@@ -89,8 +89,8 @@
 `define INTRA_QP_OFFSET    -3          // signed offset for intra frames
 `define MAX_DELTA_QP        0           // No per-CU delta QP → simplifies HW
 `define MAX_CU_DQP_DEPTH    0
-`define RDOQ_ENABLE         1
-`define RDOQTS_ENABLE       1// Flat quantization matrix (ScalingList=0 → all MF entries same per QP)
+`define RDOQ_ENABLE         0
+`define RDOQTS_ENABLE       0// Flat quantization matrix (ScalingList=0 → all MF entries same per QP)
 // MF(QP) = flat_scale[QP%6], right-shift by (29 + QP/6)
 // flat_scale for QP%6 = 0..5:
 `define FLAT_SCALE_0        26214       // QP%6==0
