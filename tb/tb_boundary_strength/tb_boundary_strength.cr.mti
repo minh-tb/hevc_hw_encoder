@@ -1,0 +1,15 @@
+D:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/boundary_strength.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/boundary_strength.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module boundary_strength
+
+Top level modules:
+	boundary_strength
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/tb/tb_boundary_strength/tb_boundary_strength.sv {1 {vlog -work work -sv D:/UIT_Doc/hevc_hw_encoder/tb/tb_boundary_strength/tb_boundary_strength.sv
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module tb_boundary_strength
+
+Top level modules:
+	tb_boundary_strength
+
+} {} {}}

@@ -1,0 +1,15 @@
+D:/UIT_Doc/hevc_hw_encoder/tb/tb_ctu_partitioner/tb_ctu_partitioner.sv {1 {vlog -work work -sv D:/UIT_Doc/hevc_hw_encoder/tb/tb_ctu_partitioner/tb_ctu_partitioner.sv
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module tb_ctu_partitioner
+
+Top level modules:
+	tb_ctu_partitioner
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/partition/ctu_partitioner.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/partition/ctu_partitioner.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module ctu_partitioner
+
+Top level modules:
+	ctu_partitioner
+
+} {} {}}

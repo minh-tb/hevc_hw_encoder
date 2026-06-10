@@ -1,0 +1,50 @@
+m255
+K3
+13
+cModel Technology
+Z0 dC:\altera\13.0sp1
+vfwd_quant
+Z1 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+!i10b 1
+!s100 P8^O88Jn0c5ZiPB4Z>9kK1
+IX9:S?kmQToM6SJijzdDDV2
+Z2 V040Nk3b5_o]9b5aA8a6>11
+Z3 !s105 fwd_quant_v_unit
+S1
+Z4 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_fwd_quant
+w1777961233
+Z5 8D:/UIT_Doc/hevc_hw_encoder/rtl/quant/fwd_quant.v
+Z6 FD:/UIT_Doc/hevc_hw_encoder/rtl/quant/fwd_quant.v
+L0 54
+Z7 OV;L;10.1d;51
+r1
+!s85 0
+31
+!s108 1777961244.632000
+!s107 D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/quant/fwd_quant.v|
+Z8 !s90 -reportprogress|300|-work|work|-sv|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common|D:/UIT_Doc/hevc_hw_encoder/rtl/quant/fwd_quant.v|
+!s101 -O0
+Z9 o-work work -sv -O0
+Z10 !s92 -work work -sv +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_fwd_quant
+R1
+Z11 !s100 P`3K5gb^dFgXMX^Fc<i]13
+Z12 Im^F26<f=9=RMYfLkn;ImF1
+Z13 VBEI2=<B82lL1U_:0a`acR2
+Z14 !s105 tb_fwd_quant_sv_unit
+S1
+R4
+Z15 w1777958640
+Z16 8D:/UIT_Doc/hevc_hw_encoder/tb/tb_fwd_quant/tb_fwd_quant.sv
+Z17 FD:/UIT_Doc/hevc_hw_encoder/tb/tb_fwd_quant/tb_fwd_quant.sv
+L0 11
+R7
+r1
+31
+Z18 !s90 -reportprogress|300|-work|work|-sv|D:/UIT_Doc/hevc_hw_encoder/tb/tb_fwd_quant/tb_fwd_quant.sv|
+R9
+!i10b 1
+!s85 0
+Z19 !s108 1777961244.570000
+Z20 !s107 D:/UIT_Doc/hevc_hw_encoder/tb/tb_fwd_quant/tb_fwd_quant.sv|
+!s101 -O0

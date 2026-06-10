@@ -1,0 +1,47 @@
+m255
+K3
+13
+cModel Technology
+Z0 dC:\altera\13.0sp1
+vinput_buffer
+!i10b 1
+Z1 !s100 N_^_BGfe_ToVLP8ahMzmU3
+Z2 IFN`87CZ?I1^B^WoU>1VFS2
+Z3 VXY22EPfSgD?34@X0;8`AO0
+Z4 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_input_buffer
+Z5 w1778699247
+Z6 8D:/UIT_Doc/hevc_hw_encoder/rtl/input_output/input_buffer.v
+Z7 FD:/UIT_Doc/hevc_hw_encoder/rtl/input_output/input_buffer.v
+L0 45
+Z8 OV;L;10.1d;51
+r1
+!s85 0
+31
+!s108 1778699821.023000
+!s107 D:/UIT_Doc/hevc_hw_encoder/rtl/common/hevc_interfaces.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/input_output/input_buffer.v|
+Z9 !s90 -reportprogress|300|-work|work|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common|D:/UIT_Doc/hevc_hw_encoder/rtl/input_output/input_buffer.v|
+!s101 -O0
+Z10 o-work work -O0
+Z11 !s92 -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_input_buffer
+Z12 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+Z13 IWQnP5VkZBCSS:@gh]5SZ00
+Z14 Vn^3ALYT1Idj:RXE?Okh5E0
+Z15 !s105 tb_input_buffer_sv_unit
+S1
+R4
+Z16 w1778699811
+Z17 8D:/UIT_Doc/hevc_hw_encoder/tb/tb_input_buffer/tb_input_buffer.sv
+Z18 FD:/UIT_Doc/hevc_hw_encoder/tb/tb_input_buffer/tb_input_buffer.sv
+L0 9
+R8
+r1
+31
+Z19 !s90 -reportprogress|300|-work|work|-sv|D:/UIT_Doc/hevc_hw_encoder/tb/tb_input_buffer/tb_input_buffer.sv|
+Z20 o-work work -sv -O0
+!i10b 1
+Z21 !s100 =f`OjKFE2VkOQ9<lQ77df1
+!s85 0
+Z22 !s108 1778699820.976000
+Z23 !s107 D:/UIT_Doc/hevc_hw_encoder/tb/tb_input_buffer/tb_input_buffer.sv|
+!s101 -O0

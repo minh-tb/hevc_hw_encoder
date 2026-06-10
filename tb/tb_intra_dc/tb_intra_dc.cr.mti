@@ -1,0 +1,18 @@
+D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh {1 {vlog -work work D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/tb/tb_intra_dc/tb_intra_dc.sv {1 {vlog -work work -sv D:/UIT_Doc/hevc_hw_encoder/tb/tb_intra_dc/tb_intra_dc.sv
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module tb_intra_dc
+
+Top level modules:
+	tb_intra_dc
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_dc.v {1 {vlog -work work -sv +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_dc.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module intra_dc
+
+Top level modules:
+	intra_dc
+
+} {} {}}

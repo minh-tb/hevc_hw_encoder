@@ -1,0 +1,50 @@
+m255
+K3
+13
+cModel Technology
+Z0 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_intra_planar
+vintra_angular
+Z1 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+!i10b 1
+!s100 ]Z4C?NUM8:o?^CNNfzY1K1
+I:=>aZGhEK0_:>2=d_Y_NF2
+Z2 VZUKg@7Lom[dMV?JbzA8[C3
+Z3 !s105 intra_angular_v_unit
+S1
+Z4 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_intra_angular
+w1778057849
+Z5 8D:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_angular.v
+Z6 FD:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_angular.v
+L0 56
+Z7 OV;L;10.1d;51
+r1
+!s85 0
+31
+!s108 1778058024.177000
+!s107 D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_angular.v|
+Z8 !s90 -reportprogress|300|-work|work|-sv|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common|D:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_angular.v|
+!s101 -O0
+Z9 o-work work -sv -O0
+Z10 !s92 -work work -sv +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_intra_angular
+R1
+Z11 !s100 K`B]01`;?ULd1ICE4azAS2
+Z12 I<bW1VWf]<eL=0jI7Bioo?0
+Z13 VPF0XdFO36CG@OUb0U@cK03
+Z14 !s105 tb_intra_angular_sv_unit
+S1
+R4
+Z15 w1778053544
+Z16 8D:/UIT_Doc/hevc_hw_encoder/tb/tb_intra_angular/tb_intra_angular.sv
+Z17 FD:/UIT_Doc/hevc_hw_encoder/tb/tb_intra_angular/tb_intra_angular.sv
+L0 8
+R7
+r1
+31
+Z18 !s90 -reportprogress|300|-work|work|-sv|D:/UIT_Doc/hevc_hw_encoder/tb/tb_intra_angular/tb_intra_angular.sv|
+R9
+!i10b 1
+!s85 0
+Z19 !s108 1778058024.099000
+Z20 !s107 D:/UIT_Doc/hevc_hw_encoder/tb/tb_intra_angular/tb_intra_angular.sv|
+!s101 -O0

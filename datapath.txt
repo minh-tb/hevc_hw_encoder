@@ -1,0 +1,77 @@
+                     [Raw YUV 4:2:0 Video File]
+                                 |
+                                 v
+=========================================================================
+STAGE 1: INPUT & PARTITIONING
+=========================================================================
+  [rtl/input_output/input_buffer.v]     <-- Buffers incoming YUV pixels
+                 |
+                 v
+  [rtl/top/gop_controller.v]            <-- Determines Frame Type (I, P, B) & POC
+                 |
+                 v
+  [rtl/partition/ctu_raster_scan.v]     <-- Feeds 64x64 CTUs to the pipeline
+                 |
+                 v
+  [rtl/partition/ctu_partitioner.v]     <-- Quadtree splitting (64->32->16->8)
+  [rtl/partition/pu_cu_splitter.v]
+                 |
+=========================================================================
+STAGE 2: PREDICTION (Spatial or Temporal)
+=========================================================================
+                 |
+      +----------+----------+
+      | (I-Frame)           | (P/B-Frame)
+      v                     v
+[INTRA PATH]           [INTER PATH]
+rtl/intra/             rtl/inter/
+ ├─ intra_pred_top.v    ├─ me_top.v (Motion Estimation)
+ ├─ intra_dc.v          ├─ tz_search.v (Integer Search)
+ ├─ intra_planar.v      ├─ satd_4x4.v (Fractional Search Cost)
+ └─ intra_angular.v     ├─ hpel_filter_luma/chroma.v (Sub-pel interpolation)
+                        └─ mc_unit.v (Motion Compensation)
+      |                     |
+      +----------+----------+
+                 |
+                 v
+      (Residual = Original Pixels - Predicted Pixels)
+
+=========================================================================
+STAGE 3: TRANSFORM & QUANTIZATION
+=========================================================================
+                 |
+                 v
+  [rtl/transform/dct_top.v]             <-- Routes to 4x4, 8x8, 16x16, 32x32 DCTs
+  [rtl/transform/dct*.v]                <-- Converts spatial residual to frequency domain
+                 |
+                 v
+  [rtl/quant/fwd_quant.v]               <-- Divides by Quantization Parameter (QP)
+  [rtl/quant/rdoq_simple.v]             <-- Rate-Distortion Optimized Quantization
+                 |
+      +----------+---------------------------------+
+      |                                            |
+====================================  ===================================
+STAGE 4: ENTROPY CODING (OUTPUT)      STAGE 5: RECONSTRUCTION (FEEDBACK)
+====================================  ===================================
+      |                                            |
+      v                                            v
+[CABAC ENCODER]                       [INVERSE QUANT & TRANSFORM]
+rtl/entropy/                          rtl/quant/inv_quant.v
+ ├─ cabac_enc_top.v                   rtl/transform/idct_top.v
+ ├─ syntax_*.v (CU/Pred/Coeffs)                    |
+ ├─ ctx_model_store.v                              v
+ ├─ bin_encoder.v                     [ADD RESIDUAL TO PREDICTION]
+ └─ range_coder.v                     rtl/recon/recon_unit.v
+      |                                            |
+      v                                            v
+[NAL FORMATTING]                      [IN-LOOP FILTERS]
+rtl/input_output/nal_writer.v         rtl/inloop_filters/deblock_top.v
+rtl/input_output/output_fifo.v        rtl/inloop_filters/sao_top.v
+      |                                            |
+      v                                            v
+[Compressed Bitstream (str.bin)]      [DECODED PICTURE BUFFER (DPB)]
+                                      rtl/recon/frame_store.v
+                                      rtl/inter/ref_frame_buffer.v
+                                                   |
+                                                   +--> (Used as Reference
+                                                         for Next Inter Frame)

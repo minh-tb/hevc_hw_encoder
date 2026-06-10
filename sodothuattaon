@@ -1,0 +1,73 @@
+[BẮT ĐẦU MÃ HÓA]
+       |
+       v
+[Khởi tạo cấu trúc GOP 16 (Random Access)]
+(Xác định POC, loại Slice I/P/B, và mức QP cơ sở cho Frame hiện tại)
+       |
+       v
+[Bộ điều khiển WPP (Wavefront)] 
+(Chia khung hình thành các hàng CTU. Cấp phát xử lý song song cho các hàng)
+       |
+       +========================================================================+
+       | [VÒNG LẶP XỬ LÝ HÀNG CTU (Chạy song song)]                             |
+       |       |                                                                |
+       |       v                                                                |
+       | [Đọc dữ liệu CTU gốc (64x64)]                                          |
+       |       |                                                                |
+       |       +---> [VÒNG LẶP ĐỆ QUY CHIA CU (Từ 64x64 xuống 8x8)]             |
+       |             |                                                          |
+       |             |-- Nếu là I-Slice:                                        |
+       |             |     +-> Đánh giá Intra Prediction (Dự đoán nội khung)    |
+       |             |                                                          |
+       |             |-- Nếu là P/B-Slice:                                      |
+       |             |     +-> [Thuật toán FDM]: Kiểm tra sớm Merge/Skip Mode.  |
+       |             |     |     Nếu đạt yêu cầu -> Bỏ qua tính Mode khác.      |
+       |             |     |                                                    |
+       |             |     +-> [Thuật toán TZ Search]: Tìm kiếm chuyển động     |
+       |             |     |     nhanh (SearchRange: 64).                       |
+       |             |     |                                                    |
+       |             |     +-> [Hadamard ME]: Tính SATD cost để so sánh.        |
+       |             |                                                          |
+       |             +---> [Thuật toán FEN]: So sánh chi phí phần dư. Nếu block |
+       |             |     lớn đã có chi phí cực nhỏ -> Dừng đệ quy sớm, không  |
+       |             |     cần chia nhỏ xuống mức độ sâu tiếp theo.             |
+       |             |                                                          |
+       |             v                                                          |
+       |       [So sánh Rate-Distortion (RD Cost) -> CHỌN MODE TỐT NHẤT]        |
+       |       (Do RDOQ=0, RD Cost chỉ dùng phép Quantization cơ bản)           |
+       |       (Do AMP=0, chỉ so sánh các kích thước đối xứng 2Nx2N, NxN)       |
+       |             |                                                          |
+       |             v                                                          |
+       |       [TÍNH PHẦN DƯ (Residual = Original - Predicted)]                 |
+       |             |                                                          |
+       |             +---> [Vòng lặp chia cây TU (Transform Unit)]              |
+       |                   +-> Kiểm tra Transform Skip (Fast)                   |
+       |                   +-> Thực hiện Biến đổi (DCT/DST)                     |
+       |                   +-> Lượng tử hóa vô hướng (Quantization với QP=32)   |
+       |             |                                                          |
+       |             v                                                          |
+       |       [Mã hóa Entropy (CABAC)] -> (Đẩy tham số CTU vào bitstream)      |
+       |             |                                                          |
+       |       [Giải lượng tử & Giải biến đổi (IQ/IT)]                          |
+       |       (Khôi phục lại pixel của CTU -> Lưu bộ đệm tạm)                  |
+       |             |                                                          |
+       |             +--< Có tiếp tục CTU khác trong hàng không?                |
+       +========================================================================+
+       |
+(Chờ đồng bộ tất cả các hàng CTU của Frame)
+       |
+       v
+[LỌC SAU KHI TÁI TẠO FRAME (In-Loop Filtering)]
+       +-> 1. Deblocking Filter (Lọc khử răng cưa ở ranh giới 8x8 lưới Luma/Chroma)
+       +-> 2. Thuật toán SAO (Phân tích Edge/Band, cộng giá trị bù đắp Offset)
+       |
+       v
+[Cập nhật Bộ đệm DPB (Decoded Picture Buffer)] 
+(Lưu lại khung hình vừa mã hóa để làm tham chiếu cho các Frame P/B sau)
+       |
+       v
+[Còn Frame nào cần mã hóa trong Video không?] 
+       |--- CÓ ---> (Quay lại vòng lặp đọc Frame)
+       | KHÔNG
+       v9
+[KẾT THÚC MÃ HÓA & LƯU STR.BIN]

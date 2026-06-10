@@ -1,0 +1,47 @@
+m255
+K3
+13
+cModel Technology
+Z0 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_ctx_model_store
+vrange_coder
+!i10b 1
+Z1 !s100 V?2j6mAoDEG;j_GhMWEmn1
+Z2 I=<[V`01jgZ7UPMYjAP:dY0
+Z3 VW]2Z8<SCh>HnLR<kOUhz?0
+Z4 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_range_coder
+Z5 w1778582006
+Z6 8D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v
+Z7 FD:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v
+L0 65
+Z8 OV;L;10.1d;51
+r1
+!s85 0
+31
+!s108 1778606936.909000
+!s107 D:/UIT_Doc/hevc_hw_encoder/rtl/top/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v|
+Z9 !s90 -reportprogress|300|-work|work|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/top|D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v|
+!s101 -O0
+Z10 o-work work -O0
+Z11 !s92 -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/top -O0
+vtb_range_coder
+Z12 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+Z13 !s100 17;SD]bZ:h[<:9CW3CCoZ2
+Z14 Io5fbeH7eGX94;:[ejK^9d2
+Z15 V5m?46`2CmM_NzP52Uf3H81
+Z16 !s105 tb_range_coder_sv_unit
+S1
+R4
+Z17 w1778576626
+Z18 8D:/UIT_Doc/hevc_hw_encoder/tb/tb_range_coder/tb_range_coder.sv
+Z19 FD:/UIT_Doc/hevc_hw_encoder/tb/tb_range_coder/tb_range_coder.sv
+L0 8
+R8
+r1
+31
+Z20 !s90 -reportprogress|300|-work|work|-sv|D:/UIT_Doc/hevc_hw_encoder/tb/tb_range_coder/tb_range_coder.sv|
+Z21 o-work work -sv -O0
+!i10b 1
+!s85 0
+Z22 !s108 1778606936.868000
+Z23 !s107 D:/UIT_Doc/hevc_hw_encoder/tb/tb_range_coder/tb_range_coder.sv|
+!s101 -O0

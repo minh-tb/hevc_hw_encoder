@@ -1,0 +1,15 @@
+D:/UIT_Doc/hevc_hw_encoder/rtl/partition/pu_cu_splitter.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/partition/pu_cu_splitter.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module pu_cu_splitter
+
+Top level modules:
+	pu_cu_splitter
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/tb/tb_pu_cu_splitter/tb_pu_cu_splitter.sv {1 {vlog -work work -sv D:/UIT_Doc/hevc_hw_encoder/tb/tb_pu_cu_splitter/tb_pu_cu_splitter.sv
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module tb_pu_cu_splitter
+
+Top level modules:
+	tb_pu_cu_splitter
+
+} {} {}}

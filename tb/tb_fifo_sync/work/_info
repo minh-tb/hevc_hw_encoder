@@ -1,0 +1,50 @@
+m255
+K3
+13
+cModel Technology
+Z0 dC:\altera\13.0sp1
+vfifo_sync
+Z1 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+Z2 IZ^>[3KP>ek]]eN46F8aDB2
+Z3 V_^2NK<_nK6^?4j^he:@_51
+S1
+Z4 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_fifo_sync
+Z5 w1777825963
+Z6 8D:/UIT_Doc/hevc_hw_encoder/rtl/common/fifo_sync.v
+Z7 FD:/UIT_Doc/hevc_hw_encoder/rtl/common/fifo_sync.v
+L0 38
+Z8 OV;L;10.1d;51
+r1
+31
+Z9 o-work work -sv -O0
+!i10b 1
+Z10 !s100 RmS_<lWBlA3ZdzYYZO>[M0
+Z11 !s105 fifo_sync_v_unit
+!s85 0
+Z12 !s108 1777825982.587000
+Z13 !s107 D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/common/fifo_sync.v|
+Z14 !s90 -reportprogress|300|-work|work|-sv|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common|D:/UIT_Doc/hevc_hw_encoder/rtl/common/fifo_sync.v|
+!s101 -O0
+Z15 !s92 -work work -sv +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_fifo_sync
+R1
+!i10b 1
+Z16 !s100 N04XL`G=dILfi0d;YGOJ?2
+Z17 IKCP]SAf;8?6Q@j@6D2zcP2
+Z18 V?fzH7jl`Fo3HkbLIZ0QCQ0
+Z19 !s105 tb_fifo_sync_sv_unit
+S1
+R4
+Z20 w1777825597
+Z21 8D:/UIT_Doc/hevc_hw_encoder/tb/tb_fifo_sync/tb_fifo_sync.sv
+Z22 FD:/UIT_Doc/hevc_hw_encoder/tb/tb_fifo_sync/tb_fifo_sync.sv
+L0 8
+R8
+r1
+!s85 0
+31
+!s108 1777825982.745000
+!s107 D:/UIT_Doc/hevc_hw_encoder/tb/tb_fifo_sync/tb_fifo_sync.sv|
+Z23 !s90 -reportprogress|300|-work|work|-sv|D:/UIT_Doc/hevc_hw_encoder/tb/tb_fifo_sync/tb_fifo_sync.sv|
+!s101 -O0
+R9

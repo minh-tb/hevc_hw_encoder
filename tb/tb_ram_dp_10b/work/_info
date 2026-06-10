@@ -1,0 +1,47 @@
+m255
+K3
+13
+cModel Technology
+Z0 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_fifo_sync
+vram_dp_10b
+!i10b 1
+!s100 lk3G5mEJf2g1gel13dI^l1
+I;HHGN2N48;l;b=QXT`jzJ2
+VO6lKXA@WJ]YVOUSgSI?XW3
+Z1 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_ram_dp_10b
+w1777648817
+8D:/UIT_Doc/hevc_hw_encoder/rtl/common/ram_dp_10b.v
+FD:/UIT_Doc/hevc_hw_encoder/rtl/common/ram_dp_10b.v
+L0 30
+Z2 OV;L;10.1d;51
+r1
+!s85 0
+31
+!s108 1777826352.644000
+!s107 D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/common/ram_dp_10b.v|
+!s90 -reportprogress|300|-work|work|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common|D:/UIT_Doc/hevc_hw_encoder/rtl/common/ram_dp_10b.v|
+!s101 -O0
+o-work work -O0
+!s92 -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_ram_dp_10b
+Z3 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+Z4 Ihd<jcnzm[h>En[D?CPGj^1
+Z5 VA?z;TOGC=j0Tkd`ihP<a@0
+S1
+R1
+Z6 w1777826209
+Z7 8D:/UIT_Doc/hevc_hw_encoder/tb/tb_ram_dp_10b/tb_ram_dp_10b.sv
+Z8 FD:/UIT_Doc/hevc_hw_encoder/tb/tb_ram_dp_10b/tb_ram_dp_10b.sv
+L0 8
+R2
+r1
+31
+Z9 o-work work -sv -O0
+!i10b 1
+Z10 !s100 bDQCXD`8S5blG1SV[_:4N3
+Z11 !s105 tb_ram_dp_10b_sv_unit
+!s85 0
+Z12 !s108 1777826352.601000
+Z13 !s107 D:/UIT_Doc/hevc_hw_encoder/tb/tb_ram_dp_10b/tb_ram_dp_10b.sv|
+Z14 !s90 -reportprogress|300|-work|work|-sv|D:/UIT_Doc/hevc_hw_encoder/tb/tb_ram_dp_10b/tb_ram_dp_10b.sv|
+!s101 -O0

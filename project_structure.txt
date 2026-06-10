@@ -1,0 +1,170 @@
+hevc_hw_encoder/
+│
+├── rtl/                                    # Synthesizable Verilog RTL
+│   │
+│   ├── top/
+│   │   ├── hevc_encoder_top.v              # Top-level integration
+│   │   ├── hevc_decoder_top.v              # Top-level decoder
+│   │   ├── gop_controller.v                # GOP/B-frame order, POC counter
+│   │   ├── slice_controller.v              # Slice header, frame type FSM
+│   │   └── parameter_pkg.vh               # Global localparam (QP=32, depth=4, etc.)
+│   │
+│   ├── input_output/
+│   │   ├── input_buffer.v                  # YUV 4:2:0 10-bit frame input FIFO
+│   │   ├── output_fifo.v                   # Bitstream output FIFO → str.bin
+│   │   └── nal_writer.v                    # NAL unit framing, Annex B start codes
+│   │
+│   ├── partition/
+│   │   ├── ctu_raster_scan.v               # CTU address generator (raster order)
+│   │   ├── ctu_partitioner.v               # Quadtree CU split decision (64→32→16→8)
+│   │   └── pu_cu_splitter.v                # PU/TU split within CU
+│   │
+│   ├── intra/
+│   │   ├── intra_pred_top.v                # Intra prediction top
+│   │   ├── intra_dc.v                      # DC mode
+│   │   ├── intra_planar.v                  # Planar mode
+│   │   ├── intra_angular.v                 # 33 angular modes (parameterized dir)
+│   │   └── ref_sample_filter.v             # Intra reference sample smoothing
+│   │
+│   ├── inter/
+│   │   ├── me_top.v                        # Motion estimation top
+│   │   ├── tz_search.v                     # TZ (Test Zone) integer search
+│   │   ├── sad_4x4.v                       # 4×4 SAD unit (arrayed)
+│   │   ├── sad_8x8.v                       # 8×8 SAD unit
+│   │   ├── satd_4x4.v                      # 4×4 SATD/Hadamard (fractional ME cost)
+│   │   ├── hpel_filter_luma.v              # 8-tap HEVC luma H/V/HV interpolation
+│   │   ├── hpel_filter_chroma.v            # 4-tap chroma interpolation
+│   │   ├── mc_unit.v                       # Motion compensation (apply MV + filter)
+│   │   ├── mvp_predictor.v                 # Merge/AMVP candidate list builder
+│   │   └── ref_frame_buffer.v              # Decoded reference frame SRAM (ping-pong)
+│   │
+│   ├── transform/
+│   │   ├── dct_top.v                       # DCT dispatcher (routes to 4/8/16/32)
+│   │   ├── dct4.v                          # 4×4 integer DCT butterfly
+│   │   ├── dct8.v                          # 8×8  (calls dct4 × 2 + stage)
+│   │   ├── dct16.v                         # 16×16 (recursive)
+│   │   ├── dct32.v                         # 32×32 (recursive)
+│   │
+│   ├── quant/
+│   │   ├── fwd_quant.v                     # Forward quantization (flat matrix, QP=32)
+│   │   ├── inv_quant.v                     # Inverse quantization
+│   │   └── rdoq_simple.v                   # Simplified RDOQ (sign flip RD)
+│   │
+│   ├── inloop_filters/
+│   │   ├── deblock_top.v                   # Deblocking filter top
+│   │   ├── boundary_strength.v             # BS 0/1/2 calculation
+│   │   ├── db_filter_luma.v                # Luma 4-tap/8-tap strong/weak filter
+│   │   ├── db_filter_chroma.v              # Chroma filter
+│   │   ├── sao_top.v                       # SAO top
+│   │   ├── sao_edge_offset.v               # EO: 4 directions, 5 categories
+│   │   └── sao_band_offset.v               # BO: 32 bands
+│   │
+│   ├── entropy/
+│   │   ├── cabac_enc_top.v                 # CABAC encoder top
+│   │   ├── range_coder.v                   # M-coder arithmetic range engine
+│   │   ├── bin_encoder.v                   # Bin → ctx model → range update
+│   │   ├── ctx_model_store.v               # 154 context models (SRAM-backed)
+│   │   ├── syntax_cu.v                     # CU syntax: split_flag, pred_mode
+│   │   ├── syntax_pred.v                   # Pred syntax: merge, MVD, ref_idx
+│   │   ├── syntax_coeff.v                  # Coeff syntax: last_sig, sig_map, abs, sign
+│   │   ├── cabac_dec_top.v                 # CABAC decoder top (for decoder path)
+│   │   ├── range_decoder.v                 # Arithmetic range decoder
+│   │   └── bin_decoder.v
+│   │
+│   ├── recon/
+│   │   ├── recon_unit.v                    # Residual add-back (pred + IDCT out)
+│   │   └── frame_store.v                   # Reconstructed frame buffer (DPB)
+│   │
+│   └── common/
+│       ├── ram_dp_10b.v                    # Dual-port SRAM macro wrapper (10-bit)
+│       ├── ram_sp_generic.v                # Single-port SRAM wrapper
+│       ├── fifo_sync.v                     # Synchronous FIFO (reused everywhere)
+│       ├── pipeline_reg.v                  # Generic pipeline register stage
+│       ├── clk_gate.v                      # Clock gating cell wrapper
+│       └── hevc_interfaces.vh              # SystemVerilog interface definitions
+│
+├── tb/                                     # Testbenches
+│   │ 
+│   ├── unit/
+│   │   ├── tb_dct4.v   
+│   │   ├── tb_dct8.v
+│   │   ├── tb_dct16.v
+│   │   ├── tb_dct32.v
+│   │   ├── tb_fwd_quant.v
+│   │   ├── tb_intra_dc.v
+│   │   ├── tb_intra_planar.v
+│   │   ├── tb_intra_angular.v
+│   │   ├── tb_sad_4x4.v
+│   │   ├── tb_satd_4x4.v
+│   │   ├── tb_tz_search.v
+│   │   ├── tb_hpel_luma.v
+│   │   ├── tb_deblock.v
+│   │   ├── tb_sao.v
+│   │   ├── tb_range_coder.v
+│   │   └── tb_cabac_enc.v
+│   │
+│   ├── integration/
+│   │   ├── tb_intra_encode.v               # Intra-only encode (I-frame)
+│   │   ├── tb_inter_encode.v               # Inter encode (P/B-frame)
+│   │   ├── tb_inloop_filters.v             # Deblock + SAO chain
+│   │   ├── tb_entropy_chain.v              # Quant → CABAC → bitstream
+│   │   └── tb_full_encoder.v               # Full encoder top-level
+│   │
+│   ├── decoder/
+│   │   └── tb_full_decoder.v               # Full decoder + compare vs HM ref
+│   │
+│   └── common/
+│       ├── yuv_reader.v                    # Read raw YUV file task
+│       ├── bitstream_writer.v              # Dump bitstream to file task
+│       ├── hm_ref_model.v                  # C-model golden reference via DPI-C
+│       └── score_board.v                   # Pixel-level PSNR comparator
+│
+├── ref_model/                              # C/C++ reference (via DPI-C)
+│   ├── hm_dpi/
+│   │   ├── hm_dpi_top.cpp                  # DPI-C bridge to HM encoder
+│   │   ├── hm_dpi_top.h
+│   │   └── Makefile
+│   └── golden/
+│       ├── gen_dct_vectors.py              # Generate DCT test vectors (numpy)
+│       ├── gen_intra_vectors.py            # Generate intra pred test vectors
+│       ├── gen_quant_vectors.py
+│       └── gen_cabac_vectors.py
+│
+├── scripts/
+│   ├── sim/
+│   │   ├── run_unit.sh                     # Run single unit testbench (VCS/Questa)
+│   │   ├── run_all_unit.sh                 # Run all unit TBs in parallel
+│   │   ├── run_integration.sh
+│   │   └── run_regression.sh              # Full regression + PSNR check
+│   │
+│   ├── synth/
+│   │   ├── dc_setup.tcl                    # Design Compiler setup
+│   │   ├── dc_constraints.sdc              # Timing constraints (target freq)
+│   │   └── dc_run.tcl                      # Synthesis run script
+│   │
+│   └── lint/
+│       ├── spyglass_run.tcl                # SpyGlass lint rules
+│       └── verilator_lint.sh               # Free alternative: Verilator lint
+│
+├── verif/
+│   ├── sequences/
+│   │   ├── flat_field.yuv                  # Solid color (quant edge case)
+│   │   ├── ramp_h.yuv                      # Horizontal ramp (angular pred)
+│   │   ├── ramp_v.yuv                      # Vertical ramp
+│   │   ├── checkerboard.yuv                # High freq (DCT stress)
+│   │   └── README.md
+│   │
+│   └── expected/
+│       ├── flat_field_qp32.bin             # HM-generated reference bitstreams
+│       ├── ramp_h_qp32.bin
+│       └── checkerboard_qp32.bin
+│
+├── docs/
+│   ├── architecture.md                     # Module block diagram descriptions
+│   ├── gop_structure.md                    # B-frame hierarchy notes from cfg
+│   ├── cabac_ctx_table.md                  # 154 context init values (main10)
+│   ├── dct_coefficients.md                 # Integer DCT basis matrix reference
+│   └── validation_plan.md                  # Test plan + pass criteria
+│
+└── cfg/
+    └── encoder_randomaccess_main10.cfg     # Your original config (source of truth)

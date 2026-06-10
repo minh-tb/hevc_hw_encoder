@@ -1,0 +1,15 @@
+D:/UIT_Doc/hevc_hw_encoder/rtl/input_output/output_fifo.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/input_output/output_fifo.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module output_fifo
+
+Top level modules:
+	output_fifo
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/tb/tb_output_fifo/tb_output_fifo.sv {1 {vlog -work work -sv D:/UIT_Doc/hevc_hw_encoder/tb/tb_output_fifo/tb_output_fifo.sv
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module tb_output_fifo
+
+Top level modules:
+	tb_output_fifo
+
+} {} {}}

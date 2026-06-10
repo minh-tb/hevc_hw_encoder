@@ -1,0 +1,86 @@
+========================================================================================
+                          HEVC HARDWARE ENCODER DATAPATH (10-bit)
+========================================================================================
+ 
+               [ RAW YUV VIDEO IN ]
+                        |
+                        v
++--------------------------------------------------------------------------------------+
+| 12. TOP-LEVEL CONTROL (gop_controller, slice_controller)                             |
+|     (Manages Frame Types, POC, Slice Headers, and Reference Picture Lists)           |
++--------------------------------------------------------------------------------------+
+                        |
+                        v
++-------------------------------------------------------+
+| 1 & 2. INPUT STAGE & PARTITIONING                     |
+|  [input_buffer] -> [ctu_raster_scan]                  |
+|                           |                           |
+|                    [ctu_partitioner]                  |
+|                           |                           |
+|                    [pu_cu_splitter] <----+            |
++------------------------------------------|------------+
+                        |                  | (Split
+                        v                  |  Feedback)
++------------------------------------------|------------+
+| 3. PREDICTION DISPATCH & MODE DECISION   |            |
+|  [mode_decision] ------------------------+            |
++-------------------------------------------------------+
+            |                                |
+       (Intra PUs)                      (Inter PUs)
+            |                                |
+            v                                v
++-----------------------+        +-----------------------+     +-----------------------+
+| 4. INTRA PREDICTION   |        | 6. MOTION ESTIMATION  |<----| 7. REF FRAME BUFFER   |
+|  [intra_pred_top]     |        |    [mvp_predictor]    |     |  [ref_frame_buffer]   |
+|  (DC/Planar/Angular)  |        |    [tz_search]        |     |  (External DRAM AXI)  |
++-----------------------+        +-----------------------+     +-----------------------+
+            |                                |                             ^
+            |                                | (Best MV)                   |
+            |                                v                             |
+            |                    +-----------------------+                 |
+            |                    | MOTION COMPENSATION   |                 |
+            |                    |    [mc_unit]          |                 |
+            |                    +-----------------------+                 |
+            |                                |                             |
+            +---------------+----------------+                             |
+                            |                                              |
+                            v                                              |
++-------------------------------------------------------+                  |
+| 5. RESIDUAL SUBTRACTION                               |                  |
+|  [residual_sub]                                       |                  |
+|  (Original Pixels - Predicted Pixels = Residual)      |                  |
++-------------------------------------------------------+                  |
+                            |                                              |
+                            v                                              |
++-------------------------------------------------------+                  |
+| 8. TRANSFORM & QUANTIZATION                           |                  |
+|  [dct_top] (4x4, 8x8, 16x16, 32x32 DCT)               |                  |
+|       |                                               |                  |
+|  [fwd_quant] (Divides by QP)                          |                  |
++-------------------------------------------------------+                  |
+             |                             |                               |
+     (Quantized Coeffs)                    |                               |
+             |                             |                               |
+             v                             v                               |
++-----------------------+  +---------------------------------+             |
+| 11. ENTROPY CODING    |  | 9. RECONSTRUCTION LOOP          |             |
+|  [cabac_enc_top]      |  |  [inv_quant]                    |             |
+|  [syntax_models]      |  |       |                         |             |
+|  [range_coder]        |  |  [dct_top] (IDCT / fwd_inv_n=0) |             |
++-----------------------+  |       |                         |             |
+             |             |  [recon_unit] (Pred + IDCT)     |             |
+             v             +---------------------------------+             |
++-----------------------+                  |                               |
+| OUTPUT FORMATTING     |                  v                               |
+|  [output_fifo]        |  +---------------------------------+             |
+|  [nal_writer]         |  | 10. IN-LOOP FILTERS             |             |
+|  (Adds Annex B NALs)  |  |  [deblock_top] (Smooth edges)   |             |
++-----------------------+  |       |                         |             |
+             |             |  [sao_top] (Fix ringing)        |             |
+             v             +---------------------------------+             |
+   [ str.bin FILE ]                        |                               |
+                                           v                               |
+                           +---------------------------------+             |
+                           | DECODED PICTURE BUFFER (DPB)    |             |
+                           |  [frame_store]                  |-------------+
+                           +---------------------------------+

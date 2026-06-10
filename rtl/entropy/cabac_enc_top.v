@@ -1,0 +1,309 @@
+//=============================================================================
+// cabac_enc_top.v
+// CABAC Encoder Top-Level — integrates all entropy sub-modules
+//
+// Mapped from HM source:
+//   TLibEncoder/TEncSbac.cpp     :: TEncSbac (wrapper for all syntax encoders)
+//   TLibEncoder/TEncBinCABAC.cpp :: TEncBinCABAC (arithmetic coder)
+//   TLibEncoder/TEncSlice.cpp    :: encodeSlice() — drives the encoding flow
+//
+// Module hierarchy instantiated here:
+//
+//   cabac_enc_top
+//    ├── ctx_model_store    (154 × 7-bit state SRAM, slice init, read/write)
+//    ├── bin_encoder        (ctx lookup → range_coder dispatch, EP bypass)
+//    ├── range_coder        (M-coder arithmetic engine, byte output)
+//    ├── syntax_cu          (split_flag, skip, merge, pred_mode, part_mode)
+//    ├── syntax_pred        (inter_dir, ref_idx, mvp_flag, MVD)
+//    └── syntax_coeff       (last_sig, sig_map, gt1, gt2, sign, remaining)
+//
+// Encoding flow for one CU:
+//
+//   1. [slice_init] → ctx_model_store reset (154 cycles)
+//   2. [cu_req]     → syntax_cu   → bins → bin_encoder → range_coder → bytes
+//   3. [pred_req]   → syntax_pred → bins → bin_encoder → range_coder → bytes
+//   4. [coeff_req]  → syntax_coeff→ bins → bin_encoder → range_coder → bytes
+//   5. [flush_req]  → range_coder flush → final bytes → NAL writer
+//
+// Bin arbitration:
+//   Only one syntax_* module drives bin_encoder at a time.
+//   State machine tracks active source: NONE / CU / PRED / COEFF
+//   bin_valid is muxed from the active source; bin_rdy is broadcast to all.
+//
+// External interface:
+//   Slice-level: slice_init, slice_type, qp_in → ctx_model_store
+//   CU-level:    cu_req + CU fields → syntax_cu (see syntax_cu.v ports)
+//   Pred-level:  pred_req + pred fields → syntax_pred
+//   Coeff-level: coeff_req + coeff array → syntax_coeff
+//   Flush:       flush_req → range_coder (end of slice/NALU)
+//   Output:      byte_valid, byte_out → NAL writer / output_fifo
+//=============================================================================
+
+`include "parameter_pkg.vh"
+
+module cabac_enc_top #(
+    parameter CTX_ID_W  = 8,
+    parameter COEFF_W   = 16,
+    parameter MVD_W     = 12,
+    parameter N_COEFF   = 16    // 4×4 block
+)(
+    input  wire        clk,
+    input  wire        rst_n,
+
+    // ── Slice initialization ─────────────────────────────────────────────
+    input  wire        slice_init,     // pulse: reset contexts + range coder
+    input  wire [1:0]  slice_type,     // 0=I, 1=P, 2=B
+    input  wire [6:0]  qp_in,         // QP (tie to 7'd32 for fixed-QP)
+
+    // ── CU syntax request ────────────────────────────────────────────────
+    input  wire        cu_req,
+    output wire        cu_done,
+    input  wire [1:0]  cu_depth,
+    input  wire        cu_is_split,
+    input  wire        slice_is_intra,
+    input  wire        cu_skip,
+    input  wire        cu_merge,
+    input  wire [2:0]  cu_merge_idx,
+    input  wire        cu_pred_intra,
+    input  wire [1:0]  cu_part_mode,
+    input  wire        cu_cbf,
+    input  wire [1:0]  cu_skip_ctx,
+
+    // ── Prediction syntax request ────────────────────────────────────────
+    input  wire        pred_req,
+    output wire        pred_done,
+    input  wire        slice_is_b,
+    input  wire [1:0]  inter_dir,
+    input  wire [2:0]  ref_idx_l0,
+    input  wire        mvp_flag_l0,
+    input  wire signed [MVD_W-1:0] mvd_l0_x,
+    input  wire signed [MVD_W-1:0] mvd_l0_y,
+    input  wire [2:0]  ref_idx_l1,
+    input  wire        mvp_flag_l1,
+    input  wire signed [MVD_W-1:0] mvd_l1_x,
+    input  wire signed [MVD_W-1:0] mvd_l1_y,
+
+    // ── Coefficient syntax request ───────────────────────────────────────
+    input  wire        coeff_req,
+    output wire        coeff_done,
+    input  wire [1:0]  coeff_comp,
+    input  wire        coeff_is_intra,
+    input  wire [COEFF_W*N_COEFF-1:0] coeff_flat,
+
+    // ── Terminating bin + flush ──────────────────────────────────────────
+    input  wire        trm_req,        // encode terminating bin (end of slice)
+    input  wire        flush_req,      // flush range coder (end of NALU)
+    output wire        flush_done,
+
+    // ── Byte output → output_fifo / NAL writer ───────────────────────────
+    output wire        byte_valid,
+    output wire [7:0]  byte_out,
+    input  wire        byte_ready,
+
+    // ── Status ───────────────────────────────────────────────────────────
+    output wire        enc_busy,       // 1 while any syntax element being encoded
+    output wire        ctx_init_busy   // 1 during 154-cycle context initialization
+);
+
+    // =========================================================================
+    // ctx_model_store
+    // =========================================================================
+    wire [CTX_ID_W-1:0] rd_ctx_id;
+    wire [6:0]           rd_state;
+    wire                 upd_valid;
+    wire [CTX_ID_W-1:0] upd_ctx_id;
+    wire                 upd_bin;
+
+    ctx_model_store #(.CTX_ID_W(CTX_ID_W)) u_ctx (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .slice_init (slice_init),
+        .slice_type (slice_type),
+        .qp_in      (qp_in),
+        .rd_ctx_id  (rd_ctx_id),
+        .rd_state   (rd_state),
+        .upd_valid  (upd_valid),
+        .upd_ctx_id (upd_ctx_id),
+        .upd_bin    (upd_bin),
+        .init_busy  (ctx_init_busy)
+    );
+
+    // =========================================================================
+    // range_coder
+    // =========================================================================
+    wire        rc_bin_valid, rc_bin_value, rc_bin_ready;
+    wire [5:0]  rc_pstate;
+    wire        rc_valmps;
+    wire        rc_ep_valid, rc_ep_value;
+    wire        rc_coder_busy;
+    wire        rc_muxed_bin_value;
+
+    range_coder u_rc (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .coder_init (slice_init),
+        .bin_valid  (rc_bin_valid),
+        .bin_value  (rc_muxed_bin_value),
+        .bin_pstate (rc_pstate),
+        .bin_valmps (rc_valmps),
+        .bin_ready  (rc_bin_ready),
+        .ep_valid   (rc_ep_valid),
+        .trm_valid  (trm_req),
+        .flush_valid(flush_req),
+        .flush_done (flush_done),
+        .byte_valid (byte_valid),
+        .byte_out   (byte_out),
+        .byte_ready (byte_ready),
+        .coder_busy (rc_coder_busy)
+    );
+
+    // =========================================================================
+    // bin_encoder — arbitrated bin mux feeds into this
+    // =========================================================================
+    wire                 be_bin_valid, be_bin_value;
+    wire [CTX_ID_W-1:0] be_ctx_id;
+    wire                 be_is_ep;
+    wire                 be_bin_rdy;
+
+    bin_encoder #(.CTX_ID_W(CTX_ID_W)) u_be (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .init_busy   (ctx_init_busy),
+        .bin_valid   (be_bin_valid),
+        .bin_value   (be_bin_value),
+        .ctx_id      (be_ctx_id),
+        .is_ep       (be_is_ep),
+        .bin_rdy_out (be_bin_rdy),
+        .rd_ctx_id   (rd_ctx_id),
+        .rd_state    (rd_state),
+        .upd_valid   (upd_valid),
+        .upd_ctx_id  (upd_ctx_id),
+        .upd_bin     (upd_bin),
+        .rc_bin_valid(rc_bin_valid),
+        .rc_bin_value(rc_bin_value),
+        .rc_pstate   (rc_pstate),
+        .rc_valmps   (rc_valmps),
+        .rc_bin_ready(rc_bin_ready),
+        .rc_ep_valid (rc_ep_valid),
+        .rc_ep_value (rc_ep_value),
+        .rc_ep_ready (rc_bin_ready)
+    );
+
+    // =========================================================================
+    // syntax_cu
+    // =========================================================================
+    wire sc_bin_valid, sc_bin_value, sc_is_ep;
+    wire [CTX_ID_W-1:0] sc_ctx_id;
+
+    syntax_cu #(.CTX_ID_W(CTX_ID_W)) u_scu (
+        .clk           (clk),
+        .rst_n         (rst_n),
+        .cu_valid      (cu_req),
+        .cu_done       (cu_done),
+        .cu_depth      (cu_depth),
+        .cu_is_split   (cu_is_split),
+        .slice_is_intra(slice_is_intra),
+        .cu_skip       (cu_skip),
+        .cu_merge      (cu_merge),
+        .cu_merge_idx  (cu_merge_idx),
+        .cu_pred_intra (cu_pred_intra),
+        .cu_part_mode  (cu_part_mode),
+        .cu_cbf        (cu_cbf),
+        .cu_skip_ctx   (cu_skip_ctx),
+        .bin_valid     (sc_bin_valid),
+        .bin_value     (sc_bin_value),
+        .bin_ctx_id    (sc_ctx_id),
+        .bin_is_ep     (sc_is_ep),
+        .bin_rdy       (be_bin_rdy)
+    );
+
+    // =========================================================================
+    // syntax_pred
+    // =========================================================================
+    wire sp_bin_valid, sp_bin_value, sp_is_ep;
+    wire [CTX_ID_W-1:0] sp_ctx_id;
+
+    syntax_pred #(.CTX_ID_W(CTX_ID_W), .MVD_W(MVD_W)) u_sp (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .pred_valid  (pred_req),
+        .pred_done   (pred_done),
+        .slice_is_b  (slice_is_b),
+        .cu_depth    (cu_depth),
+        .inter_dir   (inter_dir),
+        .ref_idx_l0  (ref_idx_l0),
+        .mvp_flag_l0 (mvp_flag_l0),
+        .mvd_l0_x    (mvd_l0_x),
+        .mvd_l0_y    (mvd_l0_y),
+        .ref_idx_l1  (ref_idx_l1),
+        .mvp_flag_l1 (mvp_flag_l1),
+        .mvd_l1_x    (mvd_l1_x),
+        .mvd_l1_y    (mvd_l1_y),
+        .bin_valid   (sp_bin_valid),
+        .bin_value   (sp_bin_value),
+        .bin_ctx_id  (sp_ctx_id),
+        .bin_is_ep   (sp_is_ep),
+        .bin_rdy     (be_bin_rdy)
+    );
+
+    // =========================================================================
+    // syntax_coeff
+    // =========================================================================
+    wire sf_bin_valid, sf_bin_value, sf_is_ep;
+    wire [CTX_ID_W-1:0] sf_ctx_id;
+
+    syntax_coeff #(.CTX_ID_W(CTX_ID_W), .COEFF_W(COEFF_W)) u_sc (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .coeff_valid (coeff_req),
+        .coeff_done  (coeff_done),
+        .comp_id     (coeff_comp),
+        .is_intra    (coeff_is_intra),
+        .coeff_flat  (coeff_flat),
+        .bin_valid   (sf_bin_valid),
+        .bin_value   (sf_bin_value),
+        .bin_ctx_id  (sf_ctx_id),
+        .bin_is_ep   (sf_is_ep),
+        .bin_rdy     (be_bin_rdy)
+    );
+
+    // =========================================================================
+    // Bin arbitration mux — one source active at a time
+    // Priority: syntax_cu > syntax_pred > syntax_coeff
+    // In normal operation the CTU controller only asserts one req at a time
+    // =========================================================================
+    assign be_bin_valid = sc_bin_valid | sp_bin_valid | sf_bin_valid;
+    assign be_bin_value = sc_bin_valid ? sc_bin_value :
+                          sp_bin_valid ? sp_bin_value : sf_bin_value;
+    assign be_ctx_id    = sc_bin_valid ? sc_ctx_id    :
+                          sp_bin_valid ? sp_ctx_id    : sf_ctx_id;
+    assign be_is_ep     = sc_bin_valid ? sc_is_ep     :
+                          sp_bin_valid ? sp_is_ep     : sf_is_ep;
+
+    // Mux regular and EP bin values for the range_coder's single value input
+    assign rc_muxed_bin_value = rc_ep_valid ? rc_ep_value : rc_bin_value;
+
+    // =========================================================================
+    // Busy signal
+    // =========================================================================
+    assign enc_busy = sc_bin_valid | sp_bin_valid | sf_bin_valid
+                    | ctx_init_busy | rc_coder_busy;
+
+    // =========================================================================
+    // Simulation
+    // =========================================================================
+    // synthesis translate_off
+    always @(posedge clk) begin
+        // Warn if multiple sources asserted simultaneously
+        if ({sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b001 &&
+            {sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b010 &&
+            {sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b100 &&
+            {sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b000)
+            $display("WARN [cabac_enc_top] multiple bin sources active: %b at t=%0t",
+                     {sc_bin_valid, sp_bin_valid, sf_bin_valid}, $time);
+        if (flush_done)
+            $display("INFO [cabac_enc_top] flush done — slice bitstream complete");
+    end
+    // synthesis translate_on
+
+endmodule

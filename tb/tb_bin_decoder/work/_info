@@ -1,0 +1,47 @@
+m255
+K3
+13
+cModel Technology
+Z0 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_ref_frame_buffer
+vbin_decoder
+!i10b 1
+Z1 !s100 <HWj?T8DhPaPK_AIikEke0
+Z2 ICGH9X5h3ij`z2L8]O]>]f3
+Z3 VagU2Sd8MWZcaTXfdg0@8L1
+Z4 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_bin_decoder
+Z5 w1778749417
+Z6 8D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_decoder.v
+Z7 FD:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_decoder.v
+L0 76
+Z8 OV;L;10.1d;51
+r1
+!s85 0
+31
+!s108 1778750755.961000
+!s107 D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_decoder.v|
+Z9 !s90 -reportprogress|300|-work|work|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common|D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_decoder.v|
+!s101 -O0
+Z10 o-work work -O0
+Z11 !s92 -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_bin_decoder
+Z12 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+Z13 I[0BiZI_MdFlVZTi`FVd=>3
+Z14 Vo;8nkja4aOU8=WlPQ172K1
+Z15 !s105 tb_bin_decoder_sv_unit
+S1
+R4
+Z16 w1778750752
+Z17 8D:/UIT_Doc/hevc_hw_encoder/tb/tb_bin_decoder/tb_bin_decoder.sv
+Z18 FD:/UIT_Doc/hevc_hw_encoder/tb/tb_bin_decoder/tb_bin_decoder.sv
+L0 8
+R8
+r1
+31
+Z19 !s90 -reportprogress|300|-work|work|-sv|D:/UIT_Doc/hevc_hw_encoder/tb/tb_bin_decoder/tb_bin_decoder.sv|
+Z20 o-work work -sv -O0
+!i10b 1
+Z21 !s100 _oOl_;=Zn4QDc3S>jDk=N0
+!s85 0
+Z22 !s108 1778750755.922000
+Z23 !s107 D:/UIT_Doc/hevc_hw_encoder/tb/tb_bin_decoder/tb_bin_decoder.sv|
+!s101 -O0

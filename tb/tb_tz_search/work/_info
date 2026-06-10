@@ -1,0 +1,67 @@
+m255
+K3
+13
+cModel Technology
+Z0 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_satd_4x4
+vsad_4x4
+Z1 I`3]V2JHd7hK_8eo=]jjlX0
+Z2 V_UmT1EF`P_ln<f5I7ZEjI1
+Z3 dD:\UIT_Doc\hevc_hw_encoder\tb\tb_tz_search
+Z4 w1778230763
+Z5 8D:/UIT_Doc/hevc_hw_encoder/rtl/inter/sad_4x4.v
+Z6 FD:/UIT_Doc/hevc_hw_encoder/rtl/inter/sad_4x4.v
+L0 57
+Z7 OV;L;10.1d;51
+r1
+31
+Z8 o-work work -O0
+!i10b 1
+Z9 !s100 IVmCG:0:cPP3oecNcUZiT2
+!s85 0
+Z10 !s108 1778247441.908000
+Z11 !s107 D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/inter/sad_4x4.v|
+Z12 !s90 -reportprogress|300|-work|work|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common|D:/UIT_Doc/hevc_hw_encoder/rtl/inter/sad_4x4.v|
+!s101 -O0
+Z13 !s92 -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_tz_search
+Z14 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+Z15 Ic<<_M6S;IDIMkQHM:0P250
+Z16 VeKa5;>K91Z6JkVL?>GA<C2
+S1
+R3
+Z17 w1778246204
+Z18 8D:/UIT_Doc/hevc_hw_encoder/tb/tb_tz_search/tb_tz_search.sv
+Z19 FD:/UIT_Doc/hevc_hw_encoder/tb/tb_tz_search/tb_tz_search.sv
+L0 14
+R7
+r1
+31
+Z20 o-work work -sv -O0
+Z21 !s100 3Mne962Q6kR5a13JdWcgn0
+Z22 !s105 tb_tz_search_sv_unit
+Z23 !s108 1778247441.864000
+Z24 !s107 D:/UIT_Doc/hevc_hw_encoder/tb/tb_tz_search/tb_tz_search.sv|
+Z25 !s90 -reportprogress|300|-work|work|-sv|D:/UIT_Doc/hevc_hw_encoder/tb/tb_tz_search/tb_tz_search.sv|
+!i10b 1
+!s85 0
+!s101 -O0
+vtz_search
+!i10b 1
+!s100 fa[Hm6h=HnfGQE^gCW?[e0
+I0IIRROQ9i?MUPeMB<kFm=1
+V01;39cShHizJ<ZLI=ennA2
+R3
+w1778245185
+8D:/UIT_Doc/hevc_hw_encoder/rtl/inter/tz_search.v
+FD:/UIT_Doc/hevc_hw_encoder/rtl/inter/tz_search.v
+L0 77
+R7
+r1
+!s85 0
+31
+!s108 1778247441.949000
+!s107 D:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|D:/UIT_Doc/hevc_hw_encoder/rtl/inter/tz_search.v|
+!s90 -reportprogress|300|-work|work|+incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common|D:/UIT_Doc/hevc_hw_encoder/rtl/inter/tz_search.v|
+!s101 -O0
+R8
+R13
