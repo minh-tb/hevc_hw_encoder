@@ -3,7 +3,7 @@
 // Testbench for PU/TU Splitter
 //
 // Verifies:
-//   1. Correct geometric slicing of PUs (NxN, AMP asymmetric).
+//   1. Correct geometric slicing of PUs (NxN, 2NxN, Nx2N).
 //   2. Quadtree recursive splitting logic handling down to 4x4 leaves.
 //   3. Standard Y -> Cb -> Cr extraction ordering.
 //   4. Robust stalling / back-pressure from downstream modules.
@@ -55,7 +55,6 @@ module tb_pu_cu_splitter;
     logic [5:0]  tu_x, tu_y;
     logic [2:0]  tu_size_log2;
     logic [1:0]  tu_comp;
-    logic        tu_transform_skip;
     logic        tu_is_last_in_cu;
     logic [5:0]  tu_qp;
     logic [15:0] tu_ctu_addr;
@@ -144,8 +143,6 @@ module tb_pu_cu_splitter;
 
         drive(0 /*PART_2Nx2N*/, 1);
         drive(3 /*PART_NxN*/,   4);
-        drive(4 /*PART_2NxnU*/, 2);
-        
         if (total_errors == 0) $display("\n=== ALL PIPELINE TESTS PASSED ===");
         else                   $display("\n=== TESTS FAILED: %0d Errors ===", total_errors);
         

@@ -92,6 +92,7 @@ module cabac_enc_top #(
 
     // ── Terminating bin + flush ──────────────────────────────────────────
     input  wire        trm_req,        // encode terminating bin (end of slice)
+    input  wire        trm_bin_val,    // 1 for end_of_slice, 0 otherwise
     input  wire        flush_req,      // flush range coder (end of NALU)
     output wire        flush_done,
 
@@ -184,9 +185,7 @@ module cabac_enc_top #(
         .rc_pstate   (rc_pstate),
         .rc_valmps   (rc_valmps),
         .rc_bin_ready(rc_bin_ready),
-        .rc_ep_valid (rc_ep_valid),
-        .rc_ep_value (rc_ep_value),
-        .rc_ep_ready (rc_bin_ready)
+        .rc_ep_valid (rc_ep_valid)
     );
 
     // =========================================================================
@@ -226,11 +225,20 @@ module cabac_enc_top #(
     syntax_pred #(.CTX_ID_W(CTX_ID_W), .MVD_W(MVD_W)) u_sp (
         .clk         (clk),
         .rst_n       (rst_n),
-        .pred_valid  (pred_req),
-        .pred_done   (pred_done),
-        .slice_is_b  (slice_is_b),
-        .cu_depth    (cu_depth),
-        .inter_dir   (inter_dir),
+        .pred_valid       (pred_req),
+        .pred_done        (pred_done),
+        .slice_is_b       (slice_is_b),
+        .cu_depth         (cu_depth),
+        .inter_dir        (inter_dir),
+        
+        // Intra prediction
+        .cu_pred_intra    (cu_pred_intra),
+        .prev_intra_luma_pred_flag (1'b1), // stub: mode is always 0 (planar), so it's always MPM 0
+        .mpm_idx          (2'd0),          // MPM 0
+        .rem_intra_luma_pred_mode  (5'd0),
+        .intra_chroma_pred_mode    (3'd4), // derived from luma
+        
+        // L0 prediction
         .ref_idx_l0  (ref_idx_l0),
         .mvp_flag_l0 (mvp_flag_l0),
         .mvd_l0_x    (mvd_l0_x),
@@ -280,8 +288,8 @@ module cabac_enc_top #(
     assign be_is_ep     = sc_bin_valid ? sc_is_ep     :
                           sp_bin_valid ? sp_is_ep     : sf_is_ep;
 
-    // Mux regular and EP bin values for the range_coder's single value input
-    assign rc_muxed_bin_value = rc_ep_valid ? rc_ep_value : rc_bin_value;
+    // Mux bin value and context into range_coder
+    assign rc_muxed_bin_value = trm_req ? trm_bin_val : rc_bin_value;
 
     // =========================================================================
     // Busy signal
@@ -303,6 +311,13 @@ module cabac_enc_top #(
                      {sc_bin_valid, sp_bin_valid, sf_bin_valid}, $time);
         if (flush_done)
             $display("INFO [cabac_enc_top] flush done — slice bitstream complete");
+            
+        if (be_bin_valid && be_bin_rdy) begin
+            $display("CABAC_BIN_ENC: value=%b is_ep=%b ctx=%0d at t=%0t", be_bin_value, be_is_ep, be_ctx_id, $time);
+        end
+        if (rc_bin_valid && rc_bin_ready) begin
+            $display("CABAC_RANGE_CODER: in_val=%b pstate=%0d valmps=%b at t=%0t", rc_muxed_bin_value, rc_pstate, rc_valmps, $time);
+        end
     end
     // synthesis translate_on
 

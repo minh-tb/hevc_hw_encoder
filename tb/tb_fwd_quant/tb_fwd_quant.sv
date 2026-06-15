@@ -45,7 +45,6 @@ module tb_fwd_quant;
         .qp             (qp),
         .tu_size_log2   (tu_size_log2),
         .is_intra       (is_intra),
-        .transform_skip (transform_skip),
         .in_valid       (in_valid),
         .in_ready       (in_ready),
         .in_coeff       (in_coeff),

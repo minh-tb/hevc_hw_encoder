@@ -7,7 +7,7 @@ hevc_hw_encoder/
 │   │   ├── hevc_decoder_top.v              # Top-level decoder
 │   │   ├── gop_controller.v                # GOP/B-frame order, POC counter
 │   │   ├── slice_controller.v              # Slice header, frame type FSM
-│   │   └── parameter_pkg.vh               # Global localparam (QP=32, depth=4, etc.)
+│   │   
 │   │
 │   ├── input_output/
 │   │   ├── input_buffer.v                  # YUV 4:2:0 10-bit frame input FIFO
@@ -17,7 +17,8 @@ hevc_hw_encoder/
 │   ├── partition/
 │   │   ├── ctu_raster_scan.v               # CTU address generator (raster order)
 │   │   ├── ctu_partitioner.v               # Quadtree CU split decision (64→32→16→8)
-│   │   └── pu_cu_splitter.v                # PU/TU split within CU
+│   │   ├── pu_cu_splitter.v                # PU/TU split within CU
+│   │   └── mode_decision.v                 # Evaluates RD cost to choose Intra vs Inter and Split flags
 │   │
 │   ├── intra/
 │   │   ├── intra_pred_top.v                # Intra prediction top
@@ -31,7 +32,6 @@ hevc_hw_encoder/
 │   │   ├── tz_search.v                     # TZ (Test Zone) integer search
 │   │   ├── sad_4x4.v                       # 4×4 SAD unit (arrayed)
 │   │   ├── sad_8x8.v                       # 8×8 SAD unit
-│   │   ├── satd_4x4.v                      # 4×4 SATD/Hadamard (fractional ME cost)
 │   │   ├── hpel_filter_luma.v              # 8-tap HEVC luma H/V/HV interpolation
 │   │   ├── hpel_filter_chroma.v            # 4-tap chroma interpolation
 │   │   ├── mc_unit.v                       # Motion compensation (apply MV + filter)
@@ -47,8 +47,7 @@ hevc_hw_encoder/
 │   │
 │   ├── quant/
 │   │   ├── fwd_quant.v                     # Forward quantization (flat matrix, QP=32)
-│   │   ├── inv_quant.v                     # Inverse quantization
-│   │   └── rdoq_simple.v                   # Simplified RDOQ (sign flip RD)
+│   │   └── inv_quant.v                     # Inverse quantization
 │   │
 │   ├── inloop_filters/
 │   │   ├── deblock_top.v                   # Deblocking filter top
@@ -95,7 +94,6 @@ hevc_hw_encoder/
 │   │   ├── tb_intra_planar.v
 │   │   ├── tb_intra_angular.v
 │   │   ├── tb_sad_4x4.v
-│   │   ├── tb_satd_4x4.v
 │   │   ├── tb_tz_search.v
 │   │   ├── tb_hpel_luma.v
 │   │   ├── tb_deblock.v
@@ -119,45 +117,6 @@ hevc_hw_encoder/
 │       ├── hm_ref_model.v                  # C-model golden reference via DPI-C
 │       └── score_board.v                   # Pixel-level PSNR comparator
 │
-├── ref_model/                              # C/C++ reference (via DPI-C)
-│   ├── hm_dpi/
-│   │   ├── hm_dpi_top.cpp                  # DPI-C bridge to HM encoder
-│   │   ├── hm_dpi_top.h
-│   │   └── Makefile
-│   └── golden/
-│       ├── gen_dct_vectors.py              # Generate DCT test vectors (numpy)
-│       ├── gen_intra_vectors.py            # Generate intra pred test vectors
-│       ├── gen_quant_vectors.py
-│       └── gen_cabac_vectors.py
-│
-├── scripts/
-│   ├── sim/
-│   │   ├── run_unit.sh                     # Run single unit testbench (VCS/Questa)
-│   │   ├── run_all_unit.sh                 # Run all unit TBs in parallel
-│   │   ├── run_integration.sh
-│   │   └── run_regression.sh              # Full regression + PSNR check
-│   │
-│   ├── synth/
-│   │   ├── dc_setup.tcl                    # Design Compiler setup
-│   │   ├── dc_constraints.sdc              # Timing constraints (target freq)
-│   │   └── dc_run.tcl                      # Synthesis run script
-│   │
-│   └── lint/
-│       ├── spyglass_run.tcl                # SpyGlass lint rules
-│       └── verilator_lint.sh               # Free alternative: Verilator lint
-│
-├── verif/
-│   ├── sequences/
-│   │   ├── flat_field.yuv                  # Solid color (quant edge case)
-│   │   ├── ramp_h.yuv                      # Horizontal ramp (angular pred)
-│   │   ├── ramp_v.yuv                      # Vertical ramp
-│   │   ├── checkerboard.yuv                # High freq (DCT stress)
-│   │   └── README.md
-│   │
-│   └── expected/
-│       ├── flat_field_qp32.bin             # HM-generated reference bitstreams
-│       ├── ramp_h_qp32.bin
-│       └── checkerboard_qp32.bin
 │
 ├── docs/
 │   ├── architecture.md                     # Module block diagram descriptions

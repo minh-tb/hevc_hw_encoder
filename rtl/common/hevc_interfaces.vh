@@ -158,10 +158,6 @@
 `define PART_2NxN    3'd1   // Horizontal half
 `define PART_NX2N    3'd2   // Vertical half
 `define PART_NxN     3'd3   // Quarter (intra only)
-`define PART_2NxnU   3'd4   // AMP: asymmetric (implement last)
-`define PART_2NxnD   3'd5
-`define PART_nLx2N   3'd6
-`define PART_nRx2N   3'd7
 
 // Prediction mode
 `define PRED_INTER   1'b0
@@ -177,7 +173,6 @@
 // tu_size_log2      3       log2 of TU size: 2=4x4, 3=8x8, 4=16x16, 5=32x32
 // comp              2       Component Y/Cb/Cr
 // is_luma           1       Convenience flag
-// transform_skip    1       TransformSkip flag (config: TransformSkip=1)
 // last_tu_in_cu     1       Final TU in this CU
 // valid             1
 // ready             1
@@ -188,7 +183,6 @@
     logic [2:0]  tu_size_log2;   \
     logic [1:0]  comp;           \
     logic        is_luma;        \
-    logic        transform_skip; \
     logic        last_tu_in_cu;  \
     logic        valid;          \
     logic        ready;

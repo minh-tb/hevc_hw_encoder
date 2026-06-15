@@ -107,8 +107,9 @@ module tz_search #(
     // Reference block fetch port — to ref_frame_buffer
     // Request a 4×4 block at (ref_req_x, ref_req_y) in reference frame
     output reg                         ref_req_valid,
-    output reg  signed [12:0]          ref_req_x,
-    output reg  signed [12:0]          ref_req_y,
+    output reg  signed [11:0]          ref_req_x,
+    output reg  signed [11:0]          ref_req_y,
+    input  wire                        ref_req_ready,
     input  wire                        ref_resp_valid,  // asserted 1 cy after req
     input  wire [PIXEL_WIDTH*16-1:0]   ref_resp_data,   // 4×4 reference pixels
 
@@ -316,7 +317,10 @@ module tz_search #(
                 ref_req_valid <= 1'b1;
                 ref_req_x     <= ref_x_req;
                 ref_req_y     <= ref_y_req;
-                state         <= S_WAIT_REF;
+                if (ref_req_ready) begin
+                    $display("Time=%0t: [tz_search] REQ_REF accepted for x=%0d, y=%0d", $time, ref_x_req, ref_y_req);
+                    state <= S_WAIT_REF;
+                end
             end
 
             // ---------------------------------------------------------------
@@ -324,6 +328,7 @@ module tz_search #(
             // ---------------------------------------------------------------
             S_WAIT_REF: begin
                 if (ref_resp_valid) begin
+                    $display("Time=%0t: [tz_search] WAIT_REF got resp_valid", $time);
                     sad_ref_flat <= ref_resp_data;
                     sad_valid_in <= 1'b1;    // launch SAD computation
                     state        <= S_SAD_S1;
@@ -352,6 +357,7 @@ module tz_search #(
                     best_sad  <= sad_out;
                     best_mv_x <= cand_x;
                     best_mv_y <= cand_y;
+                    $display("Time=%0t: [tz_search] New best MV=(%0d,%0d) SAD=%0d", $time, cand_x, cand_y, sad_out);
                 end
                 state <= S_NEXT_PT;
             end
@@ -425,6 +431,7 @@ module tz_search #(
             // HM: rcMv = MV(rcStruct.iBestX, rcStruct.iBestY)
             // ---------------------------------------------------------------
             S_DONE: begin
+                $display("Time=%0t: [tz_search] DONE best_mv=(%0d,%0d) best_sad=%0d", $time, best_mv_x, best_mv_y, best_sad);
                 result_valid <= 1'b1;
                 search_ready <= 1'b1;
                 state        <= S_IDLE;

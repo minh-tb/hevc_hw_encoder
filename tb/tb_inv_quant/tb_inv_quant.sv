@@ -43,7 +43,6 @@ module tb_inv_quant;
         .rst_n          (rst_n),
         .qp             (qp),
         .tu_size_log2   (tu_size_log2),
-        .transform_skip (transform_skip),
         .in_valid       (in_valid),
         .in_ready       (in_ready),
         .in_level       (in_level),

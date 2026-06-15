@@ -106,8 +106,8 @@ module frame_store #(
 
     // Reference picture list (from GOP controller)
     // L0 and L1 lists: slot indices for each reference position
-    input  wire [2:0]   ref_l0 [0:`MAX_REF_ACTIVE-1],
-    input  wire [2:0]   ref_l1 [0:`MAX_REF_ACTIVE-1],
+    input  wire [14:0]  ref_l0,
+    input  wire [14:0]  ref_l1,
     input  wire [2:0]   ref_l0_count,
     input  wire [2:0]   ref_l1_count,
 
@@ -391,8 +391,8 @@ module frame_store #(
     wire signed [12:0] rd_cur_x_raw = rd_base_x + $signed({6'b0, rd_px});
     wire signed [12:0] rd_cur_y_raw = rd_base_y + $signed({6'b0, rd_py});
 
-    wire signed [12:0] max_x = (rd_comp_r != 2'd0) ? $signed({2'b0, FRAME_WIDTH[11:1]})  : $signed({1'b0, FRAME_WIDTH[11:0]});
-    wire signed [12:0] max_y = (rd_comp_r != 2'd0) ? $signed({2'b0, FRAME_HEIGHT[11:1]}) : $signed({1'b0, FRAME_HEIGHT[11:0]});
+    wire signed [12:0] max_x = (rd_comp_r != 2'd0) ? $signed(FRAME_WIDTH / 2)  : $signed(FRAME_WIDTH);
+    wire signed [12:0] max_y = (rd_comp_r != 2'd0) ? $signed(FRAME_HEIGHT / 2) : $signed(FRAME_HEIGHT);
 
     wire [11:0] rd_cur_x = (rd_cur_x_raw < 13'sd0)                         ? 12'd0 :
                             (rd_cur_x_raw >= max_x)                         ? (max_x[11:0] - 12'd1) :
@@ -413,9 +413,29 @@ module frame_store #(
                                  {1'b0, rd_comp_base} +
                                  ({21'b0, rd_eff_y} * {21'b0, rd_stride} + {21'b0, rd_eff_x}) * 33'd2;
 
+    wire [6:0] next_px = (rd_px == rd_blk_w_r - 7'd1) ? 7'd0 : rd_px + 7'd1;
+    wire [6:0] next_py = (rd_px == rd_blk_w_r - 7'd1) ? rd_py + 7'd1 : rd_py;
+
+    wire signed [12:0] next_x_raw = rd_base_x + $signed({6'b0, next_px});
+    wire signed [12:0] next_y_raw = rd_base_y + $signed({6'b0, next_py});
+
+    wire [11:0] next_cur_x = (next_x_raw < 13'sd0) ? 12'd0 :
+                             (next_x_raw >= max_x) ? (max_x[11:0] - 12'd1) :
+                             next_x_raw[11:0];
+    wire [11:0] next_cur_y = (next_y_raw < 13'sd0) ? 12'd0 :
+                             (next_y_raw >= max_y) ? (max_y[11:0] - 12'd1) :
+                             next_y_raw[11:0];
+
+    wire [32:0] next_pixel_addr = {1'b0, rd_slot_r} * SLOT_STRIDE_BYTES +
+                                  {1'b0, rd_comp_base} +
+                                  ({21'b0, next_cur_y} * {21'b0, rd_stride} + {21'b0, next_cur_x}) * 33'd2;
+
+    wire [32:0] next_beat_addr = next_pixel_addr & ~33'h1F;
+
     // Read data path — unpack pixels from AXI read data
     reg [AXI_DW-1:0] rd_data_buf;
     reg        rd_buf_valid;
+    reg [32:0] cached_beat_addr;
 
     wire [2:0]  rd_word_idx  = rd_pixel_addr[4:2]; // which 32-bit word in the 256-bit beat
     wire [31:0] rd_word      = rd_data_buf >> ({rd_word_idx, 5'd0}); // Shift to align word to LSB
@@ -436,10 +456,12 @@ module frame_store #(
             rd_px        <= 7'd0;
             rd_py        <= 7'd0;
             axi_arvalid  <= 1'b0;
+            cached_beat_addr <= 33'h1FFFFFFFF;
         end else begin
             case (rd_state)
                 RD_IDLE: begin
                     rd_buf_valid <= 1'b0;
+                    cached_beat_addr <= 33'h1FFFFFFFF;
                     if (rd_req_valid) begin
                         rd_slot_r   <= rd_slot;
                         rd_comp_r   <= rd_comp;
@@ -469,6 +491,7 @@ module frame_store #(
                     if (axi_rvalid) begin
                         rd_data_buf  <= axi_rdata;
                         rd_buf_valid <= 1'b1;
+                        cached_beat_addr <= rd_pixel_addr & ~33'h1F;
                         rd_state     <= RD_OUT;
                     end
                 end
@@ -476,20 +499,18 @@ module frame_store #(
                 RD_OUT: begin
                     if (rd_resp_ready && rd_buf_valid) begin
                         // Advance to next pixel
-                        if (rd_px == rd_blk_w_r - 7'd1) begin
-                            rd_px <= 7'd0;
-                            rd_py <= rd_py + 7'd1;
-                        end else begin
-                            rd_px <= rd_px + 7'd1;
-                        end
+                        rd_px <= next_px;
+                        rd_py <= next_py;
 
                         if (rd_resp_last) begin
                             rd_state     <= RD_IDLE;
                             rd_buf_valid <= 1'b0;
                         end else begin
-                            // Issue next read
-                            rd_state    <= RD_ADDR;
-                            rd_buf_valid<= 1'b0;
+                            if (next_beat_addr != cached_beat_addr) begin
+                                // Issue next read
+                                rd_state    <= RD_ADDR;
+                                rd_buf_valid<= 1'b0;
+                            end
                         end
                     end
                 end

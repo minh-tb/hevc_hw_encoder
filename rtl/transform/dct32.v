@@ -53,12 +53,25 @@ module dct32 (
 
     input  wire         in_valid,
     output wire         in_ready,
-    input  wire signed [`COEFF_WIDTH-1:0] in_data [0:31][0:31],
+    input  wire [16383:0] in_data,
 
     output reg          out_valid,
     input  wire         out_ready,
-    output reg  signed [`COEFF_WIDTH-1:0] out_data [0:31][0:31]
+    output wire [16383:0] out_data
 );
+
+    wire signed [`COEFF_WIDTH-1:0] in_data_arr [0:31][0:31];
+    reg  signed [`COEFF_WIDTH-1:0] out_data_arr [0:31][0:31];
+
+    genvar gi, gj;
+    generate
+        for (gi = 0; gi < 32; gi = gi + 1) begin : gen_flat
+            for (gj = 0; gj < 32; gj = gj + 1) begin : gen_flat_col
+                assign in_data_arr[gi][gj] = in_data[(gi*32+gj)*16 +: 16];
+                assign out_data[(gi*32+gj)*16 +: 16] = out_data_arr[gi][gj];
+            end
+        end
+    endgenerate
 
     //-------------------------------------------------------------------------
     // DCT-32 basis coefficients (HEVC spec Table 9-15)
@@ -187,22 +200,22 @@ module dct32 (
                         reg signed [IW-1:0] EEEO[0:1];
 
                         // Even/odd decomposition
-                        E[0] =in_data[r][0] +in_data[r][31]; E[1] =in_data[r][1] +in_data[r][30];
-                        E[2] =in_data[r][2] +in_data[r][29]; E[3] =in_data[r][3] +in_data[r][28];
-                        E[4] =in_data[r][4] +in_data[r][27]; E[5] =in_data[r][5] +in_data[r][26];
-                        E[6] =in_data[r][6] +in_data[r][25]; E[7] =in_data[r][7] +in_data[r][24];
-                        E[8] =in_data[r][8] +in_data[r][23]; E[9] =in_data[r][9] +in_data[r][22];
-                        E[10]=in_data[r][10]+in_data[r][21]; E[11]=in_data[r][11]+in_data[r][20];
-                        E[12]=in_data[r][12]+in_data[r][19]; E[13]=in_data[r][13]+in_data[r][18];
-                        E[14]=in_data[r][14]+in_data[r][17]; E[15]=in_data[r][15]+in_data[r][16];
-                        O[0] =in_data[r][0] -in_data[r][31]; O[1] =in_data[r][1] -in_data[r][30];
-                        O[2] =in_data[r][2] -in_data[r][29]; O[3] =in_data[r][3] -in_data[r][28];
-                        O[4] =in_data[r][4] -in_data[r][27]; O[5] =in_data[r][5] -in_data[r][26];
-                        O[6] =in_data[r][6] -in_data[r][25]; O[7] =in_data[r][7] -in_data[r][24];
-                        O[8] =in_data[r][8] -in_data[r][23]; O[9] =in_data[r][9] -in_data[r][22];
-                        O[10]=in_data[r][10]-in_data[r][21]; O[11]=in_data[r][11]-in_data[r][20];
-                        O[12]=in_data[r][12]-in_data[r][19]; O[13]=in_data[r][13]-in_data[r][18];
-                        O[14]=in_data[r][14]-in_data[r][17]; O[15]=in_data[r][15]-in_data[r][16];
+                        E[0] =in_data_arr[r][0] +in_data_arr[r][31]; E[1] =in_data_arr[r][1] +in_data_arr[r][30];
+                        E[2] =in_data_arr[r][2] +in_data_arr[r][29]; E[3] =in_data_arr[r][3] +in_data_arr[r][28];
+                        E[4] =in_data_arr[r][4] +in_data_arr[r][27]; E[5] =in_data_arr[r][5] +in_data_arr[r][26];
+                        E[6] =in_data_arr[r][6] +in_data_arr[r][25]; E[7] =in_data_arr[r][7] +in_data_arr[r][24];
+                        E[8] =in_data_arr[r][8] +in_data_arr[r][23]; E[9] =in_data_arr[r][9] +in_data_arr[r][22];
+                        E[10]=in_data_arr[r][10]+in_data_arr[r][21]; E[11]=in_data_arr[r][11]+in_data_arr[r][20];
+                        E[12]=in_data_arr[r][12]+in_data_arr[r][19]; E[13]=in_data_arr[r][13]+in_data_arr[r][18];
+                        E[14]=in_data_arr[r][14]+in_data_arr[r][17]; E[15]=in_data_arr[r][15]+in_data_arr[r][16];
+                        O[0] =in_data_arr[r][0] -in_data_arr[r][31]; O[1] =in_data_arr[r][1] -in_data_arr[r][30];
+                        O[2] =in_data_arr[r][2] -in_data_arr[r][29]; O[3] =in_data_arr[r][3] -in_data_arr[r][28];
+                        O[4] =in_data_arr[r][4] -in_data_arr[r][27]; O[5] =in_data_arr[r][5] -in_data_arr[r][26];
+                        O[6] =in_data_arr[r][6] -in_data_arr[r][25]; O[7] =in_data_arr[r][7] -in_data_arr[r][24];
+                        O[8] =in_data_arr[r][8] -in_data_arr[r][23]; O[9] =in_data_arr[r][9] -in_data_arr[r][22];
+                        O[10]=in_data_arr[r][10]-in_data_arr[r][21]; O[11]=in_data_arr[r][11]-in_data_arr[r][20];
+                        O[12]=in_data_arr[r][12]-in_data_arr[r][19]; O[13]=in_data_arr[r][13]-in_data_arr[r][18];
+                        O[14]=in_data_arr[r][14]-in_data_arr[r][17]; O[15]=in_data_arr[r][15]-in_data_arr[r][16];
 
                         // DCT-16 layer on E[0..15]
                         EE[0]=E[0]+E[15]; EE[1]=E[1]+E[14]; EE[2]=E[2]+E[13]; EE[3]=E[3]+E[12];
@@ -273,14 +286,14 @@ module dct32 (
                         reg signed [IW-1:0] E [0:15];
 
                         // Read column r
-                        x[0]=in_data[0][r];  x[1]=in_data[1][r];  x[2]=in_data[2][r];  x[3]=in_data[3][r];
-                        x[4]=in_data[4][r];  x[5]=in_data[5][r];  x[6]=in_data[6][r];  x[7]=in_data[7][r];
-                        x[8]=in_data[8][r];  x[9]=in_data[9][r];  x[10]=in_data[10][r];x[11]=in_data[11][r];
-                        x[12]=in_data[12][r];x[13]=in_data[13][r];x[14]=in_data[14][r];x[15]=in_data[15][r];
-                        x[16]=in_data[16][r];x[17]=in_data[17][r];x[18]=in_data[18][r];x[19]=in_data[19][r];
-                        x[20]=in_data[20][r];x[21]=in_data[21][r];x[22]=in_data[22][r];x[23]=in_data[23][r];
-                        x[24]=in_data[24][r];x[25]=in_data[25][r];x[26]=in_data[26][r];x[27]=in_data[27][r];
-                        x[28]=in_data[28][r];x[29]=in_data[29][r];x[30]=in_data[30][r];x[31]=in_data[31][r];
+                        x[0]=in_data_arr[0][r];  x[1]=in_data_arr[1][r];  x[2]=in_data_arr[2][r];  x[3]=in_data_arr[3][r];
+                        x[4]=in_data_arr[4][r];  x[5]=in_data_arr[5][r];  x[6]=in_data_arr[6][r];  x[7]=in_data_arr[7][r];
+                        x[8]=in_data_arr[8][r];  x[9]=in_data_arr[9][r];  x[10]=in_data_arr[10][r];x[11]=in_data_arr[11][r];
+                        x[12]=in_data_arr[12][r];x[13]=in_data_arr[13][r];x[14]=in_data_arr[14][r];x[15]=in_data_arr[15][r];
+                        x[16]=in_data_arr[16][r];x[17]=in_data_arr[17][r];x[18]=in_data_arr[18][r];x[19]=in_data_arr[19][r];
+                        x[20]=in_data_arr[20][r];x[21]=in_data_arr[21][r];x[22]=in_data_arr[22][r];x[23]=in_data_arr[23][r];
+                        x[24]=in_data_arr[24][r];x[25]=in_data_arr[25][r];x[26]=in_data_arr[26][r];x[27]=in_data_arr[27][r];
+                        x[28]=in_data_arr[28][r];x[29]=in_data_arr[29][r];x[30]=in_data_arr[30][r];x[31]=in_data_arr[31][r];
 
                         // 16 odd outputs from odd-indexed rows
                         O[0] =T90*x[1]+T90b*x[3]+T88*x[5]+T85*x[7]+T82*x[9]+T78*x[11]+T73*x[13]+T67*x[15]+T61*x[17]+T54*x[19]+T46*x[21]+T38*x[23]+T31*x[25]+T22*x[27]+T13*x[29]+T04*x[31];
@@ -387,7 +400,7 @@ module dct32 (
             out_valid <= 1'b0;
             for (c = 0; c < 32; c = c + 1)
                 for (k = 0; k < 32; k = k + 1)
-                    out_data[c][k] <= {`COEFF_WIDTH{1'b0}};
+                    out_data_arr[c][k] <= {`COEFF_WIDTH{1'b0}};
         end else if (!out_ready) begin
             out_valid <= out_valid;
         end else begin
@@ -436,38 +449,38 @@ module dct32 (
                         EEEE[0]=EEE[0]+EEE[3]; EEEE[1]=EEE[1]+EEE[2];
                         EEEO[0]=EEE[0]-EEE[3]; EEEO[1]=EEE[1]-EEE[2];
 
-                        out_data[0][c]  <= `CLIP16((T64*EEEE[0]+T64*EEEE[1]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[16][c] <= `CLIP16((T64*EEEE[0]-T64*EEEE[1]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[8][c]  <= `CLIP16((T83*EEEO[0]+T36*EEEO[1]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[24][c] <= `CLIP16((T36*EEEO[0]-T83*EEEO[1]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[4][c]  <= `CLIP16((T89*EEO[0]+T75*EEO[1]+T50*EEO[2]+T18*EEO[3]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[12][c] <= `CLIP16((T75*EEO[0]-T18*EEO[1]-T89*EEO[2]-T50*EEO[3]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[20][c] <= `CLIP16((T50*EEO[0]-T89*EEO[1]+T18*EEO[2]+T75*EEO[3]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[28][c] <= `CLIP16((T18*EEO[0]-T50*EEO[1]+T75*EEO[2]-T89*EEO[3]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[2][c]  <= `CLIP16((T90*EO[0]+T87*EO[1]+T80*EO[2]+T70*EO[3]+T57*EO[4]+T43*EO[5]+T25*EO[6]+T09*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[6][c]  <= `CLIP16((T87*EO[0]+T57*EO[1]+T09*EO[2]-T43*EO[3]-T80*EO[4]-T90*EO[5]-T70*EO[6]-T25*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[10][c] <= `CLIP16((T80*EO[0]+T09*EO[1]-T70*EO[2]-T87*EO[3]-T25*EO[4]+T57*EO[5]+T90*EO[6]+T43*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[14][c] <= `CLIP16((T70*EO[0]-T43*EO[1]-T87*EO[2]+T09*EO[3]+T90*EO[4]+T25*EO[5]-T80*EO[6]-T57*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[18][c] <= `CLIP16((T57*EO[0]-T80*EO[1]-T25*EO[2]+T90*EO[3]-T09*EO[4]-T87*EO[5]+T43*EO[6]+T70*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[22][c] <= `CLIP16((T43*EO[0]-T90*EO[1]+T57*EO[2]+T25*EO[3]-T87*EO[4]+T70*EO[5]+T09*EO[6]-T80*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[26][c] <= `CLIP16((T25*EO[0]-T70*EO[1]+T90*EO[2]-T80*EO[3]+T43*EO[4]+T09*EO[5]-T57*EO[6]+T87*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[30][c] <= `CLIP16((T09*EO[0]-T25*EO[1]+T43*EO[2]-T57*EO[3]+T70*EO[4]-T80*EO[5]+T87*EO[6]-T90*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[1][c]  <= `CLIP16((T90*O[0]+T90b*O[1]+T88*O[2]+T85*O[3]+T82*O[4]+T78*O[5]+T73*O[6]+T67*O[7]+T61*O[8]+T54*O[9]+T46*O[10]+T38*O[11]+T31*O[12]+T22*O[13]+T13*O[14]+T04*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[3][c]  <= `CLIP16((T90*O[0]+T82*O[1]+T67*O[2]+T46*O[3]+T22*O[4]-T04*O[5]-T31*O[6]-T54*O[7]-T73*O[8]-T85*O[9]-T90*O[10]-T88*O[11]-T78*O[12]-T61*O[13]-T38*O[14]-T13*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[5][c]  <= `CLIP16((T88*O[0]+T67*O[1]+T31*O[2]-T13*O[3]-T54*O[4]-T82*O[5]-T90*O[6]-T78*O[7]-T46*O[8]-T04*O[9]+T38*O[10]+T73*O[11]+T90*O[12]+T85*O[13]+T61*O[14]+T22*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[7][c]  <= `CLIP16((T85*O[0]+T46*O[1]-T13*O[2]-T67*O[3]-T90*O[4]-T73*O[5]-T22*O[6]+T38*O[7]+T82*O[8]+T88*O[9]+T54*O[10]-T04*O[11]-T61*O[12]-T90*O[13]-T78*O[14]-T31*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[9][c]  <= `CLIP16((T82*O[0]+T22*O[1]-T54*O[2]-T90*O[3]-T61*O[4]+T13*O[5]+T78*O[6]+T85*O[7]+T31*O[8]-T46*O[9]-T90*O[10]-T67*O[11]+T04*O[12]+T73*O[13]+T88*O[14]+T38*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[11][c] <= `CLIP16((T78*O[0]-T04*O[1]-T82*O[2]-T73*O[3]+T13*O[4]+T85*O[5]+T67*O[6]-T22*O[7]-T88*O[8]-T61*O[9]+T31*O[10]+T90*O[11]+T54*O[12]-T38*O[13]-T90*O[14]-T46*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[13][c] <= `CLIP16((T73*O[0]-T31*O[1]-T90*O[2]-T22*O[3]+T78*O[4]+T67*O[5]-T38*O[6]-T90*O[7]-T13*O[8]+T82*O[9]+T61*O[10]-T46*O[11]-T88*O[12]-T04*O[13]+T85*O[14]+T54*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[15][c] <= `CLIP16((T67*O[0]-T54*O[1]-T78*O[2]+T38*O[3]+T85*O[4]-T22*O[5]-T90*O[6]+T04*O[7]+T90*O[8]+T13*O[9]-T88*O[10]+T31*O[11]+T82*O[12]-T46*O[13]-T73*O[14]+T61*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[17][c] <= `CLIP16((T61*O[0]-T73*O[1]-T46*O[2]+T82*O[3]+T31*O[4]-T88*O[5]-T13*O[6]+T90*O[7]-T04*O[8]-T90*O[9]+T22*O[10]+T85*O[11]-T38*O[12]-T78*O[13]+T54*O[14]+T67*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[19][c] <= `CLIP16((T54*O[0]-T85*O[1]-T04*O[2]+T88*O[3]-T46*O[4]-T61*O[5]+T82*O[6]+T13*O[7]-T90*O[8]+T38*O[9]+T73*O[10]-T78*O[11]-T22*O[12]+T90*O[13]-T31*O[14]-T67*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[21][c] <= `CLIP16((T46*O[0]-T90*O[1]+T38*O[2]+T54*O[3]-T90*O[4]+T31*O[5]+T61*O[6]-T88*O[7]+T22*O[8]+T67*O[9]-T85*O[10]+T13*O[11]+T73*O[12]-T82*O[13]+T04*O[14]+T78*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[23][c] <= `CLIP16((T38*O[0]-T88*O[1]+T73*O[2]-T04*O[3]-T67*O[4]+T90*O[5]-T46*O[6]-T31*O[7]+T85*O[8]-T78*O[9]+T13*O[10]+T61*O[11]-T90*O[12]+T54*O[13]+T22*O[14]-T82*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[25][c] <= `CLIP16((T31*O[0]-T78*O[1]+T90*O[2]-T61*O[3]+T04*O[4]+T54*O[5]-T88*O[6]+T82*O[7]-T38*O[8]-T22*O[9]+T73*O[10]-T90*O[11]+T67*O[12]-T13*O[13]-T46*O[14]+T85*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[27][c] <= `CLIP16((T22*O[0]-T61*O[1]+T85*O[2]-T90*O[3]+T73*O[4]-T38*O[5]-T04*O[6]+T46*O[7]-T78*O[8]+T90*O[9]-T82*O[10]+T54*O[11]-T13*O[12]-T31*O[13]+T67*O[14]-T88*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[29][c] <= `CLIP16((T13*O[0]-T38*O[1]+T61*O[2]-T78*O[3]+T88*O[4]-T90*O[5]+T85*O[6]-T73*O[7]+T54*O[8]-T31*O[9]+T04*O[10]+T22*O[11]-T46*O[12]+T67*O[13]-T82*O[14]+T90*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
-                        out_data[31][c] <= `CLIP16((T04*O[0]-T13*O[1]+T22*O[2]-T31*O[3]+T38*O[4]-T46*O[5]+T54*O[6]-T61*O[7]+T67*O[8]-T73*O[9]+T78*O[10]-T82*O[11]+T85*O[12]-T88*O[13]+T90*O[14]-T90b*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[0][c]  <= `CLIP16((T64*EEEE[0]+T64*EEEE[1]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[16][c] <= `CLIP16((T64*EEEE[0]-T64*EEEE[1]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[8][c]  <= `CLIP16((T83*EEEO[0]+T36*EEEO[1]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[24][c] <= `CLIP16((T36*EEEO[0]-T83*EEEO[1]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[4][c]  <= `CLIP16((T89*EEO[0]+T75*EEO[1]+T50*EEO[2]+T18*EEO[3]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[12][c] <= `CLIP16((T75*EEO[0]-T18*EEO[1]-T89*EEO[2]-T50*EEO[3]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[20][c] <= `CLIP16((T50*EEO[0]-T89*EEO[1]+T18*EEO[2]+T75*EEO[3]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[28][c] <= `CLIP16((T18*EEO[0]-T50*EEO[1]+T75*EEO[2]-T89*EEO[3]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[2][c]  <= `CLIP16((T90*EO[0]+T87*EO[1]+T80*EO[2]+T70*EO[3]+T57*EO[4]+T43*EO[5]+T25*EO[6]+T09*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[6][c]  <= `CLIP16((T87*EO[0]+T57*EO[1]+T09*EO[2]-T43*EO[3]-T80*EO[4]-T90*EO[5]-T70*EO[6]-T25*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[10][c] <= `CLIP16((T80*EO[0]+T09*EO[1]-T70*EO[2]-T87*EO[3]-T25*EO[4]+T57*EO[5]+T90*EO[6]+T43*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[14][c] <= `CLIP16((T70*EO[0]-T43*EO[1]-T87*EO[2]+T09*EO[3]+T90*EO[4]+T25*EO[5]-T80*EO[6]-T57*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[18][c] <= `CLIP16((T57*EO[0]-T80*EO[1]-T25*EO[2]+T90*EO[3]-T09*EO[4]-T87*EO[5]+T43*EO[6]+T70*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[22][c] <= `CLIP16((T43*EO[0]-T90*EO[1]+T57*EO[2]+T25*EO[3]-T87*EO[4]+T70*EO[5]+T09*EO[6]-T80*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[26][c] <= `CLIP16((T25*EO[0]-T70*EO[1]+T90*EO[2]-T80*EO[3]+T43*EO[4]+T09*EO[5]-T57*EO[6]+T87*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[30][c] <= `CLIP16((T09*EO[0]-T25*EO[1]+T43*EO[2]-T57*EO[3]+T70*EO[4]-T80*EO[5]+T87*EO[6]-T90*EO[7]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[1][c]  <= `CLIP16((T90*O[0]+T90b*O[1]+T88*O[2]+T85*O[3]+T82*O[4]+T78*O[5]+T73*O[6]+T67*O[7]+T61*O[8]+T54*O[9]+T46*O[10]+T38*O[11]+T31*O[12]+T22*O[13]+T13*O[14]+T04*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[3][c]  <= `CLIP16((T90*O[0]+T82*O[1]+T67*O[2]+T46*O[3]+T22*O[4]-T04*O[5]-T31*O[6]-T54*O[7]-T73*O[8]-T85*O[9]-T90*O[10]-T88*O[11]-T78*O[12]-T61*O[13]-T38*O[14]-T13*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[5][c]  <= `CLIP16((T88*O[0]+T67*O[1]+T31*O[2]-T13*O[3]-T54*O[4]-T82*O[5]-T90*O[6]-T78*O[7]-T46*O[8]-T04*O[9]+T38*O[10]+T73*O[11]+T90*O[12]+T85*O[13]+T61*O[14]+T22*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[7][c]  <= `CLIP16((T85*O[0]+T46*O[1]-T13*O[2]-T67*O[3]-T90*O[4]-T73*O[5]-T22*O[6]+T38*O[7]+T82*O[8]+T88*O[9]+T54*O[10]-T04*O[11]-T61*O[12]-T90*O[13]-T78*O[14]-T31*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[9][c]  <= `CLIP16((T82*O[0]+T22*O[1]-T54*O[2]-T90*O[3]-T61*O[4]+T13*O[5]+T78*O[6]+T85*O[7]+T31*O[8]-T46*O[9]-T90*O[10]-T67*O[11]+T04*O[12]+T73*O[13]+T88*O[14]+T38*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[11][c] <= `CLIP16((T78*O[0]-T04*O[1]-T82*O[2]-T73*O[3]+T13*O[4]+T85*O[5]+T67*O[6]-T22*O[7]-T88*O[8]-T61*O[9]+T31*O[10]+T90*O[11]+T54*O[12]-T38*O[13]-T90*O[14]-T46*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[13][c] <= `CLIP16((T73*O[0]-T31*O[1]-T90*O[2]-T22*O[3]+T78*O[4]+T67*O[5]-T38*O[6]-T90*O[7]-T13*O[8]+T82*O[9]+T61*O[10]-T46*O[11]-T88*O[12]-T04*O[13]+T85*O[14]+T54*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[15][c] <= `CLIP16((T67*O[0]-T54*O[1]-T78*O[2]+T38*O[3]+T85*O[4]-T22*O[5]-T90*O[6]+T04*O[7]+T90*O[8]+T13*O[9]-T88*O[10]+T31*O[11]+T82*O[12]-T46*O[13]-T73*O[14]+T61*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[17][c] <= `CLIP16((T61*O[0]-T73*O[1]-T46*O[2]+T82*O[3]+T31*O[4]-T88*O[5]-T13*O[6]+T90*O[7]-T04*O[8]-T90*O[9]+T22*O[10]+T85*O[11]-T38*O[12]-T78*O[13]+T54*O[14]+T67*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[19][c] <= `CLIP16((T54*O[0]-T85*O[1]-T04*O[2]+T88*O[3]-T46*O[4]-T61*O[5]+T82*O[6]+T13*O[7]-T90*O[8]+T38*O[9]+T73*O[10]-T78*O[11]-T22*O[12]+T90*O[13]-T31*O[14]-T67*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[21][c] <= `CLIP16((T46*O[0]-T90*O[1]+T38*O[2]+T54*O[3]-T90*O[4]+T31*O[5]+T61*O[6]-T88*O[7]+T22*O[8]+T67*O[9]-T85*O[10]+T13*O[11]+T73*O[12]-T82*O[13]+T04*O[14]+T78*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[23][c] <= `CLIP16((T38*O[0]-T88*O[1]+T73*O[2]-T04*O[3]-T67*O[4]+T90*O[5]-T46*O[6]-T31*O[7]+T85*O[8]-T78*O[9]+T13*O[10]+T61*O[11]-T90*O[12]+T54*O[13]+T22*O[14]-T82*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[25][c] <= `CLIP16((T31*O[0]-T78*O[1]+T90*O[2]-T61*O[3]+T04*O[4]+T54*O[5]-T88*O[6]+T82*O[7]-T38*O[8]-T22*O[9]+T73*O[10]-T90*O[11]+T67*O[12]-T13*O[13]-T46*O[14]+T85*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[27][c] <= `CLIP16((T22*O[0]-T61*O[1]+T85*O[2]-T90*O[3]+T73*O[4]-T38*O[5]-T04*O[6]+T46*O[7]-T78*O[8]+T90*O[9]-T82*O[10]+T54*O[11]-T13*O[12]-T31*O[13]+T67*O[14]-T88*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[29][c] <= `CLIP16((T13*O[0]-T38*O[1]+T61*O[2]-T78*O[3]+T88*O[4]-T90*O[5]+T85*O[6]-T73*O[7]+T54*O[8]-T31*O[9]+T04*O[10]+T22*O[11]-T46*O[12]+T67*O[13]-T82*O[14]+T90*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
+                        out_data_arr[31][c] <= `CLIP16((T04*O[0]-T13*O[1]+T22*O[2]-T31*O[3]+T38*O[4]-T46*O[5]+T54*O[6]-T61*O[7]+T67*O[8]-T73*O[9]+T78*O[10]-T82*O[11]+T85*O[12]-T88*O[13]+T90*O[14]-T90b*O[15]+FWD_RND_2)>>>FWD_SHIFT_2);
                     end
 
                 end else begin
@@ -541,38 +554,38 @@ module dct32 (
                         E[8]=EE[7]-EO[7];  E[9]=EE[6]-EO[6];  E[10]=EE[5]-EO[5]; E[11]=EE[4]-EO[4];
                         E[12]=EE[3]-EO[3]; E[13]=EE[2]-EO[2]; E[14]=EE[1]-EO[1]; E[15]=EE[0]-EO[0];
 
-                        out_data[r][0]  <= `CLIP16((E[0] +O[0] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][1]  <= `CLIP16((E[1] +O[1] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][2]  <= `CLIP16((E[2] +O[2] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][3]  <= `CLIP16((E[3] +O[3] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][4]  <= `CLIP16((E[4] +O[4] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][5]  <= `CLIP16((E[5] +O[5] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][6]  <= `CLIP16((E[6] +O[6] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][7]  <= `CLIP16((E[7] +O[7] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][8]  <= `CLIP16((E[8] +O[8] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][9]  <= `CLIP16((E[9] +O[9] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][10] <= `CLIP16((E[10]+O[10]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][11] <= `CLIP16((E[11]+O[11]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][12] <= `CLIP16((E[12]+O[12]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][13] <= `CLIP16((E[13]+O[13]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][14] <= `CLIP16((E[14]+O[14]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][15] <= `CLIP16((E[15]+O[15]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][16] <= `CLIP16((E[15]-O[15]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][17] <= `CLIP16((E[14]-O[14]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][18] <= `CLIP16((E[13]-O[13]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][19] <= `CLIP16((E[12]-O[12]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][20] <= `CLIP16((E[11]-O[11]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][21] <= `CLIP16((E[10]-O[10]+INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][22] <= `CLIP16((E[9] -O[9] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][23] <= `CLIP16((E[8] -O[8] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][24] <= `CLIP16((E[7] -O[7] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][25] <= `CLIP16((E[6] -O[6] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][26] <= `CLIP16((E[5] -O[5] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][27] <= `CLIP16((E[4] -O[4] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][28] <= `CLIP16((E[3] -O[3] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][29] <= `CLIP16((E[2] -O[2] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][30] <= `CLIP16((E[1] -O[1] +INV_RND_2)>>>INV_SHIFT_2);
-                        out_data[r][31] <= `CLIP16((E[0] -O[0] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][0]  <= `CLIP16((E[0] +O[0] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][1]  <= `CLIP16((E[1] +O[1] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][2]  <= `CLIP16((E[2] +O[2] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][3]  <= `CLIP16((E[3] +O[3] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][4]  <= `CLIP16((E[4] +O[4] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][5]  <= `CLIP16((E[5] +O[5] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][6]  <= `CLIP16((E[6] +O[6] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][7]  <= `CLIP16((E[7] +O[7] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][8]  <= `CLIP16((E[8] +O[8] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][9]  <= `CLIP16((E[9] +O[9] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][10] <= `CLIP16((E[10]+O[10]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][11] <= `CLIP16((E[11]+O[11]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][12] <= `CLIP16((E[12]+O[12]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][13] <= `CLIP16((E[13]+O[13]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][14] <= `CLIP16((E[14]+O[14]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][15] <= `CLIP16((E[15]+O[15]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][16] <= `CLIP16((E[15]-O[15]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][17] <= `CLIP16((E[14]-O[14]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][18] <= `CLIP16((E[13]-O[13]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][19] <= `CLIP16((E[12]-O[12]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][20] <= `CLIP16((E[11]-O[11]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][21] <= `CLIP16((E[10]-O[10]+INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][22] <= `CLIP16((E[9] -O[9] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][23] <= `CLIP16((E[8] -O[8] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][24] <= `CLIP16((E[7] -O[7] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][25] <= `CLIP16((E[6] -O[6] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][26] <= `CLIP16((E[5] -O[5] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][27] <= `CLIP16((E[4] -O[4] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][28] <= `CLIP16((E[3] -O[3] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][29] <= `CLIP16((E[2] -O[2] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][30] <= `CLIP16((E[1] -O[1] +INV_RND_2)>>>INV_SHIFT_2);
+                        out_data_arr[r][31] <= `CLIP16((E[0] -O[0] +INV_RND_2)>>>INV_SHIFT_2);
                     end
                 end
             end
@@ -592,7 +605,7 @@ module dct32 (
     always @(posedge clk) begin
         if (rst_n && out_valid && fwd_inv_n_s1 && !check32_done) begin
             $display("INFO  [dct32] first fwd output [0][0]=%0d [1][0]=%0d",
-                     out_data[0][0], out_data[1][0]);
+                     out_data_arr[0][0], out_data_arr[1][0]);
             check32_done = 1;
         end
     end

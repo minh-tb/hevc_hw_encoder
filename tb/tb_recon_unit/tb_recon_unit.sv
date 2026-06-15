@@ -43,7 +43,6 @@ module tb_recon_unit;
     recon_unit dut (
         .clk(clk),
         .rst_n(rst_n),
-        .transform_skip(transform_skip),
         .comp(comp),
         .pred_valid(pred_valid),
         .pred_ready(pred_ready),

@@ -226,7 +226,6 @@ module range_coder (
             byte_out     <= 8'd0;
             flush_done   <= 1'b0;
         end else begin
-            byte_valid <= 1'b0;   // default deassert
             flush_done <= 1'b0;
 
             // ── Slice init ─────────────────────────────────────────────────
@@ -292,13 +291,22 @@ module range_coder (
             end
 
             S_RENORM: begin
+                // synthesis translate_off
+                $display("Time=%0t: [RANGE_CODER_DEBUG] Inside S_RENORM. bits_left=%0d, range_r=%0d", $time, bits_left, range_r);
+                // synthesis translate_on
                 if (bits_left < 7'd12) begin
+                    // synthesis translate_off
+                    $display("Time=%0t: [RANGE_CODER_DEBUG] bits_left < 12! Setting state to 3", $time);
+                    // synthesis translate_on
                     state     <= S_WRITEOUT_LEAD;
                     if (range_r >= 9'd256)
                         ret_state <= S_READY;
                     else
                         ret_state <= S_RENORM;
                 end else begin
+                    // synthesis translate_off
+                    $display("Time=%0t: [RANGE_CODER_DEBUG] bits_left >= 12! Shifting", $time);
+                    // synthesis translate_on
                     range_r   <= range_r << 1;
                     low_r     <= low_r << 1;
                     bits_left <= bits_left - 7'd1;
@@ -310,33 +318,43 @@ module range_coder (
             end
 
             S_WRITEOUT_LEAD: begin
+                // synthesis translate_off
+                $display("Time=%0t: [RANGE_CODER_DEBUG] Inside S_WRITEOUT_LEAD", $time);
+                // synthesis translate_on
                 shift_val = 6'd24 - bits_left[5:0];
                 lead_byte = (low_r >> shift_val) & 9'h1FF;
                 next_bits = bits_left + 7'd8;
                 
-                bits_left <= next_bits;
-                low_r     <= low_r & (32'hFFFF_FFFF >> next_bits);
-                
                 if (lead_byte == 9'h0FF) begin
+                    bits_left <= next_bits;
+                    low_r     <= low_r & (32'hFFFF_FFFF >> next_bits);
                     num_ff <= num_ff + 16'd1;
                     state  <= ret_state;
                     if (ret_state == S_READY) bin_ready <= 1'b1;
                 end else begin
                     if (num_ff > 0) begin
-                        carry      = lead_byte[8];
-                        byte_valid <= 1'b1;
-                        byte_out   <= buf_byte + {7'd0, carry};
-                        buf_byte   <= lead_byte[7:0];
-                        ff_byte    <= carry ? 8'h00 : 8'hFF;
-                        if (num_ff > 1) begin
-                            state  <= S_WRITEOUT_FF;
-                            num_ff <= num_ff - 16'd1;
-                        end else begin
-                            num_ff <= 16'd1; // The new lead_byte is now the buffered byte
-                            state  <= ret_state;
-                            if (ret_state == S_READY) bin_ready <= 1'b1;
+                        if (!byte_valid) begin
+                            carry      = lead_byte[8];
+                            byte_valid <= 1'b1;
+                            byte_out   <= buf_byte + {7'd0, carry};
+                            buf_byte   <= lead_byte[7:0];
+                            ff_byte    <= carry ? 8'h00 : 8'hFF;
+                        end else if (byte_ready) begin
+                            byte_valid <= 1'b0;
+                            bits_left <= next_bits;
+                            low_r     <= low_r & (32'hFFFF_FFFF >> next_bits);
+                            if (num_ff > 1) begin
+                                state  <= S_WRITEOUT_FF;
+                                num_ff <= num_ff - 16'd1;
+                            end else begin
+                                num_ff <= 16'd1; // The new lead_byte is now the buffered byte
+                                state  <= ret_state;
+                                if (ret_state == S_READY) bin_ready <= 1'b1;
+                            end
                         end
                     end else begin
+                        bits_left <= next_bits;
+                        low_r     <= low_r & (32'hFFFF_FFFF >> next_bits);
                         buf_byte <= lead_byte[7:0];
                         num_ff   <= 16'd1;
                         state    <= ret_state;
@@ -346,83 +364,111 @@ module range_coder (
             end
 
             S_WRITEOUT_FF: begin
-                byte_valid <= 1'b1;
-                byte_out   <= ff_byte;
-                if (num_ff > 1) begin
-                    num_ff <= num_ff - 16'd1;
-                end else begin
-                    num_ff <= 16'd1; // The new lead_byte is now the buffered byte
-                    state  <= ret_state;
-                    if (ret_state == S_READY) bin_ready <= 1'b1;
+                if (!byte_valid) begin
+                    byte_valid <= 1'b1;
+                    byte_out   <= ff_byte;
+                end else if (byte_ready) begin
+                    byte_valid <= 1'b0;
+                    if (num_ff > 1) begin
+                        num_ff <= num_ff - 16'd1;
+                    end else begin
+                        num_ff <= 16'd1; // The new lead_byte is now the buffered byte
+                        state  <= ret_state;
+                        if (ret_state == S_READY) bin_ready <= 1'b1;
+                    end
                 end
             end
 
             S_FLUSH_1: begin
+                // synthesis translate_off
+                $display("Time=%0t: [RANGE_CODER] S_FLUSH_1, num_ff=%0d, bits_left=%0d", $time, num_ff, bits_left);
+                // synthesis translate_on
+
                 shift_val = 6'd32 - bits_left[5:0];
                 carry     = (low_r >> shift_val) & 1'b1;
-                low_r     <= carry ? (low_r - (32'd1 << shift_val)) : low_r;
                 
                 if (num_ff > 0) begin
-                    // Start trailing output sequence
-                    byte_valid <= 1'b1;
-                    byte_out   <= buf_byte + {7'd0, carry};
-                    ff_byte    <= carry ? 8'h00 : 8'hFF;
-                    state      <= S_FLUSH_2;
+                    if (!byte_valid) begin
+                        low_r      <= carry ? (low_r - (32'd1 << shift_val)) : low_r;
+                        byte_valid <= 1'b1;
+                        byte_out   <= buf_byte + {7'd0, carry};
+                        ff_byte    <= carry ? 8'h00 : 8'hFF;
+                    end else if (byte_ready) begin
+                        byte_valid <= 1'b0;
+                        state      <= S_FLUSH_2;
+                    end
                 end else begin
+                    low_r <= carry ? (low_r - (32'd1 << shift_val)) : low_r;
                     state <= S_FLUSH_3;
                 end
             end
 
             S_FLUSH_2: begin
                  if (num_ff > 1) begin
-                    byte_valid <= 1'b1;
-                    byte_out   <= ff_byte;
-                    num_ff     <= num_ff - 16'd1;
+                    if (!byte_valid) begin
+                        byte_valid <= 1'b1;
+                        byte_out   <= ff_byte;
+                    end else if (byte_ready) begin
+                        byte_valid <= 1'b0;
+                        num_ff     <= num_ff - 16'd1;
+                    end
                 end else begin
                     state      <= S_FLUSH_3;
                 end
             end
              S_FLUSH_3: begin
+                // synthesis translate_off
+                $display("Time=%0t: [RANGE_CODER] S_FLUSH_3", $time);
+                // synthesis translate_on
+
                 L = 5'd25 - bits_left[4:0];
                 V = (low_r >> 8) & ((32'd1 << (5'd24 - bits_left[4:0])) - 1);
                 
                 if (L <= 5'd8) begin
-                    P = 5'd8 - L;
-                    final_val = (V << (P + 1)) | (16'd1 << P);
+                    if (!byte_valid) begin
+                        P = 5'd8 - L;
+                        final_val = (V << (P + 1)) | (16'd1 << P);
+                        byte_valid <= 1'b1;
+                        byte_out   <= final_val[7:0];
+                    end else if (byte_ready) begin
+                        byte_valid <= 1'b0;
+                        state      <= S_READY;
+                        range_r    <= 9'd510;
+                        low_r      <= 32'd0;
+                        bits_left  <= 7'd23;
+                        buf_byte   <= 8'hFF;
+                        num_ff     <= 16'd0;
+                        bin_ready  <= 1'b1;
+                        flush_done <= 1'b1;
+                    end
+                end else begin
+                    if (!byte_valid) begin
+                        P = 5'd16 - L;
+                        final_val = (V << (P + 1)) | (16'd1 << P);
+                        byte_valid <= 1'b1;
+                        byte_out   <= final_val[15:8]; // Output first byte
+                        ff_byte    <= final_val[7:0];  // Reuse ff_byte to store second byte
+                    end else if (byte_ready) begin
+                        byte_valid <= 1'b0;
+                        state      <= S_FLUSH_4;
+                    end
+                end
+            end
+            S_FLUSH_4: begin
+                if (!byte_valid) begin
                     byte_valid <= 1'b1;
-                    byte_out   <= final_val[7:0];
-                    
+                    byte_out   <= ff_byte;
+                end else if (byte_ready) begin
+                    byte_valid <= 1'b0;
                     state      <= S_READY;
                     range_r    <= 9'd510;
                     low_r      <= 32'd0;
                     bits_left  <= 7'd23;
                     buf_byte   <= 8'hFF;
                     num_ff     <= 16'd0;
-                    
                     bin_ready  <= 1'b1;
                     flush_done <= 1'b1;
-                end else begin
-                    P = 5'd16 - L;
-                    final_val = (V << (P + 1)) | (16'd1 << P);
-                    byte_valid <= 1'b1;
-                    byte_out   <= final_val[15:8]; // Output first byte
-                    ff_byte    <= final_val[7:0];  // Reuse ff_byte to store second byte
-                    state      <= S_FLUSH_4;
                 end
-            end
-            S_FLUSH_4: begin
-                byte_valid <= 1'b1;
-                byte_out   <= ff_byte;
-                
-                state      <= S_READY;
-                range_r    <= 9'd510;
-                low_r      <= 32'd0;
-                bits_left  <= 7'd23;
-                buf_byte   <= 8'hFF;
-                num_ff     <= 16'd0;
-                
-                bin_ready  <= 1'b1;
-                flush_done <= 1'b1;
             end
             endcase
         end
@@ -442,9 +488,14 @@ module range_coder (
                 $display("ERROR [range_coder] range=%0d < 256 at t=%0t (needs renorm)",
                          range_r, $time);
         end
-        if (bin_valid && !bin_ready)
-            $display("WARN  [range_coder] bin_valid asserted while !bin_ready at t=%0t",
-                     $time);
+    end
+    
+    // synthesis translate_off
+    always @(posedge clk) begin
+        if (state == 3) $display("Time=%0t: [RANGE_CODER_CRITICAL] STATE IS EXACTLY 3!", $time);
+    end
+    always @(posedge clk) begin
+        if (byte_valid && byte_ready) $display("Time=%0t: [RANGE_CODER_OUT] byte=%02x, state=%0d", $time, byte_out, state);
     end
     // synthesis translate_on
 

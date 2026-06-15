@@ -74,6 +74,7 @@ module ctu_raster_scan #(
     output reg          frame_active,   // 1 while scanning a frame
     output reg          frame_done      // pulse when last CTU accepted
 );
+    reg                 frame_wait_last;
 
     //-------------------------------------------------------------------------
     // Frame dimension derivation
@@ -110,6 +111,7 @@ module ctu_raster_scan #(
         if (!rst_n) begin
             ctu_valid      <= 1'b0;
             frame_active   <= 1'b0;
+            frame_wait_last<= 1'b0;
             frame_done     <= 1'b0;
             cur_x          <= 10'd0;
             cur_y          <= 10'd0;
@@ -136,6 +138,7 @@ module ctu_raster_scan #(
                 cur_addr        <= 16'd0;
                 poc             <= frame_poc;
                 slice_type      <= frame_slice_type;
+                $display("Time=%0t: [CTU_RASTER] Frame started. Latching slice_type=%0d", $time, frame_slice_type);
                 qp              <= `QP_DEFAULT;
                 frame_width_px  <= FRAME_WIDTH[13:0];
                 frame_height_px <= FRAME_HEIGHT[13:0];
@@ -151,13 +154,13 @@ module ctu_raster_scan #(
             end else if (frame_active && fire) begin
                 // Current CTU accepted — advance to next
                 if (cur_addr == TOTAL_16 - 16'd1) begin
-                    // Last CTU just accepted → frame complete
-                    frame_active <= 1'b0;
-                    frame_done   <= 1'b1;
-                    ctu_valid    <= 1'b0;
-                    cur_x        <= 10'd0;
-                    cur_y        <= 10'd0;
-                    cur_addr     <= 16'd0;
+                    // Last CTU just accepted → transition to wait for completion
+                    frame_active    <= 1'b0;
+                    frame_wait_last <= 1'b1;
+                    ctu_valid       <= 1'b0;
+                    cur_x           <= 10'd0;
+                    cur_y           <= 10'd0;
+                    cur_addr        <= 16'd0;
                 end else begin
                     // Advance raster position
                     cur_addr <= cur_addr + 16'd1;
@@ -173,6 +176,9 @@ module ctu_raster_scan #(
                     // Output reflects the NEXT CTU (the one now being presented)
                     ctu_valid <= 1'b1;
                 end
+            end else if (frame_wait_last && ctu_ready) begin
+                frame_wait_last <= 1'b0;
+                frame_done <= 1'b1;
             end
 
             // Update output registers to reflect current (cur_x, cur_y)

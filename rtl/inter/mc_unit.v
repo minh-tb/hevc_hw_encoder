@@ -96,8 +96,9 @@ module mc_unit #(
     output reg                         ref_req_valid,
     output reg  [1:0]                  ref_req_comp,   // 0=Y, 1=Cb, 2=Cr
     output reg  [2:0]                  ref_req_slot,
-    output reg  [CU_COORD_W-1:0]       ref_req_x,      // top-left of extended region
-    output reg  [CU_COORD_W-1:0]       ref_req_y,
+    output reg  signed [CU_COORD_W-1:0]       ref_req_x,      // top-left of extended region
+    output reg  signed [CU_COORD_W-1:0]       ref_req_y,
+    input  wire                        ref_req_ready,
     input  wire                        ref_resp_valid,
     // Multiplexed response: luma or chroma extended block
     // Caller packs max(PX_EXT_Y, PX_EXT_C) and module uses appropriate slice
@@ -317,10 +318,13 @@ module mc_unit #(
                 ref_req_slot  <= slot_r;
                 ref_req_x     <= y_fetch_x[CU_COORD_W-1:0];
                 ref_req_y     <= y_fetch_y[CU_COORD_W-1:0];
-                state         <= S_WAIT_Y;
+                if (ref_req_ready) begin
+                    state <= S_WAIT_Y;
+                end
             end
 
             S_WAIT_Y: begin
+                ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     y_filt_ref      <= ref_resp_y_flat;   // latch extended ref
                     y_filt_valid_in <= 1'b1;              // start filter pipeline
@@ -355,10 +359,13 @@ module mc_unit #(
                 ref_req_slot  <= slot_r;
                 ref_req_x     <= c_fetch_x[CU_COORD_W-1:0];
                 ref_req_y     <= c_fetch_y[CU_COORD_W-1:0];
-                state         <= S_WAIT_CB;
+                if (ref_req_ready) begin
+                    state <= S_WAIT_CB;
+                end
             end
 
             S_WAIT_CB: begin
+                ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     cb_filt_ref      <= ref_resp_cb_flat;
                     cb_filt_valid_in <= 1'b1;
@@ -385,10 +392,13 @@ module mc_unit #(
                 ref_req_slot  <= slot_r;
                 ref_req_x     <= c_fetch_x[CU_COORD_W-1:0];
                 ref_req_y     <= c_fetch_y[CU_COORD_W-1:0];
-                state         <= S_WAIT_CR;
+                if (ref_req_ready) begin
+                    state <= S_WAIT_CR;
+                end
             end
 
             S_WAIT_CR: begin
+                ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     cr_filt_ref      <= ref_resp_cr_flat;
                     cr_filt_valid_in <= 1'b1;

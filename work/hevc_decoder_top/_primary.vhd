@@ -1,0 +1,41 @@
+library verilog;
+use verilog.vl_types.all;
+entity hevc_decoder_top is
+    port(
+        clk             : in     vl_logic;
+        rst_n           : in     vl_logic;
+        bs_valid        : in     vl_logic;
+        bs_ready        : out    vl_logic;
+        bs_byte         : in     vl_logic_vector(7 downto 0);
+        bs_last         : in     vl_logic;
+        out_valid       : out    vl_logic;
+        out_ready       : in     vl_logic;
+        out_pixel_y     : out    vl_logic_vector(9 downto 0);
+        out_pixel_u     : out    vl_logic_vector(9 downto 0);
+        out_pixel_v     : out    vl_logic_vector(9 downto 0);
+        out_frame_last  : out    vl_logic;
+        axi_awvalid     : out    vl_logic;
+        axi_awready     : in     vl_logic;
+        axi_awaddr      : out    vl_logic_vector(32 downto 0);
+        axi_awlen       : out    vl_logic_vector(7 downto 0);
+        axi_awsize      : out    vl_logic_vector(2 downto 0);
+        axi_awburst     : out    vl_logic_vector(1 downto 0);
+        axi_wvalid      : out    vl_logic;
+        axi_wready      : in     vl_logic;
+        axi_wdata       : out    vl_logic_vector(255 downto 0);
+        axi_wstrb       : out    vl_logic_vector(31 downto 0);
+        axi_wlast       : out    vl_logic;
+        axi_bvalid      : in     vl_logic;
+        axi_bready      : out    vl_logic;
+        axi_arvalid     : out    vl_logic;
+        axi_arready     : in     vl_logic;
+        axi_araddr      : out    vl_logic_vector(32 downto 0);
+        axi_arlen       : out    vl_logic_vector(7 downto 0);
+        axi_arsize      : out    vl_logic_vector(2 downto 0);
+        axi_arburst     : out    vl_logic_vector(1 downto 0);
+        axi_rvalid      : in     vl_logic;
+        axi_rready      : out    vl_logic;
+        axi_rdata       : in     vl_logic_vector(255 downto 0);
+        axi_rlast       : in     vl_logic
+    );
+end hevc_decoder_top;

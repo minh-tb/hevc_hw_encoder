@@ -32,7 +32,7 @@
 //   Config: QuadtreeTUMaxDepthInter=3, QuadtreeTUMaxDepthIntra=3
 //           QuadtreeTULog2MaxSize=5 (32x32), QuadtreeTULog2MinSize=2 (4x4)
 //   TU split depth relative to PU size:
-//     tu_split_flag comes back from residual coding (rdoq_simple feedback)
+//     tu_split_flag comes back from residual coding feedback
 //     If not split: single TU = PU size (clamped to TU_SIZE_MAX=32)
 //     If split: recurse until TU_SIZE_MIN=4 or max depth reached
 //
@@ -59,14 +59,8 @@ module pu_cu_splitter (
     input  wire [5:0]   cu_y,
     input  wire [6:0]   cu_size,        // 8,16,32,64
     input  wire [1:0]   cu_depth,       // 0..3
-    input  wire         pred_mode,      // PRED_INTRA=1, PRED_INTER=0
     input  wire [2:0]   part_mode,      // PART_2Nx2N..PART_nRx2N
     input  wire         skip_flag,      // merge skip (no residual)
-    input  wire [5:0]   qp,
-    // CTU context passthrough
-    input  wire [15:0]  cu_ctu_addr,
-    input  wire [9:0]   cu_poc,
-    input  wire [1:0]   cu_slice_type,
 
     //-------------------------------------------------------------------------
     // PU output stream → intra_pred_top / me_top
@@ -76,16 +70,6 @@ module pu_cu_splitter (
 
     output reg  [5:0]   pu_x,           // PU top-left in CTU
     output reg  [5:0]   pu_y,
-    output reg  [6:0]   pu_w,           // PU width
-    output reg  [6:0]   pu_h,           // PU height
-    output reg  [1:0]   pu_idx,         // PU index within CU (0..3)
-    output reg          pu_pred_mode,
-    output reg  [2:0]   pu_part_mode,
-    output reg          pu_is_last_in_cu, // last PU of this CU
-    output reg  [5:0]   pu_qp,
-    output reg  [15:0]  pu_ctu_addr,
-    output reg  [9:0]   pu_poc,
-    output reg  [1:0]   pu_slice_type,
 
     //-------------------------------------------------------------------------
     // TU split feedback (from residual coding — does TU need splitting?)
@@ -105,10 +89,7 @@ module pu_cu_splitter (
     output reg  [5:0]   tu_y,
     output reg  [2:0]   tu_size_log2,   // 2=4x4 .. 5=32x32
     output reg  [1:0]   tu_comp,        // 0=Y, 1=Cb, 2=Cr
-    output reg          tu_transform_skip,
-    output reg          tu_is_last_in_cu,
-    output reg  [5:0]   tu_qp,
-    output reg  [15:0]  tu_ctu_addr
+    output reg          tu_is_last_in_cu
 );
 
     //-------------------------------------------------------------------------
@@ -158,30 +139,6 @@ module pu_cu_splitter (
                     px= idx[0] ? H[5:0] : 6'd0;
                     py= idx[1] ? H[5:0] : 6'd0;
                 end
-                3'd4: begin
-                    pw=N;
-                    ph= (idx==2'd0) ? Q[5:0] : TQ[5:0];
-                    px=6'd0;
-                    py= (idx==2'd0) ? 6'd0   : Q[5:0];
-                end
-                3'd5: begin
-                    pw=N;
-                    ph= (idx==2'd0) ? TQ[5:0] : Q[5:0];
-                    px=6'd0;
-                    py= (idx==2'd0) ? 6'd0    : TQ[5:0];
-                end
-                3'd6: begin
-                    ph=N;
-                    pw= (idx==2'd0) ? Q[5:0] : TQ[5:0];
-                    py=6'd0;
-                    px= (idx==2'd0) ? 6'd0   : Q[5:0];
-                end
-                3'd7: begin
-                    ph=N;
-                    pw= (idx==2'd0) ? TQ[5:0] : Q[5:0];
-                    py=6'd0;
-                    px= (idx==2'd0) ? 6'd0    : TQ[5:0];
-                end
                 default: begin pw=N; ph=N; px=6'd0; py=6'd0; end
             endcase
             pu_geom = {px, py, pw, ph};
@@ -195,14 +152,15 @@ module pu_cu_splitter (
     // Use 32-entry stack
     //-------------------------------------------------------------------------
     localparam TU_STACK_DEPTH = 32;
-    localparam TU_STACK_W     = 6 + 6 + 3 + 2;   // 17 bits
+    localparam TU_STACK_W     = 6 + 6 + 3 + 3 + 2;   // 20 bits
 
     reg [TU_STACK_W-1:0] tu_stack [0:TU_STACK_DEPTH-1];
     reg [4:0]             tu_sp;
 
-    wire [5:0] tu_top_x       = tu_stack[tu_sp-1][TU_STACK_W-1:TU_STACK_W-6];
-    wire [5:0] tu_top_y       = tu_stack[tu_sp-1][TU_STACK_W-7:TU_STACK_W-12];
-    wire [2:0] tu_top_log2    = tu_stack[tu_sp-1][TU_STACK_W-13:TU_STACK_W-15];
+    wire [5:0] tu_top_x       = tu_stack[tu_sp-1][19:14];
+    wire [5:0] tu_top_y       = tu_stack[tu_sp-1][13:8];
+    wire [2:0] tu_top_log2    = tu_stack[tu_sp-1][7:5];
+    wire [2:0] tu_top_depth   = tu_stack[tu_sp-1][4:2];
     wire [1:0] tu_top_comp    = tu_stack[tu_sp-1][1:0];
 
     //-------------------------------------------------------------------------
@@ -216,32 +174,26 @@ module pu_cu_splitter (
 
     reg [2:0]  state;
     reg [2:0]  pu_idx_cnt;         // which PU we're currently outputting
-    reg [2:0]  tu_depth_rel;       // TU depth relative to CU (0=CU size)
 
     // Latch current CU
     reg [5:0]  lcu_x, lcu_y;
     reg [6:0]  lcu_size;
     reg [1:0]  lcu_depth;
-    reg        lcu_pred_mode;
     reg [2:0]  lcu_part_mode;
     reg        lcu_skip;
-    reg [5:0]  lcu_qp;
-    reg [15:0] lcu_ctu_addr;
-    reg [9:0]  lcu_poc;
-    reg [1:0]  lcu_slice_type;
     reg [2:0]  lcu_num_pus;
 
     assign cu_ready         = (state == S_IDLE);
     assign tu_split_fb_ready= (state == S_TU_WAIT);
 
     // Max TU depth allowed from config
-    wire [2:0] max_tu_depth = lcu_pred_mode ? 3'd3 : 3'd3;
+    wire [2:0] max_tu_depth = 3'd3;
 
     // TU size log2 from stack
     wire [2:0] tu_cur_log2 = tu_top_log2;
     wire       tu_can_split = (tu_top_comp == 2'd0) && 
                               (tu_cur_log2 > 3'd2) &&
-                              (tu_depth_rel < max_tu_depth);
+                              (tu_top_depth < max_tu_depth);
     wire       tu_must_split= (tu_top_comp == 2'd0) &&
                               (tu_cur_log2 > 3'd5);
 
@@ -251,7 +203,9 @@ module pu_cu_splitter (
     reg [5:0]  cx, cy;
     reg [2:0]  child_log2;
     reg [5:0]  child_half;
+    reg [2:0]  child_depth;
     reg [2:0]  chr_log2;
+    reg [5:0]  chr_x, chr_y;
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -260,7 +214,6 @@ module pu_cu_splitter (
             tu_valid    <= 1'b0;
             pu_idx_cnt  <= 2'd0;
             tu_sp       <= 5'd0;
-            tu_depth_rel<= 3'd0;
             for (ti = 0; ti < TU_STACK_DEPTH; ti = ti + 1)
                 tu_stack[ti] <= {TU_STACK_W{1'b0}};
         end else begin
@@ -273,13 +226,8 @@ module pu_cu_splitter (
                         lcu_y          <= cu_y;
                         lcu_size       <= cu_size;
                         lcu_depth      <= cu_depth;
-                        lcu_pred_mode  <= pred_mode;
                         lcu_part_mode  <= part_mode;
                         lcu_skip       <= skip_flag;
-                        lcu_qp         <= qp;
-                        lcu_ctu_addr   <= cu_ctu_addr;
-                        lcu_poc        <= cu_poc;
-                        lcu_slice_type <= cu_slice_type;
                         lcu_num_pus    <= (part_mode == 3'd0) ? 3'd1 :
                                           (part_mode == 3'd3) ? 3'd4 : 3'd2;
                         pu_idx_cnt     <= 2'd0;
@@ -303,9 +251,17 @@ module pu_cu_splitter (
                                 init_log2 = ($clog2(lcu_size) > 3'd5) ?
                                              3'd5 :
                                              $clog2(lcu_size[6:0]);
-                                tu_stack[0]  <= {lcu_x, lcu_y, init_log2, 2'd0}; // comp=Y
-                                tu_sp        <= 5'd1;
-                                tu_depth_rel <= 3'd0;
+                                $display("Time=%0t: [pu_cu_splitter] S_PU_OUT lcu_size=%0d init_log2=%0d", $time, lcu_size, init_log2);
+                                if (lcu_size == 7'd64) begin
+                                    tu_stack[3] <= {lcu_x,                 lcu_y,                 3'd5, 3'd1, 2'd0}; // TL
+                                    tu_stack[2] <= {lcu_x + 6'd32, lcu_y,                 3'd5, 3'd1, 2'd0}; // TR
+                                    tu_stack[1] <= {lcu_x,                 lcu_y + 6'd32, 3'd5, 3'd1, 2'd0}; // BL
+                                    tu_stack[0] <= {lcu_x + 6'd32, lcu_y + 6'd32, 3'd5, 3'd1, 2'd0}; // BR
+                                    tu_sp       <= 5'd4;
+                                end else begin
+                                    tu_stack[0]  <= {lcu_x, lcu_y, init_log2, 3'd0, 2'd0}; // comp=Y
+                                    tu_sp        <= 5'd1;
+                                end
                                 state        <= S_TU_EVAL;
                             end
                         end else begin
@@ -313,16 +269,6 @@ module pu_cu_splitter (
                             pu_valid      <= 1'b1;
                             pu_x          <= lcu_x + geom[25:20];
                             pu_y          <= lcu_y + geom[19:14];
-                            pu_w          <= geom[13:7];
-                            pu_h          <= geom[6:0];
-                            pu_idx        <= pu_idx_cnt[1:0];
-                            pu_pred_mode  <= lcu_pred_mode;
-                            pu_part_mode  <= lcu_part_mode;
-                            pu_qp         <= lcu_qp;
-                            pu_ctu_addr   <= lcu_ctu_addr;
-                            pu_poc        <= lcu_poc;
-                            pu_slice_type <= lcu_slice_type;
-                            pu_is_last_in_cu <= (pu_idx_cnt == lcu_num_pus - 3'd1);
                             
                             pu_idx_cnt <= pu_idx_cnt + 2'd1;
                         end
@@ -343,18 +289,18 @@ module pu_cu_splitter (
                     end else if (tu_must_split) begin
                         // Force split — TU too large
                         tu_sp        <= tu_sp - 5'd1;
-                        tu_depth_rel <= tu_depth_rel + 3'd1;
                         // Push 4 children
                         begin
                             cx         = tu_top_x;
                             cy         = tu_top_y;
                             child_log2 = tu_top_log2 - 3'd1;
                             child_half = 6'd1 << child_log2;
+                            child_depth = tu_top_depth + 3'd1;
 
-                            tu_stack[tu_sp-1+3] <= {cx,            cy,            child_log2, tu_top_comp}; // TL placed at top (Child 0)
-                            tu_stack[tu_sp-1+2] <= {cx+child_half, cy,            child_log2, tu_top_comp}; // TR (Child 1)
-                            tu_stack[tu_sp-1+1] <= {cx,            cy+child_half, child_log2, tu_top_comp}; // BL (Child 2)
-                            tu_stack[tu_sp-1]   <= {cx+child_half, cy+child_half, child_log2, tu_top_comp}; // BR (Child 3)
+                            tu_stack[tu_sp-1+3] <= {cx,            cy,            child_log2, child_depth, tu_top_comp}; // TL placed at top (Child 0)
+                            tu_stack[tu_sp-1+2] <= {cx+child_half, cy,            child_log2, child_depth, tu_top_comp}; // TR (Child 1)
+                            tu_stack[tu_sp-1+1] <= {cx,            cy+child_half, child_log2, child_depth, tu_top_comp}; // BL (Child 2)
+                            tu_stack[tu_sp-1]   <= {cx+child_half, cy+child_half, child_log2, child_depth, tu_top_comp}; // BR (Child 3)
                             tu_sp <= tu_sp + 5'd3;
                         end
                     end else if (!tu_can_split) begin
@@ -371,20 +317,21 @@ module pu_cu_splitter (
                 // S_TU_WAIT: waiting for split feedback
                 //--------------------------------------------------------------
                 S_TU_WAIT: begin
+                    $display("Time=%0t: [pu_cu_splitter] S_TU_WAIT valid=%0b flag=%0b", $time, tu_split_fb_valid, tu_split_fb_flag);
                     if (tu_split_fb_valid) begin
                         if (tu_split_fb_flag) begin
                             // Split this TU
-                            tu_depth_rel <= tu_depth_rel + 3'd1;
                             begin
                                 cx         = tu_top_x;
                                 cy         = tu_top_y;
                                 child_log2 = tu_top_log2 - 3'd1;
                                 child_half = 6'd1 << child_log2;
+                                child_depth = tu_top_depth + 3'd1;
 
-                                tu_stack[tu_sp-1+3] <= {cx,            cy,            child_log2, tu_top_comp}; // TL placed at top (Child 0)
-                                tu_stack[tu_sp-1+2] <= {cx+child_half, cy,            child_log2, tu_top_comp}; // TR (Child 1)
-                                tu_stack[tu_sp-1+1] <= {cx,            cy+child_half, child_log2, tu_top_comp}; // BL (Child 2)
-                                tu_stack[tu_sp-1]   <= {cx+child_half, cy+child_half, child_log2, tu_top_comp}; // BR (Child 3)
+                                tu_stack[tu_sp-1+3] <= {cx,            cy,            child_log2, child_depth, tu_top_comp}; // TL placed at top (Child 0)
+                                tu_stack[tu_sp-1+2] <= {cx+child_half, cy,            child_log2, child_depth, tu_top_comp}; // TR (Child 1)
+                                tu_stack[tu_sp-1+1] <= {cx,            cy+child_half, child_log2, child_depth, tu_top_comp}; // BL (Child 2)
+                                tu_stack[tu_sp-1]   <= {cx+child_half, cy+child_half, child_log2, child_depth, tu_top_comp}; // BR (Child 3)
                                 tu_sp <= tu_sp + 5'd3;
                             end
                             state <= S_TU_EVAL;
@@ -400,15 +347,13 @@ module pu_cu_splitter (
                 //--------------------------------------------------------------
                 S_TU_OUT: begin
                     if (!tu_valid || tu_ready) begin
+$display("Time=%0t: [pu_cu_splitter] S_TU_OUT outputting tu_size_log2=%0d tu_comp=%0d", $time, tu_top_log2, tu_top_comp);
                         // Output this TU
                         tu_valid          <= 1'b1;
                         tu_x              <= tu_top_x;
                         tu_y              <= tu_top_y;
                         tu_size_log2      <= tu_top_log2;
                         tu_comp           <= tu_top_comp;
-                        tu_transform_skip <= 1'b0;  // mode_decision sets this
-                        tu_qp             <= lcu_qp;
-                        tu_ctu_addr       <= lcu_ctu_addr;
 
                         // Pop this TU
                         tu_sp <= tu_sp - 5'd1;
@@ -416,15 +361,22 @@ module pu_cu_splitter (
                         // After luma TU, push chroma TUs at same position
                         // HM: Y first, then Cb, then Cr per TU node
                         if (tu_top_comp == 2'd0) begin
-                            // Push Cr then Cb (Cb processed first due to stack)
-                            // Chroma TU is half luma size in each dimension (4:2:0)
-                            // but same log2 if already at minimum
-                            chr_log2 = (tu_top_log2 > 3'd2) ?
-                                        (tu_top_log2 - 3'd1) : tu_top_log2;
+                            // Only push Chroma if:
+                            // 1) Size is > 4x4 (log2 > 2)
+                            // 2) Size is 4x4 AND it is the last 4x4 in the 8x8 parent (x[2]==1 && y[2]==1)
+                            if (tu_top_log2 > 3'd2 || (tu_top_x[2] == 1'b1 && tu_top_y[2] == 1'b1)) begin
+                                
+                                // Chroma size is half luma, minimum 4x4
+                                chr_log2 = (tu_top_log2 > 3'd2) ? (tu_top_log2 - 3'd1) : 3'd2;
+                                
+                                // If we are at the 4th 4x4 block, Chroma coordinates must point to the 8x8 base
+                                chr_x = (tu_top_log2 == 3'd2) ? (tu_top_x & ~6'd4) : tu_top_x;
+                                chr_y = (tu_top_log2 == 3'd2) ? (tu_top_y & ~6'd4) : tu_top_y;
 
-                            tu_stack[tu_sp]     <= {tu_top_x, tu_top_y, chr_log2, 2'd1}; // Cb placed at top
-                            tu_stack[tu_sp-1]   <= {tu_top_x, tu_top_y, chr_log2, 2'd2}; // Cr placed at bottom
-                            tu_sp <= tu_sp + 5'd1;  // net: -1 + 2 = +1
+                                tu_stack[tu_sp]     <= {chr_x, chr_y, chr_log2, tu_top_depth, 2'd1}; // Cb
+                                tu_stack[tu_sp-1]   <= {chr_x, chr_y, chr_log2, tu_top_depth, 2'd2}; // Cr
+                                tu_sp <= tu_sp + 5'd1;  // net: -1 + 2 = +1
+                            end
                         end
 
                         // is_last: after pop and possible chroma push
@@ -447,10 +399,6 @@ module pu_cu_splitter (
             if (tu_sp >= TU_STACK_DEPTH - 2)
                 $display("ERROR [pu_cu_splitter] TU stack overflow sp=%0d time=%0t",
                          tu_sp, $time);
-            if (cu_valid && cu_ready && !(1) &&
-                (part_mode >= 3'd4))
-                $display("WARN  [pu_cu_splitter] AMP mode %0d but AMP_ENABLE=0",
-                         part_mode);
         end
     end
     // synthesis translate_on

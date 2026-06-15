@@ -68,7 +68,7 @@
 `include "parameter_pkg.vh"
 
 module ctx_model_store #(
-    parameter N_CTX    = 154,   // HEVC Main profile context count
+    parameter N_CTX    = 165,   // HEVC Main profile context count
     parameter CTX_W    = 7,     // state bits: [6:1]=pStateIdx, [0]=valMPS
     parameter CTX_ID_W = 8      // ceil(log2(N_CTX))
 )(
@@ -139,9 +139,9 @@ module ctx_model_store #(
         input [1:0]          stype;
         input [CTX_ID_W-1:0] ctx;
         // Declare separate arrays for each slice type
-        reg [7:0] iv_I [0:153];
-        reg [7:0] iv_P [0:153];
-        reg [7:0] iv_B [0:153];
+        reg [7:0] iv_I [0:164];
+        reg [7:0] iv_P [0:164];
+        reg [7:0] iv_B [0:164];
         integer   k;
         begin
             // -- I-slice initValues --
@@ -299,6 +299,17 @@ module ctx_model_store #(
             iv_I[151]=8'd154;
             iv_I[152]=8'd154;
             iv_I[153]=8'd154;
+            iv_I[154]=8'd153;
+            iv_I[155]=8'd138;
+            iv_I[156]=8'd138;
+            iv_I[157]=8'd154;
+            iv_I[158]=8'd111;
+            iv_I[159]=8'd141;
+            iv_I[160]=8'd94;
+            iv_I[161]=8'd138;
+            iv_I[162]=8'd182;
+            iv_I[163]=8'd154;
+            iv_I[164]=8'd154;
 
             // -- P-slice initValues --
             iv_P[0]=8'd107;
@@ -455,6 +466,17 @@ module ctx_model_store #(
             iv_P[151]=8'd154;
             iv_P[152]=8'd154;
             iv_P[153]=8'd154;
+            iv_P[154]=8'd124;
+            iv_P[155]=8'd138;
+            iv_P[156]=8'd94;
+            iv_P[157]=8'd79;
+            iv_P[158]=8'd153;
+            iv_P[159]=8'd111;
+            iv_P[160]=8'd149;
+            iv_P[161]=8'd107;
+            iv_P[162]=8'd167;
+            iv_P[163]=8'd154;
+            iv_P[164]=8'd154;
 
             // -- B-slice initValues --
             iv_B[0]=8'd107;
@@ -611,12 +633,22 @@ module ctx_model_store #(
             iv_B[151]=8'd154;
             iv_B[152]=8'd154;
             iv_B[153]=8'd154;
+            iv_B[154]=8'd224;
+            iv_B[155]=8'd167;
+            iv_B[156]=8'd122;
+            iv_B[157]=8'd79;
+            iv_B[158]=8'd153;
+            iv_B[159]=8'd111;
+            iv_B[160]=8'd149;
+            iv_B[161]=8'd92;
+            iv_B[162]=8'd167;
+            iv_B[163]=8'd154;
+            iv_B[164]=8'd154;
 
             case (stype)
                 2'd0: get_init_val = iv_B[ctx];
                 2'd1: get_init_val = iv_P[ctx];
                 default: get_init_val = iv_I[ctx];
-                default:  get_init_val = iv_I[ctx];
             endcase
         end
     endfunction
@@ -676,18 +708,28 @@ module ctx_model_store #(
                 ctx_mem[i] <= {CTX_W{1'b0}};
         end else begin
             if (slice_init && !init_busy) begin
+                // synthesis translate_off
+                $display("Time=%0t: [CTX_MODEL_STORE] slice_init received, starting init! slice_type=%0d, qp=%0d", $time, slice_type, qp_in);
+                // synthesis translate_on
                 init_stype_r <= slice_type;
                 init_qp_r    <= qp_in;
                 init_cnt     <= {CTX_ID_W{1'b0}};
                 init_busy    <= 1'b1;
             end else if (init_busy) begin
+                // synthesis translate_off
+                $display("Time=%0t: [CTX_MODEL_STORE] Init ctx=%0d, init_val=%0d, state=%b", $time, init_cnt, get_init_val(init_stype_r, init_cnt), compute_state(get_init_val(init_stype_r, init_cnt), init_qp_r));
+                // synthesis translate_on
                 ctx_mem[init_cnt] <= compute_state(
                                          get_init_val(init_stype_r, init_cnt),
                                          init_qp_r);
-                if (init_cnt == (N_CTX - 1))
+                if (init_cnt == (N_CTX - 1)) begin
                     init_busy <= 1'b0;
-                else
+                    // synthesis translate_off
+                    $display("Time=%0t: [CTX_MODEL_STORE] Initialization complete!", $time);
+                    // synthesis translate_on
+                end else begin
                     init_cnt  <= init_cnt + {{(CTX_ID_W-1){1'b0}}, 1'b1};
+                end
             end else if (upd_valid) begin
                 ps  = ctx_mem[upd_ctx_id][CTX_W-1:1];  // pStateIdx
                 mps = ctx_mem[upd_ctx_id][0];          // valMPS

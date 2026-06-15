@@ -271,7 +271,7 @@ module intra_angular (
                     if (needs_ext) begin
                         for (k = 0; k < 32; k = k + 1) begin
                             if (k < N) begin
-                                refExt[N_w - 8'd1 - k[7:0]] <= refSide[ ((((k + 1) * cur_inv_angle + 128) >> 8) > N_w) ? N_w : (((k + 1) * cur_inv_angle + 128) >> 8) ];
+                                refExt[N_w - 8'd1 - k[7:0]] <= refSide[ ((((k + 1) * cur_inv_angle + 128) >> 8) > N2_w) ? N2_w : (((k + 1) * cur_inv_angle + 128) >> 8) ];
                             end
                         end
                     end

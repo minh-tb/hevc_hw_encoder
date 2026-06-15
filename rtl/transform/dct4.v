@@ -47,16 +47,28 @@ module dct4 (
     // Input handshake
     input  wire         in_valid,
     output wire         in_ready,
-    // 4x4 block, row-major, signed 16-bit coefficients
-    // in_data[row][col]
-    input  wire signed [`COEFF_WIDTH-1:0] in_data [0:3][0:3],
+    // 4x4 block, row-major, flattened signed 16-bit coefficients
+    input  wire [255:0] in_data,
 
     // Output handshake
     output reg          out_valid,
     input  wire         out_ready,
-    // out_data[row][col]
-    output reg  signed [`COEFF_WIDTH-1:0] out_data [0:3][0:3]
+    // 4x4 block, row-major, flattened signed 16-bit coefficients
+    output wire [255:0] out_data
 );
+
+    wire signed [`COEFF_WIDTH-1:0] in_data_arr [0:3][0:3];
+    reg  signed [`COEFF_WIDTH-1:0] out_data_arr [0:3][0:3];
+
+    genvar gi, gj;
+    generate
+        for (gi = 0; gi < 4; gi = gi + 1) begin : gen_flat
+            for (gj = 0; gj < 4; gj = gj + 1) begin : gen_flat_col
+                assign in_data_arr[gi][gj] = in_data[(gi*4+gj)*16 +: 16];
+                assign out_data[(gi*4+gj)*16 +: 16] = out_data_arr[gi][gj];
+            end
+        end
+    endgenerate
 
     //-------------------------------------------------------------------------
     // DCT-4 basis coefficients (from HEVC spec Table 9-15)
@@ -89,12 +101,17 @@ module dct4 (
     localparam signed [31:0] CLIP_MAX =  32767;
     localparam signed [31:0] CLIP_MIN = -32768;
 
+    `define CLIP16(x) \
+        (((x) > CLIP_MAX) ? CLIP_MAX[`COEFF_WIDTH-1:0] : \
+         ((x) < CLIP_MIN) ? CLIP_MIN[`COEFF_WIDTH-1:0] : \
+         (x))
+
     //-------------------------------------------------------------------------
     // Internal extended-width wires for butterfly intermediate values
     // partialButterfly4 uses 32-bit intermediates in HM (Int = int32_t)
     //-------------------------------------------------------------------------
     // Stage 1 (row pass) output — intermediate before shift
-    reg signed [31:0] stage1 [0:3][0:3];
+    reg signed [`COEFF_WIDTH-1:0] stage1 [0:3][0:3];
     reg                                stage1_valid;
     reg                                stage1_fwd_inv_n;
 
@@ -130,10 +147,10 @@ module dct4 (
             stage1_valid <= 1'b0;
             stage1_fwd_inv_n <= 1'b0;
             for (r = 0; r < 4; r = r + 1) begin
-                stage1[r][0] <= 32'sd0;
-                stage1[r][1] <= 32'sd0;
-                stage1[r][2] <= 32'sd0;
-                stage1[r][3] <= 32'sd0;
+                stage1[r][0] <= {`COEFF_WIDTH{1'b0}};
+                stage1[r][1] <= {`COEFF_WIDTH{1'b0}};
+                stage1[r][2] <= {`COEFF_WIDTH{1'b0}};
+                stage1[r][3] <= {`COEFF_WIDTH{1'b0}};
             end
         end else if (!stall) begin
             stage1_valid <= in_valid;
@@ -152,18 +169,18 @@ module dct4 (
                         // O[0] = in[r][0] - in[r][3]
                         // O[1] = in[r][1] - in[r][2]
                         reg signed [31:0] E0, E1, O0, O1;
-                        E0 = in_data[r][0] + in_data[r][3];
-                        E1 = in_data[r][1] + in_data[r][2];
-                        O0 = in_data[r][0] - in_data[r][3];
-                        O1 = in_data[r][1] - in_data[r][2];
+                    E0 = in_data_arr[r][0] + in_data_arr[r][3];
+                    E1 = in_data_arr[r][1] + in_data_arr[r][2];
+                    O0 = in_data_arr[r][0] - in_data_arr[r][3];
+                    O1 = in_data_arr[r][1] - in_data_arr[r][2];
 
                         // Butterfly multiply + round + shift
                         // Output stored at transposed position [col][row]
                         // so stage2 col pass sees rows correctly
-                        stage1[r][0] <= (A*E0 + A*E1 + FWD_RND_1) >>> FWD_SHIFT_1;
-                        stage1[r][1] <= (B*O0 + C*O1 + FWD_RND_1) >>> FWD_SHIFT_1;
-                        stage1[r][2] <= (A*E0 - A*E1 + FWD_RND_1) >>> FWD_SHIFT_1;
-                        stage1[r][3] <= (C*O0 - B*O1 + FWD_RND_1) >>> FWD_SHIFT_1;
+                        stage1[r][0] <= `CLIP16((A*E0 + A*E1 + FWD_RND_1) >>> FWD_SHIFT_1);
+                        stage1[r][1] <= `CLIP16((B*O0 + C*O1 + FWD_RND_1) >>> FWD_SHIFT_1);
+                        stage1[r][2] <= `CLIP16((A*E0 - A*E1 + FWD_RND_1) >>> FWD_SHIFT_1);
+                        stage1[r][3] <= `CLIP16((C*O0 - B*O1 + FWD_RND_1) >>> FWD_SHIFT_1);
                     end
 
                 end else begin
@@ -176,20 +193,20 @@ module dct4 (
                         reg signed [31:0] E0, E1, O0, O1;
                         reg signed [31:0] dst0, dst1, dst2, dst3;
                         // E = reconstructed even, O = reconstructed odd
-                        E0 = (A * in_data[0][r] + A * in_data[2][r]);
-                        E1 = (A * in_data[0][r] - A * in_data[2][r]);
-                        O0 = (B * in_data[1][r] + C * in_data[3][r]);
-                        O1 = (C * in_data[1][r] - B * in_data[3][r]);
+                    E0 = (A * in_data_arr[0][r] + A * in_data_arr[2][r]);
+                    E1 = (A * in_data_arr[0][r] - A * in_data_arr[2][r]);
+                    O0 = (B * in_data_arr[1][r] + C * in_data_arr[3][r]);
+                    O1 = (C * in_data_arr[1][r] - B * in_data_arr[3][r]);
 
                         dst0 = (E0 + O0 + INV_RND_1) >>> INV_SHIFT_1;
                         dst1 = (E1 + O1 + INV_RND_1) >>> INV_SHIFT_1;
                         dst2 = (E1 - O1 + INV_RND_1) >>> INV_SHIFT_1;
                         dst3 = (E0 - O0 + INV_RND_1) >>> INV_SHIFT_1;
 
-                        stage1[r][0] <= (dst0 > CLIP_MAX) ? CLIP_MAX : ((dst0 < CLIP_MIN) ? CLIP_MIN : dst0);
-                        stage1[r][1] <= (dst1 > CLIP_MAX) ? CLIP_MAX : ((dst1 < CLIP_MIN) ? CLIP_MIN : dst1);
-                        stage1[r][2] <= (dst2 > CLIP_MAX) ? CLIP_MAX : ((dst2 < CLIP_MIN) ? CLIP_MIN : dst2);
-                        stage1[r][3] <= (dst3 > CLIP_MAX) ? CLIP_MAX : ((dst3 < CLIP_MIN) ? CLIP_MIN : dst3);
+                        stage1[r][0] <= `CLIP16(dst0);
+                        stage1[r][1] <= `CLIP16(dst1);
+                        stage1[r][2] <= `CLIP16(dst2);
+                        stage1[r][3] <= `CLIP16(dst3);
                     end
                 end
             end
@@ -207,7 +224,7 @@ module dct4 (
             out_valid <= 1'b0;
             for (r = 0; r < 4; r = r + 1)
                 for (c = 0; c < 4; c = c + 1)
-                    out_data[r][c] <= {`COEFF_WIDTH{1'b0}};
+                    out_data_arr[r][c] <= {`COEFF_WIDTH{1'b0}};
         end else if (!out_ready) begin
             // Hold output until consumer accepts
             out_valid <= out_valid;
@@ -228,10 +245,10 @@ module dct4 (
                         O0 = stage1[0][c] - stage1[3][c];
                         O1 = stage1[1][c] - stage1[2][c];
 
-                        out_data[0][c] <= (A*E0 + A*E1 + FWD_RND_2) >>> FWD_SHIFT_2;
-                        out_data[1][c] <= (B*O0 + C*O1 + FWD_RND_2) >>> FWD_SHIFT_2;
-                        out_data[2][c] <= (A*E0 - A*E1 + FWD_RND_2) >>> FWD_SHIFT_2;
-                        out_data[3][c] <= (C*O0 - B*O1 + FWD_RND_2) >>> FWD_SHIFT_2;
+                    out_data_arr[0][c] <= `CLIP16((A*E0 + A*E1 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[1][c] <= `CLIP16((B*O0 + C*O1 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[2][c] <= `CLIP16((A*E0 - A*E1 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[3][c] <= `CLIP16((C*O0 - B*O1 + FWD_RND_2) >>> FWD_SHIFT_2);
                     end
 
                 end else begin
@@ -255,10 +272,10 @@ module dct4 (
                         dst3 = (E0 - O0 + INV_RND_2) >>> INV_SHIFT_2;
 
                         // Clip to signed 16-bit range
-                        out_data[r][0] <= (dst0 > CLIP_MAX) ? CLIP_MAX[`COEFF_WIDTH-1:0] : ((dst0 < CLIP_MIN) ? CLIP_MIN[`COEFF_WIDTH-1:0] : dst0[`COEFF_WIDTH-1:0]);
-                        out_data[r][1] <= (dst1 > CLIP_MAX) ? CLIP_MAX[`COEFF_WIDTH-1:0] : ((dst1 < CLIP_MIN) ? CLIP_MIN[`COEFF_WIDTH-1:0] : dst1[`COEFF_WIDTH-1:0]);
-                        out_data[r][2] <= (dst2 > CLIP_MAX) ? CLIP_MAX[`COEFF_WIDTH-1:0] : ((dst2 < CLIP_MIN) ? CLIP_MIN[`COEFF_WIDTH-1:0] : dst2[`COEFF_WIDTH-1:0]);
-                        out_data[r][3] <= (dst3 > CLIP_MAX) ? CLIP_MAX[`COEFF_WIDTH-1:0] : ((dst3 < CLIP_MIN) ? CLIP_MIN[`COEFF_WIDTH-1:0] : dst3[`COEFF_WIDTH-1:0]);
+                    out_data_arr[r][0] <= `CLIP16(dst0);
+                    out_data_arr[r][1] <= `CLIP16(dst1);
+                    out_data_arr[r][2] <= `CLIP16(dst2);
+                    out_data_arr[r][3] <= `CLIP16(dst3);
                     end
                 end
             end
@@ -282,10 +299,13 @@ module dct4 (
     always @(posedge clk) begin
         if (rst_n && out_valid && fwd_inv_n && !check_done) begin
             $display("INFO  [dct4] first forward output [0][0]=%0d [1][0]=%0d",
-                     out_data[0][0], out_data[1][0]);
+                     out_data_arr[0][0], out_data_arr[1][0]);
             check_done = 1;
         end
     end
     // synthesis translate_on
+
+    // Clean up internal macro
+    `undef CLIP16
 
 endmodule

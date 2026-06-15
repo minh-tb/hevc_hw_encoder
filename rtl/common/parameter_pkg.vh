@@ -79,7 +79,7 @@
 //-----------------------------------------------------------------------------
 // 5. QUANTIZATION
 //    Config: QP=32, MaxDeltaQP=0, MaxCuDQPDepth=0,
-//            RDOQ=1, RDOQTS=1, IntraQPOffset=-3
+//            RDOQ=0, RDOQTS=0, IntraQPOffset=-3
 //            LambdaFromQpEnable=1
 //-----------------------------------------------------------------------------
 `define QP_DEFAULT          32          // Default quantization parameter
@@ -102,16 +102,16 @@
 
 //-----------------------------------------------------------------------------
 // 6. MOTION ESTIMATION
-//    Config: FastSearch=1 (TZ), SearchRange=384, ASR=1,
-//            MinSearchWindow=96, BipredSearchRange=4,
-//            HadamardME=1, FEN=1, FDM=1
+//    Config: FastSearch=1 (TZ), SearchRange=64, ASR=1,
+//            MinSearchWindow=64, BipredSearchRange=2,
+//            HadamardME=0, FEN=1, FDM=1
 //-----------------------------------------------------------------------------
-`define ME_SEARCH_RANGE     384         // Integer pel search range
-`define ME_SEARCH_LOG2      9           // ceil(log2(384+1))
-`define ME_MV_WIDTH         10          // MV component bits (signed, covers ±384)
-`define ME_BIPRED_RANGE     4           // Bi-pred refinement range
-`define ME_MIN_WIN          96          // ASR minimum window
-`define ME_USE_HADAMARD     1           // SATD cost for fractional ME
+`define ME_SEARCH_RANGE     64          // Integer pel search range
+`define ME_SEARCH_LOG2      7           // ceil(log2(64+1))
+`define ME_MV_WIDTH         8           // MV component bits (signed, covers ±64)
+`define ME_BIPRED_RANGE     2           // Bi-pred refinement range
+`define ME_MIN_WIN          64          // ASR minimum window
+`define ME_USE_HADAMARD     0           // SATD cost for fractional ME
 `define ME_FEN              1           // Fast encoder decision
 `define ME_FDM              1           // Fast merge RD
 `define MV_FRAC_BITS        2           // Quarter-pel: 2 fractional bits
@@ -157,12 +157,12 @@
 
 //-----------------------------------------------------------------------------
 // 10. CODING TOOLS
-//    Config: AMP=1, TransformSkip=1, TransformSkipFast=1
+//    Config: AMP=0, TransformSkip=0, TransformSkipFast=0
 //            SAOLcuBoundary=0
 //-----------------------------------------------------------------------------
-`define AMP_ENABLE          1           // Asymmetric motion partitions
-`define TRANSFORM_SKIP      1           // Transform skip flag allowed
-`define TRANSFORM_SKIP_FAST 1
+`define AMP_ENABLE          0           // Asymmetric motion partitions
+`define TRANSFORM_SKIP      0           // Transform skip flag allowed
+`define TRANSFORM_SKIP_FAST 0
 
 //-----------------------------------------------------------------------------
 // 11. IN-LOOP DISABLED FEATURES

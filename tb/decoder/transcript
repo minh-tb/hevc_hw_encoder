@@ -1,0 +1,57 @@
+# vsim -do {run -all; quit} -c work.tb_hevc_decoder_top 
+# Loading sv_std.std
+# Loading work.tb_hevc_decoder_top
+# Loading work.hevc_decoder_top
+# Loading work.nal_parser
+# Loading work.cabac_dec_top
+# Loading work.inv_quant
+# Loading work.dct_top
+# Loading work.dct4
+# Loading work.dct8
+# Loading work.dct16
+# Loading work.dct32
+# Loading work.prediction_unit
+# Loading work.recon_unit
+# Loading work.decoder_inloop_filters
+# Loading work.frame_store
+# ** Warning: (vsim-3017) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Too few port connections. Expected 60, found 43.
+# 
+#         Region: /tb_hevc_decoder_top/dut/u_dpb
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_req_valid'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_req_ready'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_slot'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_x'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_y'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_blk_w'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_blk_h'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_comp'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_resp_valid'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_resp_ready'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_resp_pixel'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'rd_resp_last'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'cache_valid'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'cache_pixel'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'cache_x'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'cache_y'.
+# 
+# ** Warning: (vsim-3722) d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_decoder_top.v(301): [TFMPC] - Missing connection for port 'cache_comp'.
+# 
+# run -all 
+# Decoder Elaboration Successful!
+# ** Note: $finish    : d:/UIT_Doc/hevc_hw_encoder/tb/decoder/tb_hevc_decoder_top.v(20)
+#    Time: 120 ns  Iteration: 0  Instance: /tb_hevc_decoder_top

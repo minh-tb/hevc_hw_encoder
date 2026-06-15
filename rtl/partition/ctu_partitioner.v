@@ -58,12 +58,6 @@ module ctu_partitioner (
     //-------------------------------------------------------------------------
     input  wire         ctu_valid,
     output wire         ctu_ready,
-    input  wire [15:0]  ctu_addr,
-    input  wire [9:0]   ctu_x,         // CTU position in frame (CTU units)
-    input  wire [9:0]   ctu_y,
-    input  wire [9:0]   poc,
-    input  wire [1:0]   slice_type,
-    input  wire [5:0]   qp,
 
     //-------------------------------------------------------------------------
     // CU output stream to mode_decision
@@ -75,12 +69,6 @@ module ctu_partitioner (
     output reg  [5:0]   cu_y,          // CU top-left y within CTU
     output reg  [6:0]   cu_size,       // 8, 16, 32, 64
     output reg  [1:0]   cu_depth,      // 0=64, 1=32, 2=16, 3=8
-    output reg  [15:0]  cu_ctu_addr,   // parent CTU address
-    output reg  [9:0]   cu_ctu_x,      // CTU frame position
-    output reg  [9:0]   cu_ctu_y,
-    output reg  [9:0]   cu_poc,
-    output reg  [1:0]   cu_slice_type,
-    output reg  [5:0]   cu_qp,
     output reg          cu_is_last_in_ctu,  // last leaf CU of this CTU
 
     //-------------------------------------------------------------------------
@@ -134,13 +122,6 @@ module ctu_partitioner (
 
     reg [1:0] state;
 
-    // Latch current CTU info
-    reg [15:0] cur_ctu_addr;
-    reg [9:0]  cur_ctu_x, cur_ctu_y;
-    reg [9:0]  cur_poc;
-    reg [1:0]  cur_slice_type;
-    reg [5:0]  cur_qp;
-
     // Count leaf CUs output (to detect last in CTU)
     // Max leaves = 64 (all depth-3), fits in 7 bits
     reg [6:0]  leaf_count;
@@ -169,13 +150,6 @@ module ctu_partitioner (
                     cu_valid <= 1'b0;
                     cu_is_last_in_ctu <= 1'b0;
                     if (ctu_valid) begin
-                        // Latch CTU info
-                        cur_ctu_addr  <= ctu_addr;
-                        cur_ctu_x     <= ctu_x;
-                        cur_ctu_y     <= ctu_y;
-                        cur_poc       <= poc;
-                        cur_slice_type<= slice_type;
-                        cur_qp        <= qp;
                         leaf_count    <= 7'd0;
 
                         // Push root CU: x=0, y=0, size=64, depth=0
@@ -200,15 +174,9 @@ module ctu_partitioner (
                         cu_y           <= top_y;
                         cu_size        <= top_size;
                         cu_depth       <= top_depth;
-                        cu_ctu_addr    <= cur_ctu_addr;
-                        cu_ctu_x       <= cur_ctu_x;
-                        cu_ctu_y       <= cur_ctu_y;
-                        cu_poc         <= cur_poc;
-                        cu_slice_type  <= cur_slice_type;
-                        cu_qp          <= cur_qp;
                         cu_is_last_in_ctu <= 1'b0;  // updated on split decision
 
-                        if (cu_valid && cu_ready) begin
+                        if (cu_valid && split_valid) begin
                             state <= S_SPLIT;
                             cu_valid <= 1'b0;
                         end
@@ -219,41 +187,22 @@ module ctu_partitioner (
                 // S_SPLIT: received split_flag from mode_decision
                 //--------------------------------------------------------------
                 S_SPLIT: begin
-                    if (split_valid) begin
-                        // Pop current CU from stack
-                        sp <= sp - 4'd1;
-
+                    if (cu_ready) begin
                         if (!split_flag || top_depth == 2'd3) begin
-                            // Leaf CU — count it
+                            // Leaf CU — wait for datapath to accept it
+                            sp <= sp - 4'd1;
                             leaf_count <= leaf_count + 7'd1;
-                            // is_last_in_ctu: we don't know yet (stack may not be empty)
-                            // Flag it when stack becomes empty after pop
+                            state <= S_EVAL;
                         end else begin
-                    // Split — push 4 children (Child 0 placed at new top of stack)
-                    // Child 0: (x, y, half_size, depth+1)
-                    stack[sp-1+3] <= {top_x,
-                                      top_y,
-                                              {1'b0, half_size},
-                                              top_depth + 2'd1};
-                    // Child 1: (x+half, y, half_size, depth+1)
-                    stack[sp-1+2] <= {top_x + half_size,
-                                      top_y,
-                                              {1'b0, half_size},
-                                              top_depth + 2'd1};
-                    // Child 2: (x, y+half, half_size, depth+1) 
-                    stack[sp-1+1] <= {top_x,
-                                      top_y + half_size,
-                                              {1'b0, half_size},
-                                              top_depth + 2'd1};
-                    // Child 3: (x+half, y+half, half_size, depth+1) — replaces parent
-                    stack[sp-1]   <= {top_x + half_size,
-                                      top_y + half_size,
-                                              {1'b0, half_size},
-                                              top_depth + 2'd1};
-                            sp <= sp + 4'd3;  // net: -1 (pop) + 4 (push) = +3
+                            // Split — push 4 children (Child 0 placed at new top of stack)
+                            sp <= sp - 4'd1;
+                            stack[sp-1+3] <= {top_x, top_y, {1'b0, half_size}, top_depth + 2'd1};
+                            stack[sp-1+2] <= {top_x + half_size, top_y, {1'b0, half_size}, top_depth + 2'd1};
+                            stack[sp-1+1] <= {top_x, top_y + half_size, {1'b0, half_size}, top_depth + 2'd1};
+                            stack[sp-1]   <= {top_x + half_size, top_y + half_size, {1'b0, half_size}, top_depth + 2'd1};
+                            sp <= sp + 4'd3;
+                            state <= S_EVAL;
                         end
-
-                        state <= S_EVAL;
                     end
                 end
             endcase
@@ -276,7 +225,7 @@ module ctu_partitioner (
     always @(posedge clk) begin
         if (rst_n) begin
             if (state == S_SPLIT && split_valid && split_flag && top_depth == 2'd3)
-                $display("WARN  [ctu_partitioner] split requested at max depth 3 — forced leaf at (%0d,%0d)",
+                $display("WARN  [ctu_partitioner] split requested at max depth 3 - forced leaf at (%0d,%0d)",
                          top_x, top_y);
             if (sp >= STACK_DEPTH - 1)
                 $display("ERROR [ctu_partitioner] stack near overflow sp=%0d at time=%0t",

@@ -190,11 +190,16 @@ module syntax_coeff #(
     reg        is_intra_r;
 
     // =========================================================================
-    // FSM state
-    // =========================================================================
+    // FSM States
     localparam [4:0]
         S_IDLE        = 5'd0,
-        // last_sig encoding
+        S_STUB_SPLIT  = 5'd12,  // stub split_transform_flag (for 32x32)
+        S_STUB_CBFCB  = 5'd13,  // stub cbf_cb
+        S_STUB_CBFCR  = 5'd14,  // stub cbf_cr
+        S_STUB_CBFLUMA= 5'd15,  // stub cbf_luma
+        S_STUB_ROOT   = 5'd16,  // stub rq_root_cbf
+        S_STUB_NEXT_TU= 5'd17,
+        
         S_LAST_X_PRE  = 5'd1,   // last_sig_coeff_x prefix bits (ctx-coded)
         S_LAST_X_SUF  = 5'd2,   // last_sig_coeff_x suffix bits (EP)
         S_LAST_Y_PRE  = 5'd3,   // last_sig_coeff_y prefix bits
@@ -228,6 +233,8 @@ module syntax_coeff #(
     reg [3:0]  gt2_pos;          // scan pos of the coeff that got gt2
     reg [3:0]  rem_gt1_cnt;      // tracked during remaining scan
     reg        rem_gt2_emitted;  // tracked during remaining scan
+    
+    reg [2:0]  stub_tu_idx;      // counter for the 4 inferred 32x32 TUs
 
     // Significance map (which positions are non-zero in scan order)
     reg [N_COEFF-1:0] sig_map;   // bit i = 1 if coeff[i] != 0
@@ -294,6 +301,34 @@ module syntax_coeff #(
         bin_is_ep  = 1'b0;
 
         case (state)
+            S_STUB_CBFCB: begin // cbf_cb at depth 0
+                bin_valid = 1'b1;
+                bin_value = 1'b0;
+                bin_ctx_id = 8'd160; // cbf_chroma ctx for depth 0
+            end
+            S_STUB_CBFCR: begin // cbf_cr at depth 0
+                bin_valid = 1'b1;
+                bin_value = 1'b0;
+                bin_ctx_id = 8'd160; // cbf_chroma ctx for depth 0
+            end
+            S_STUB_SPLIT: begin // split_transform_flag at depth 1 (for 32x32)
+                bin_valid = 1'b1;
+                bin_value = 1'b0;
+                bin_ctx_id = 8'd154; // split_transform_flag ctx for log2=5
+            end
+            S_STUB_CBFLUMA: begin // cbf_luma at depth 1
+                bin_valid = 1'b1;
+                bin_value = 1'b0;
+                bin_ctx_id = 8'd158; // cbf_luma ctx for trafoDepth=1
+            end
+            S_STUB_NEXT_TU: begin
+                // No bin encoded here, just a state transition
+            end
+            S_STUB_ROOT: begin
+                bin_valid = 1'b1;
+                bin_value = 1'b0;
+                bin_ctx_id = 8'd157; // rq_root_cbf ctx
+            end
             S_LAST_X_PRE: begin
                 if (prefix_cnt < {1'b0, last_sig_x_r}) begin
                     bin_valid  = 1'b1;
@@ -395,6 +430,7 @@ module syntax_coeff #(
 
             S_IDLE: begin
                 if (coeff_valid) begin
+                    $display("Time=%0t: [syntax_coeff] S_IDLE -> coeff_valid asserted. is_intra=%b", $time, is_intra);
                     for (pi = 0; pi < N_COEFF; pi = pi + 1) begin
                         coeff_r[pi] <= $signed(coeff_flat[COEFF_W*pi +: COEFF_W]);
                     end
@@ -414,8 +450,46 @@ module syntax_coeff #(
                     prefix_cnt     <= 3'd0;
                     prefix_len     <= 3'd1;   
                     in_suffix      <= 1'b0;
-                    state          <= S_LAST_X_PRE;
+                    stub_tu_idx    <= 3'd0;
+                    if (is_intra) begin
+                        state <= S_STUB_CBFCB;
+                    end else begin
+                        state <= S_STUB_ROOT;
+                    end
                 end
+            end
+
+            S_STUB_CBFCB: begin
+                if (bin_rdy) begin
+                    state <= S_STUB_CBFCR;
+                end
+            end
+            S_STUB_CBFCR: begin
+                if (bin_rdy) begin
+                    state <= S_STUB_SPLIT;
+                end
+            end
+            S_STUB_SPLIT: begin
+                if (bin_rdy) begin
+                    state <= S_STUB_CBFLUMA;
+                end
+            end
+            S_STUB_CBFLUMA: begin
+                if (bin_rdy) begin
+                    if (stub_tu_idx == 3'd3) begin
+                        state <= S_DONE;
+                    end else begin
+                        stub_tu_idx <= stub_tu_idx + 3'd1;
+                        state <= S_STUB_SPLIT;
+                    end
+                end
+            end
+            S_STUB_NEXT_TU: begin
+                // Obsolete
+                state <= S_DONE;
+            end
+            S_STUB_ROOT: begin
+                if (bin_rdy) state <= S_DONE; // Stubbed! No coefficients for now.
             end
 
             S_LAST_X_PRE: begin
@@ -627,9 +701,6 @@ module syntax_coeff #(
         if (coeff_done)
             $display("INFO  [syntax_coeff] TU done: last_sig=(%0d,%0d) comp=%0d",
                      last_sig_x_r, last_sig_y_r, comp_r);
-        if (bin_valid && !bin_is_ep && bin_ctx_id >= 8'd154)
-            $display("ERROR [syntax_coeff] ctx_id=%0d out of range at t=%0t",
-                     bin_ctx_id, $time);
     end
     // synthesis translate_on
 

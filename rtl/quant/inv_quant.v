@@ -55,9 +55,9 @@ module inv_quant (
     input  wire         rst_n,
 
     input  wire [5:0]   qp,
+    input  wire [1:0]   tu_comp,            // 0=Y, 1=Cb, 2=Cr
     input  wire [2:0]   tu_size_log2,       // unused for IQ (no TU size factor)
                                              // kept for interface symmetry
-    input  wire         transform_skip,
 
     // Input quantized level stream
     input  wire         in_valid,
@@ -73,6 +73,35 @@ module inv_quant (
     output reg  [9:0]   out_scan_idx,
     output reg          out_last
 );
+
+    //-------------------------------------------------------------------------
+    // HEVC Table 8-9 Chroma QP Mapping
+    //-------------------------------------------------------------------------
+    function automatic [5:0] chroma_qp_map;
+        input [5:0] qp_y;
+        begin
+            if (qp_y < 30) chroma_qp_map = qp_y;
+            else if (qp_y == 30) chroma_qp_map = 29;
+            else if (qp_y == 31) chroma_qp_map = 30;
+            else if (qp_y == 32) chroma_qp_map = 31;
+            else if (qp_y == 33) chroma_qp_map = 32;
+            else if (qp_y == 34) chroma_qp_map = 33;
+            else if (qp_y == 35) chroma_qp_map = 33;
+            else if (qp_y == 36) chroma_qp_map = 34;
+            else if (qp_y == 37) chroma_qp_map = 34;
+            else if (qp_y == 38) chroma_qp_map = 35;
+            else if (qp_y == 39) chroma_qp_map = 35;
+            else if (qp_y == 40) chroma_qp_map = 36;
+            else if (qp_y == 41) chroma_qp_map = 36;
+            else if (qp_y == 42) chroma_qp_map = 37;
+            else if (qp_y == 43) chroma_qp_map = 37;
+            else if (qp_y == 44) chroma_qp_map = 37;
+            else if (qp_y == 45) chroma_qp_map = 38;
+            else if (qp_y == 46) chroma_qp_map = 38;
+            else if (qp_y == 47) chroma_qp_map = 38;
+            else chroma_qp_map = 39;
+        end
+    endfunction
 
     //-------------------------------------------------------------------------
     // g_invQuantScales — HM TComTrQuant.cpp
@@ -93,23 +122,25 @@ module inv_quant (
     //-------------------------------------------------------------------------
     // QP decomposition
     //-------------------------------------------------------------------------
-    wire [2:0] qp_mod6 = (qp >= 48) ? (qp - 48) :
-                          (qp >= 42) ? (qp - 42) :
-                          (qp >= 36) ? (qp - 36) :
-                          (qp >= 30) ? (qp - 30) :
-                          (qp >= 24) ? (qp - 24) :
-                          (qp >= 18) ? (qp - 18) :
-                          (qp >= 12) ? (qp - 12) :
-                          (qp >=  6) ? (qp -  6) : qp[2:0];
+    wire [5:0] actual_qp = (tu_comp == 0) ? qp : chroma_qp_map(qp);
 
-    wire [3:0] qp_div6  = (qp >= 48) ? 4'd8 :
-                           (qp >= 42) ? 4'd7 :
-                           (qp >= 36) ? 4'd6 :
-                           (qp >= 30) ? 4'd5 :
-                           (qp >= 24) ? 4'd4 :
-                           (qp >= 18) ? 4'd3 :
-                           (qp >= 12) ? 4'd2 :
-                           (qp >=  6) ? 4'd1 : 4'd0;
+    wire [2:0] qp_mod6 = (actual_qp >= 48) ? (actual_qp - 48) :
+                          (actual_qp >= 42) ? (actual_qp - 42) :
+                          (actual_qp >= 36) ? (actual_qp - 36) :
+                          (actual_qp >= 30) ? (actual_qp - 30) :
+                          (actual_qp >= 24) ? (actual_qp - 24) :
+                          (actual_qp >= 18) ? (actual_qp - 18) :
+                          (actual_qp >= 12) ? (actual_qp - 12) :
+                          (actual_qp >=  6) ? (actual_qp -  6) : actual_qp[2:0];
+
+    wire [3:0] qp_div6  = (actual_qp >= 48) ? 4'd8 :
+                           (actual_qp >= 42) ? 4'd7 :
+                           (actual_qp >= 36) ? 4'd6 :
+                           (actual_qp >= 30) ? 4'd5 :
+                           (actual_qp >= 24) ? 4'd4 :
+                           (actual_qp >= 18) ? 4'd3 :
+                           (actual_qp >= 12) ? 4'd2 :
+                           (actual_qp >=  6) ? 4'd1 : 4'd0;
 
     wire [6:0] IQS = inv_quant_scale(qp_mod6);
 
@@ -124,9 +155,7 @@ module inv_quant (
 
     wire [4:0] cQP_per = qp_div6 + BIT_DEPTH_ADJ[4:0];
     
-    wire signed [6:0] iTransformShift = MAX_TR_DYNAMIC_RANGE - `BIT_DEPTH - {4'b0, tu_size_log2};
-    
-    wire signed [6:0] shift_full = $signed(IQUANT_SHIFT) - $signed({2'b0, cQP_per}) - iTransformShift;
+    wire signed [6:0] shift_full = $signed(IQUANT_SHIFT) - $signed({2'b0, cQP_per});
 
     wire        do_right_shift = (shift_full > 0);
     wire [4:0]  right_shift    = do_right_shift ? shift_full[4:0] : 5'd0;

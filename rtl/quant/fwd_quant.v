@@ -28,17 +28,11 @@
 //         = 6 + QP/6 + tu_size_log2
 //   For QP=32, tu_size_log2=2 (4x4):
 //     qbits = 6 + 5 + 2 = 13
-//
-// RDOQ (config: RDOQ=1):
-//   Full trellis RDOQ is expensive hardware.
-//   Implement simplified RDOQ: sign-data hiding (SDH) + level rounding only.
-//   Full trellis skipped per elimination list (fast path first).
-//
 // Config:
 //   QP             = 32  (fixed, MaxDeltaQP=0)
 //   ScalingList    = 0   (flat matrix → constant MF per QP)
-//   RDOQ           = 1   (simplified — level rounding optimisation)
-//   RDOQTS         = 1   (transform skip: pass-through when ts_flag)
+//   RDOQ           = 0   (disabled per config)
+//   RDOQTS         = 0   (transform skip: pass-through when ts_flag)
 //   IntraQPOffset  = -3  (applied at slice level before this unit)
 //
 // Pipeline:
@@ -62,7 +56,6 @@ module fwd_quant (
     // TU context
     input  wire [2:0]   tu_size_log2,           // 2=4x4 .. 5=32x32
     input  wire         is_intra,               // 1=intra slice (affects deadzone)
-    input  wire         transform_skip,         // 1=skip transform (RDOQTS path)
 
     // Input coefficient stream (post-DCT, serial)
     input  wire         in_valid,
@@ -204,43 +197,9 @@ module fwd_quant (
         level_signed[`COEFF_WIDTH-1:0];
 
     //-------------------------------------------------------------------------
-    // Transform skip path (RDOQTS=1)
-    // When transform_skip=1: no transform was applied, coeff = residual pixel
-    // Quantization still applies but with fixed qbits (no log2(N) factor)
-    // HM uses same iTransformShift for TS (residual is scaled upstream)
-    // Note: ts_qbits == qbits here; the TS difference is upstream
-    // (no DCT applied so residual values differ, not the qbits formula)
-    //-------------------------------------------------------------------------
-    wire [4:0] ts_qbits = QUANT_SHIFT[4:0] + cQP_per;
-
-    wire [26:0] ts_offset_base = (27'd1 << (ts_qbits - 5'd1));
-    
-    wire [34:0] ts_offset_intra_full = {8'b0, ts_offset_base} * 35'd171;
-    wire [26:0] ts_offset_intra = ts_offset_intra_full[34:8];
-
-    wire [34:0] ts_offset_inter_full = {8'b0, ts_offset_base} * 35'd85;
-    wire [26:0] ts_offset_inter = ts_offset_inter_full[34:8];
-
-    wire [26:0] ts_offset  = is_intra ? ts_offset_intra : ts_offset_inter;
-
-    wire [32:0] ts_product = {17'b0, coeff_abs} * {16'b0, MF};
-    wire [33:0] ts_sum     = {1'b0, ts_product} + {7'b0, ts_offset};
-    wire [33:0] ts_level_u = ts_sum >> ts_qbits;
-
-    wire signed [34:0] ts_level_signed =
-        coeff_sign ? (-$signed({1'b0, ts_level_u})) :
-                      $signed({1'b0, ts_level_u});
-
-    wire signed [`COEFF_WIDTH-1:0] ts_level_clipped =
-        (ts_level_signed >  32767) ?  16'sd32767 :
-        (ts_level_signed < -32768) ? -16'sd32768 :
-        ts_level_signed[`COEFF_WIDTH-1:0];
-
-    //-------------------------------------------------------------------------
     // Final level select
     //-------------------------------------------------------------------------
-    wire signed [`COEFF_WIDTH-1:0] final_level =
-        transform_skip ? ts_level_clipped : level_clipped;
+    wire signed [`COEFF_WIDTH-1:0] final_level = level_clipped;
 
     //-------------------------------------------------------------------------
     // CBF tracking — asserted if any non-zero level in this TU

@@ -45,7 +45,7 @@ module clk_gate (
     // FPGA: simple AND — synthesis tool converts to flip-flop CE inputs
     // (* keep *) prevents AND from being merged into other logic
     //-------------------------------------------------------------------------
-    (* keep = "true" *)
+    // (* keep = "true" *) // Removed for Icarus Verilog compatibility
     assign clk_out = clk_in & (enable | test_en);
 
     //-------------------------------------------------------------------------

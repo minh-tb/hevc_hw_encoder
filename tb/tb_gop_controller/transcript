@@ -1,0 +1,25 @@
+# vsim -do {run -all; quit} -c tb_gop_controller 
+# Loading sv_std.std
+# Loading work.tb_gop_controller
+# Loading work.gop_controller
+# run -all 
+# ENCODING FRAME: POC = 0 | Type = I | TempID = 0 | L0 Cnt = 0 | L1 Cnt = 0
+# ENCODING FRAME: POC = 16 | Type = B | TempID = 1 | L0 Cnt = 2 | L1 Cnt = 2
+# ENCODING FRAME: POC = 8 | Type = B | TempID = 1 | L0 Cnt = 2 | L1 Cnt = 3
+# ENCODING FRAME: POC = 4 | Type = B | TempID = 4 | L0 Cnt = 2 | L1 Cnt = 4
+# ENCODING FRAME: POC = 2 | Type = B | TempID = 5 | L0 Cnt = 2 | L1 Cnt = 5
+# ENCODING FRAME: POC = 1 | Type = B | TempID = 6 | L0 Cnt = 2 | L1 Cnt = 5
+# ENCODING FRAME: POC = 3 | Type = B | TempID = 6 | L0 Cnt = 2 | L1 Cnt = 5
+# ENCODING FRAME: POC = 6 | Type = B | TempID = 5 | L0 Cnt = 2 | L1 Cnt = 4
+# ENCODING FRAME: POC = 5 | Type = B | TempID = 6 | L0 Cnt = 2 | L1 Cnt = 5
+# ENCODING FRAME: POC = 7 | Type = B | TempID = 6 | L0 Cnt = 2 | L1 Cnt = 4
+# ENCODING FRAME: POC = 12 | Type = B | TempID = 4 | L0 Cnt = 2 | L1 Cnt = 3
+# ENCODING FRAME: POC = 10 | Type = B | TempID = 5 | L0 Cnt = 2 | L1 Cnt = 4
+# ENCODING FRAME: POC = 9 | Type = B | TempID = 6 | L0 Cnt = 2 | L1 Cnt = 5
+# ENCODING FRAME: POC = 11 | Type = B | TempID = 6 | L0 Cnt = 2 | L1 Cnt = 4
+# ENCODING FRAME: POC = 14 | Type = B | TempID = 5 | L0 Cnt = 2 | L1 Cnt = 3
+# ENCODING FRAME: POC = 13 | Type = B | TempID = 6 | L0 Cnt = 2 | L1 Cnt = 4
+# ENCODING FRAME: POC = 15 | Type = B | TempID = 6 | L0 Cnt = 2 | L1 Cnt = 4
+# All frames encoded successfully.
+# ** Note: $finish    : d:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_gop_controller.v(99)
+#    Time: 2655 ns  Iteration: 0  Instance: /tb_gop_controller

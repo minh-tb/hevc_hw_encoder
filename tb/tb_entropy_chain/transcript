@@ -1,0 +1,78 @@
+# vsim -do {run -all; quit} -c tb_entropy_chain 
+# Loading sv_std.std
+# Loading work.tb_entropy_chain
+# Loading work.cabac_enc_top
+# Loading work.ctx_model_store
+# Loading work.range_coder
+# Loading work.bin_encoder
+# Loading work.syntax_cu
+# Loading work.syntax_pred
+# Loading work.syntax_coeff
+# run -all 
+# INFO  [ctx_model_store] N_CTX=154 CTX_W=7 init_cycles=154
+# INFO  [bin_encoder] CTX_ID_W=8
+# INFO  [syntax_cu] CTX_ID_W=8
+# ** Warning: (vsim-3534) [FOFIR] - Failed to open file "d:/UIT_Doc/hevc_hw_encoder/verif/expected/flat_field_qp32.bin" for reading.
+# 
+# No such file or directory. (errno = ENOENT)    : tb_entropy_chain.sv(105)
+#    Time: 0 ps  Iteration: 0  Instance: /tb_entropy_chain
+# [TESTBENCH] No golden reference file found. Running in standalone mode.
+# 
+# ==================================================
+#    STARTING FULL ENTROPY CHAIN INTEGRATION TEST
+# ==================================================
+# 
+# [SEQ] 1. Initializing Slice Contexts...
+# [SEQ] 2. Encoding Intra CU Syntax...
+# TRACE [bin_encoder] bin=0 ctx=0 ps=21 vmps=0 at t=1605000
+# INFO  [syntax_cu] CU done: depth=0 split=0 skip=0 merge=0 pred_intra=1 part=0
+# [SEQ] 3. Encoding Transform Coefficients...
+# TRACE [bin_encoder] bin=0 ctx=0 ps=4 vmps=1 at t=1645000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1655000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1655000
+# TRACE [bin_encoder] bin=1 ctx=29 ps=4 vmps=1 at t=1665000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1675000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1675000
+# TRACE [bin_encoder] bin=0 ctx=38 ps=2 vmps=1 at t=1685000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1695000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1695000
+# TRACE [bin_encoder] bin=1 ctx=39 ps=0 vmps=1 at t=1705000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1715000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1715000
+# TRACE [bin_encoder] bin=1 ctx=68 ps=10 vmps=1 at t=1725000
+# TRACE [bin_encoder] bin=0 ctx=67 ps=11 vmps=0 at t=1735000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1745000
+# TRACE [bin_encoder] bin=1 ctx=111 ps=12 vmps=0 at t=1755000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1765000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1765000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1775000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1775000
+# TRACE [bin_encoder] bin=1 ctx=111 ps=41 vmps=0 at t=1785000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1795000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1795000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1805000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1805000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1815000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1815000
+# WARN  [range_coder] bin_valid asserted while !bin_ready at t=1825000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1825000
+# TRACE [bin_encoder] bin=1 ctx=112 ps=31 vmps=0 at t=1835000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1845000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1855000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1865000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1875000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1885000
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=1995000
+# [CABAC OUT] Byte 1: 0xa2
+# WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out (backpressure stall) at t=2085000
+# [CABAC OUT] Byte 2: 0x1e
+# INFO  [syntax_coeff] TU done: last_sig=(0,1) comp=0
+# [SEQ] 4. Flushing Range Coder...
+# [CABAC OUT] Byte 3: 0x3b
+# INFO [cabac_enc_top] flush done — slice bitstream complete
+# [CABAC OUT] Byte 4: 0xf6
+# 
+# >>> TEST COMPLETE. Wrote 4 bytes. <<<
+# Break in Module tb_entropy_chain at tb_entropy_chain.sv line 237
+# Stopped at tb_entropy_chain.sv line 237 
+#  quit 

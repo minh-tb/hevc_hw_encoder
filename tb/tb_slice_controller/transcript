@@ -1,0 +1,25 @@
+# vsim -do {run -all; quit} -c tb_slice_controller 
+# Loading sv_std.std
+# Loading work.tb_slice_controller
+# Loading work.slice_controller
+# run -all 
+# 
+# === TEST 1: I-Frame CRA (POC=0) ===
+# --- NAL START: Type=21, TempID=0 ---
+#     [NAL Writer] RBSP Byte: 0xac
+#     [NAL Writer] RBSP Byte: 0x02
+# >>> CTU FRAME SCAN STARTED <<<
+# <<< CTU FRAME SCAN DONE <<<
+# --- NAL END ---
+# 
+# === TEST 2: B-Frame (POC=16) ===
+# --- NAL START: Type=1, TempID=0 ---
+#     [NAL Writer] RBSP Byte: 0xe2
+#     [NAL Writer] RBSP Byte: 0x10
+# >>> CTU FRAME SCAN STARTED <<<
+# <<< CTU FRAME SCAN DONE <<<
+# --- NAL END ---
+# 
+# All tests passed!
+# ** Note: $finish    : d:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_slice_controller.v(117)
+#    Time: 485 ns  Iteration: 0  Instance: /tb_slice_controller

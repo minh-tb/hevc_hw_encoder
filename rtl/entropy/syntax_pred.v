@@ -67,6 +67,13 @@ module syntax_pred #(
     input  wire [1:0]            cu_depth,     // for inter_dir ctx selection
     input  wire [1:0]            inter_dir,    // 0=L0, 1=L1, 2=Bi (B-slice)
 
+    // Intra prediction (when cu_pred_intra == 1)
+    input  wire                  cu_pred_intra,
+    input  wire                  prev_intra_luma_pred_flag,
+    input  wire [1:0]            mpm_idx,
+    input  wire [4:0]            rem_intra_luma_pred_mode,
+    input  wire [2:0]            intra_chroma_pred_mode,
+
     // L0 prediction
     input  wire [2:0]            ref_idx_l0,   // reference frame index (0..MAX_REF-1)
     input  wire                  mvp_flag_l0,  // AMVP candidate index (0 or 1)
@@ -137,7 +144,14 @@ module syntax_pred #(
         S_MVD1_Y_SIGN  = 5'd25,
         // L1 MVP flag (Now after MVD)
         S_MVP1         = 5'd26,
-        S_DONE         = 5'd27;
+        
+        // Intra Prediction
+        S_INTRA_PREV   = 5'd27,
+        S_INTRA_MPM    = 5'd28,
+        S_INTRA_REM    = 5'd29,
+        S_INTRA_CHROMA = 5'd30,
+        
+        S_DONE         = 5'd31;
 
 
     reg [4:0] state;
@@ -173,6 +187,11 @@ module syntax_pred #(
     reg        mvp_l0_r, mvp_l1_r;
     reg        is_b_r;
     reg [1:0]  depth_r;
+    reg        pred_intra_r;
+    reg        prev_intra_r;
+    reg [1:0]  mpm_idx_r;
+    reg [4:0]  rem_intra_r;
+    reg [2:0]  chroma_mode_r;
 
     // =========================================================================
     // Helper: compute inter_dir context
@@ -252,6 +271,32 @@ module syntax_pred #(
                 bin_value  = (abs_mvd_l0_y > 1);
                 bin_ctx_id = CTX_MVD_GT1;
             end
+            S_INTRA_PREV: begin // prev_intra_luma_pred_flag
+                bin_valid  = 1'b1;
+                bin_value  = 1'b1; // say 1
+                bin_ctx_id = 8'd14; // prev_intra_luma_pred_flag ctx
+            end
+            S_INTRA_MPM: begin
+                bin_valid = 1'b1;
+                bin_value = (eg_symbol == 0) ? 1'b0 : (eg_symbol == 1) ? 1'b1 : mpm_idx_r[0]; // Wait, eg_symbol used as step!
+                bin_is_ep = 1'b1;
+            end
+            S_INTRA_REM: begin
+                bin_valid = 1'b1;
+                bin_value = rem_intra_r[4 - eg_symbol]; // eg_symbol used as bit index
+                bin_is_ep = 1'b1;
+            end
+            S_INTRA_CHROMA: begin
+                bin_valid = 1'b1;
+                if (eg_symbol == 0) begin
+                    bin_value = (chroma_mode_r != 4);
+                    bin_ctx_id = 8'd16; // intra_chroma_pred_mode ctx
+                end else begin
+                    bin_value = chroma_mode_r[2 - eg_symbol];
+                    bin_is_ep = 1'b1;
+                end
+            end
+
             S_MVD0_Y_EG: begin
                 if (!eg_in_suffix) begin
                     bin_valid = 1'b1;
@@ -405,24 +450,32 @@ module syntax_pred #(
             // ── IDLE ────────────────────────────────────────────────────────
             S_IDLE: begin
                 if (pred_valid) begin
-                    // Latch all inputs
-                    inter_dir_r <= inter_dir;
-                    ref_l0_r    <= ref_idx_l0;
-                    ref_l1_r    <= ref_idx_l1;
-                    mvp_l0_r    <= mvp_flag_l0;
-                    mvp_l1_r    <= mvp_flag_l1;
-                    is_b_r      <= slice_is_b;
-                    depth_r     <= cu_depth;
-                    // Compute absolute values and signs
-                    abs_mvd_l0_x <= mvd_l0_x[MVD_W-1] ? -mvd_l0_x : mvd_l0_x;
-                    abs_mvd_l0_y <= mvd_l0_y[MVD_W-1] ? -mvd_l0_y : mvd_l0_y;
-                    abs_mvd_l1_x <= mvd_l1_x[MVD_W-1] ? -mvd_l1_x : mvd_l1_x;
-                    abs_mvd_l1_y <= mvd_l1_y[MVD_W-1] ? -mvd_l1_y : mvd_l1_y;
-                    sign_mvd_l0_x <= mvd_l0_x[MVD_W-1];
-                    sign_mvd_l0_y <= mvd_l0_y[MVD_W-1];
-                    sign_mvd_l1_x <= mvd_l1_x[MVD_W-1];
-                    sign_mvd_l1_y <= mvd_l1_y[MVD_W-1];
-                    state <= slice_is_b ? S_INTER_DIR : S_REF0_BIN0;
+                    pred_intra_r <= cu_pred_intra;
+                    if (cu_pred_intra) begin
+                        prev_intra_r  <= prev_intra_luma_pred_flag;
+                        mpm_idx_r     <= mpm_idx;
+                        rem_intra_r   <= rem_intra_luma_pred_mode;
+                        chroma_mode_r <= intra_chroma_pred_mode;
+                        state         <= S_INTRA_PREV;
+                    end else begin
+                        inter_dir_r <= inter_dir;
+                        ref_l0_r    <= ref_idx_l0;
+                        ref_l1_r    <= ref_idx_l1;
+                        mvp_l0_r    <= mvp_flag_l0;
+                        mvp_l1_r    <= mvp_flag_l1;
+                        is_b_r      <= slice_is_b;
+                        depth_r     <= cu_depth;
+                        // Compute absolute values and signs
+                        abs_mvd_l0_x <= mvd_l0_x[MVD_W-1] ? -mvd_l0_x : mvd_l0_x;
+                        abs_mvd_l0_y <= mvd_l0_y[MVD_W-1] ? -mvd_l0_y : mvd_l0_y;
+                        abs_mvd_l1_x <= mvd_l1_x[MVD_W-1] ? -mvd_l1_x : mvd_l1_x;
+                        abs_mvd_l1_y <= mvd_l1_y[MVD_W-1] ? -mvd_l1_y : mvd_l1_y;
+                        sign_mvd_l0_x <= mvd_l0_x[MVD_W-1];
+                        sign_mvd_l0_y <= mvd_l0_y[MVD_W-1];
+                        sign_mvd_l1_x <= mvd_l1_x[MVD_W-1];
+                        sign_mvd_l1_y <= mvd_l1_y[MVD_W-1];
+                        state <= slice_is_b ? S_INTER_DIR : S_REF0_BIN0;
+                    end
                 end
             end
 
@@ -529,6 +582,20 @@ module syntax_pred #(
                         if (eg_suffix_cnt == 5'd1 || eg_suffix_cnt == 5'd0) begin
                             state <= S_MVD0_Y_SIGN;
                         end
+                    end
+                end
+            end
+
+            S_IDLE: begin
+                if (pred_valid) begin
+                    $display("Time=%0t: [syntax_pred] S_IDLE -> starting. is_b=%b, intra=%b", $time, slice_is_b, pred_intra_r);
+                    pred_done <= 1'b0;
+                    if (pred_intra_r) begin
+                        state <= S_INTRA_PREV;
+                    end else if (slice_is_b) begin
+                        state <= S_INTER_DIR;
+                    end else begin
+                        state <= S_REF0_BIN0;
                     end
                 end
             end
@@ -646,8 +713,62 @@ module syntax_pred #(
                 if (bin_rdy) state <= S_DONE;
             end
 
+            S_INTRA_PREV: begin
+                if (bin_rdy) begin
+                    if (prev_intra_r) begin
+                        eg_symbol <= 0; // use eg_symbol as step counter
+                        state <= S_INTRA_MPM;
+                    end else begin
+                        eg_symbol <= 0;
+                        state <= S_INTRA_REM;
+                    end
+                end
+            end
+            
+            S_INTRA_MPM: begin
+                if (bin_rdy) begin
+                    if (eg_symbol == 0 && mpm_idx_r == 0) begin
+                        eg_symbol <= 0;
+                        state <= S_INTRA_CHROMA;
+                    end else if (eg_symbol == 0) begin
+                        eg_symbol <= 1; // move to second bin
+                    end else begin
+                        eg_symbol <= 0;
+                        state <= S_INTRA_CHROMA;
+                    end
+                end
+            end
+            
+            S_INTRA_REM: begin
+                if (bin_rdy) begin
+                    if (eg_symbol == 4) begin
+                        eg_symbol <= 0;
+                        state <= S_INTRA_CHROMA;
+                    end else begin
+                        eg_symbol <= eg_symbol + 1;
+                    end
+                end
+            end
+            
+            S_INTRA_CHROMA: begin
+                if (bin_rdy) begin
+                    if (eg_symbol == 0 && chroma_mode_r == 4) begin
+                        $display("Time=%0t: [syntax_pred] S_INTRA_CHROMA -> S_DONE (chroma=4)", $time);
+                        state <= S_DONE;
+                    end else if (eg_symbol == 0) begin
+                        eg_symbol <= 1;
+                    end else if (eg_symbol == 2) begin
+                        $display("Time=%0t: [syntax_pred] S_INTRA_CHROMA -> S_DONE", $time);
+                        state <= S_DONE;
+                    end else begin
+                        eg_symbol <= eg_symbol + 1;
+                    end
+                end
+            end
+
             // ── DONE ─────────────────────────────────────────────────────────
             S_DONE: begin
+                $display("Time=%0t: [syntax_pred] S_DONE reached!", $time);
                 pred_done <= 1'b1;
                 state     <= S_IDLE;
             end

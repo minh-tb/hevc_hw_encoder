@@ -1,0 +1,64 @@
+D:/UIT_Doc/hevc_hw_encoder/tb/tb_entropy_chain/tb_entropy_chain.sv {1 {vlog -work work -sv +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/tb/tb_entropy_chain/tb_entropy_chain.sv
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module tb_entropy_chain
+
+Top level modules:
+	tb_entropy_chain
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_cu.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_cu.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module syntax_cu
+
+Top level modules:
+	syntax_cu
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_decoder.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_decoder.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module bin_decoder
+
+Top level modules:
+	bin_decoder
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/ctx_model_store.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/ctx_model_store.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module ctx_model_store
+
+Top level modules:
+	ctx_model_store
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_encoder.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_encoder.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module bin_encoder
+
+Top level modules:
+	bin_encoder
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_pred.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_pred.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module syntax_pred
+
+Top level modules:
+	syntax_pred
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module syntax_coeff
+
+Top level modules:
+	syntax_coeff
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module range_coder
+
+Top level modules:
+	range_coder
+
+} {} {}} D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v {1 {vlog -work work +incdir+D:/UIT_Doc/hevc_hw_encoder/rtl/common D:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v
+Model Technology ModelSim ALTERA vlog 10.1d Compiler 2012.11 Nov  2 2012
+-- Compiling module cabac_enc_top
+
+Top level modules:
+	cabac_enc_top
+
+} {} {}}

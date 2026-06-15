@@ -53,12 +53,12 @@ module dct_top (
     // Matches TU_INFO_BUS: data arrives row-major
     input  wire         in_valid,
     output wire         in_ready,
-    input  wire signed [`COEFF_WIDTH-1:0] in_data [0:31][0:31],
+    input  wire [16383:0] in_data,
 
     // Output — max 32×32, smaller TUs valid in [0:N-1][0:N-1]
     output wire         out_valid,
     input  wire         out_ready,
-    output wire signed [`COEFF_WIDTH-1:0] out_data [0:31][0:31],
+    output wire [16383:0] out_data,
 
     // Passthrough size info for downstream quant_unit
     output reg  [2:0]   out_tu_size_log2,
@@ -103,15 +103,25 @@ module dct_top (
                       (sel32) ? in_ready32 :
                       1'b0;
 
+    wire signed [`COEFF_WIDTH-1:0] in_data_arr [0:31][0:31];
+    genvar gi_flat, gj_flat;
+    generate
+        for (gi_flat = 0; gi_flat < 32; gi_flat = gi_flat + 1) begin : gen_in_data_arr_row
+            for (gj_flat = 0; gj_flat < 32; gj_flat = gj_flat + 1) begin : gen_in_data_arr_col
+                assign in_data_arr[gi_flat][gj_flat] = in_data[(gi_flat*32+gj_flat)*16 +: 16];
+            end
+        end
+    endgenerate
+
     //-------------------------------------------------------------------------
     // 4×4 input slice — [0:3][0:3]
     //-------------------------------------------------------------------------
-    wire signed [`COEFF_WIDTH-1:0] in4 [0:3][0:3];
+    wire [255:0] in4;
     genvar gi, gj;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : gen_in4_row
             for (gj = 0; gj < 4; gj = gj + 1) begin : gen_in4_col
-                assign in4[gi][gj] = in_data[gi][gj];
+                assign in4[(gi*4+gj)*16 +: 16] = in_data_arr[gi][gj];
             end
         end
     endgenerate
@@ -119,11 +129,11 @@ module dct_top (
     //-------------------------------------------------------------------------
     // 8×8 input slice
     //-------------------------------------------------------------------------
-    wire signed [`COEFF_WIDTH-1:0] in8 [0:7][0:7];
+    wire [1023:0] in8;
     generate
         for (gi = 0; gi < 8; gi = gi + 1) begin : gen_in8_row
             for (gj = 0; gj < 8; gj = gj + 1) begin : gen_in8_col
-                assign in8[gi][gj] = in_data[gi][gj];
+                assign in8[(gi*8+gj)*16 +: 16] = in_data_arr[gi][gj];
             end
         end
     endgenerate
@@ -131,11 +141,11 @@ module dct_top (
     //-------------------------------------------------------------------------
     // 16×16 input slice
     //-------------------------------------------------------------------------
-    wire signed [`COEFF_WIDTH-1:0] in16 [0:15][0:15];
+    wire [4095:0] in16;
     generate
         for (gi = 0; gi < 16; gi = gi + 1) begin : gen_in16_row
             for (gj = 0; gj < 16; gj = gj + 1) begin : gen_in16_col
-                assign in16[gi][gj] = in_data[gi][gj];
+                assign in16[(gi*16+gj)*16 +: 16] = in_data_arr[gi][gj];
             end
         end
     endgenerate
@@ -144,7 +154,15 @@ module dct_top (
     // DCT4 instance
     //-------------------------------------------------------------------------
     wire                           out_valid4;
+    wire [255:0]                   out4_flat;
     wire signed [`COEFF_WIDTH-1:0] out4 [0:3][0:3];
+    generate
+        for (gi = 0; gi < 4; gi = gi + 1) begin : gen_out4_row
+            for (gj = 0; gj < 4; gj = gj + 1) begin : gen_out4_col
+                assign out4[gi][gj] = out4_flat[(gi*4+gj)*16 +: 16];
+            end
+        end
+    endgenerate
 
     dct4 u_dct4 (
         .clk        (clk),
@@ -155,14 +173,22 @@ module dct_top (
         .in_data    (in4),
         .out_valid  (out_valid4),
         .out_ready  (out_ready),
-        .out_data   (out4)
+        .out_data   (out4_flat)
     );
 
     //-------------------------------------------------------------------------
     // DCT8 instance
     //-------------------------------------------------------------------------
     wire                           out_valid8;
+    wire [1023:0]                  out8_flat;
     wire signed [`COEFF_WIDTH-1:0] out8 [0:7][0:7];
+    generate
+        for (gi = 0; gi < 8; gi = gi + 1) begin : gen_out8_row
+            for (gj = 0; gj < 8; gj = gj + 1) begin : gen_out8_col
+                assign out8[gi][gj] = out8_flat[(gi*8+gj)*16 +: 16];
+            end
+        end
+    endgenerate
 
     dct8 u_dct8 (
         .clk        (clk),
@@ -173,14 +199,22 @@ module dct_top (
         .in_data    (in8),
         .out_valid  (out_valid8),
         .out_ready  (out_ready),
-        .out_data   (out8)
+        .out_data   (out8_flat)
     );
 
     //-------------------------------------------------------------------------
     // DCT16 instance
     //-------------------------------------------------------------------------
     wire                           out_valid16;
+    wire [4095:0]                  out16_flat;
     wire signed [`COEFF_WIDTH-1:0] out16 [0:15][0:15];
+    generate
+        for (gi = 0; gi < 16; gi = gi + 1) begin : gen_out16_row
+            for (gj = 0; gj < 16; gj = gj + 1) begin : gen_out16_col
+                assign out16[gi][gj] = out16_flat[(gi*16+gj)*16 +: 16];
+            end
+        end
+    endgenerate
 
     dct16 u_dct16 (
         .clk        (clk),
@@ -191,14 +225,22 @@ module dct_top (
         .in_data    (in16),
         .out_valid  (out_valid16),
         .out_ready  (out_ready),
-        .out_data   (out16)
+        .out_data   (out16_flat)
     );
 
     //-------------------------------------------------------------------------
     // DCT32 instance — in_data[0:31][0:31] directly connected
     //-------------------------------------------------------------------------
     wire                           out_valid32;
+    wire [16383:0]                 out32_flat;
     wire signed [`COEFF_WIDTH-1:0] out32 [0:31][0:31];
+    generate
+        for (gi = 0; gi < 32; gi = gi + 1) begin : gen_out32_row
+            for (gj = 0; gj < 32; gj = gj + 1) begin : gen_out32_col
+                assign out32[gi][gj] = out32_flat[(gi*32+gj)*16 +: 16];
+            end
+        end
+    endgenerate
 
     dct32 u_dct32 (
         .clk        (clk),
@@ -209,7 +251,7 @@ module dct_top (
         .in_data    (in_data),
         .out_valid  (out_valid32),
         .out_ready  (out_ready),
-        .out_data   (out32)
+        .out_data   (out32_flat)
     );
 
     //-------------------------------------------------------------------------
@@ -225,21 +267,30 @@ module dct_top (
     // Implementation: build 32×32 output combinationally from whichever
     // instance has out_valid asserted
     //-------------------------------------------------------------------------
+    reg signed [`COEFF_WIDTH-1:0] out_data_reg [0:31][0:31];
+    integer i, j;
+    
+    always @(*) begin
+        for (i = 0; i < 32; i = i + 1) begin
+            for (j = 0; j < 32; j = j + 1) begin
+                out_data_reg[i][j] = {`COEFF_WIDTH{1'b0}};
+                
+                if (out_valid4 && i < 4 && j < 4)
+                    out_data_reg[i][j] = out4[i][j];
+                else if (out_valid8 && i < 8 && j < 8)
+                    out_data_reg[i][j] = out8[i][j];
+                else if (out_valid16 && i < 16 && j < 16)
+                    out_data_reg[i][j] = out16[i][j];
+                else if (out_valid32)
+                    out_data_reg[i][j] = out32[i][j];
+            end
+        end
+    end
+
     generate
         for (gi = 0; gi < 32; gi = gi + 1) begin : gen_out_row
             for (gj = 0; gj < 32; gj = gj + 1) begin : gen_out_col
-
-                assign out_data[gi][gj] =
-                    // DCT4 active: only [0:3][0:3] valid
-                    (out_valid4  && gi < 4  && gj < 4)  ? out4 [gi][gj] :
-                    // DCT8 active: only [0:7][0:7] valid
-                    (out_valid8  && gi < 8  && gj < 8)  ? out8 [gi][gj] :
-                    // DCT16 active: only [0:15][0:15] valid
-                    (out_valid16 && gi < 16 && gj < 16) ? out16[gi][gj] :
-                    // DCT32 active: full [0:31][0:31]
-                    (out_valid32)                        ? out32[gi][gj] :
-                    {`COEFF_WIDTH{1'b0}};
-
+                assign out_data[(gi*32+gj)*16 +: 16] = out_data_reg[gi][gj];
             end
         end
     endgenerate
@@ -248,8 +299,10 @@ module dct_top (
     // Pipeline: tu_size_log2 and fwd_inv_n delayed 2 cycles to match
     // DCT output latency — identical to fwd_inv_n_s1 pattern in each DCT
     //-------------------------------------------------------------------------
-    reg [2:0] size_pipe [0:1];
-    reg       dir_pipe  [0:1];
+    reg       stage1_valid;
+    reg [2:0] size_s1;
+    reg       dir_s1;
+    wire      stall = stage1_valid && out_valid && !out_ready;
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -270,7 +323,9 @@ module dct_top (
             out_tu_size_log2 <= 3'd2;
             out_fwd_inv_n    <= 1'b1;
         end else if (!out_ready) begin
-            // Hold state (implicit, explicitly captured by not being in else)
+            // FIX: Explicitly hold output when blocked to match submodule Stage 2
+            out_tu_size_log2 <= out_tu_size_log2;
+            out_fwd_inv_n    <= out_fwd_inv_n;
         end else begin
             if (stage1_valid) begin
                 out_tu_size_log2 <= size_s1;

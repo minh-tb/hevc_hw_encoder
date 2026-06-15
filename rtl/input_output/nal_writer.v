@@ -215,7 +215,10 @@ module nal_writer (
                 // RBSP payload — with emulation prevention
                 //--------------------------------------------------------------
                 S_RBSP: begin
-                    if (out_ready || !out_valid) begin
+                    if (nal_end) begin
+                        total_nal_count <= total_nal_count + 32'd1;
+                        state <= S_DONE;
+                    end else if (out_ready || !out_valid) begin
                         if (need_epb && !inserting_epb) begin
                             // Insert emulation prevention byte 0x03 first
                             out_valid      <= 1'b1;

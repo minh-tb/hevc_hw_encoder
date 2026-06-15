@@ -92,8 +92,8 @@ module ref_frame_buffer #(
     output reg                       ref_req_ready,
     input  wire [1:0]                ref_req_comp,   // 0=Y, 1=Cb, 2=Cr
     input  wire [2:0]                ref_req_slot,   // DPB frame slot
-    input  wire [11:0]               ref_req_x,      // top-left x of extended region
-    input  wire [11:0]               ref_req_y,      // top-left y of extended region
+    input  wire signed [11:0]               ref_req_x,      // top-left x of extended region
+    input  wire signed [11:0]               ref_req_y,      // top-left y of extended region
     // (signed interpretation: negative = left/above frame border)
 
     // Response port — to mc_unit
@@ -139,10 +139,8 @@ module ref_frame_buffer #(
     // =========================================================================
     reg  [1:0]   comp_r;
     reg  [2:0]   slot_r;
-    reg  signed [12:0] req_x_r;   // 13-bit signed (can be negative for border)
+    reg  signed [12:0] req_x_r;
     reg  signed [12:0] req_y_r;
-
-    // Current row being fetched (0 .. BLK_EXT-1)
     reg  [3:0]   row_idx;         // max BLK_EXT_Y=11 → 4 bits
 
     // Frame dimension and stride for current component
@@ -303,6 +301,7 @@ module ref_frame_buffer #(
                 axi_arburst  <= 2'b01;        // INCR
                 need_beat2   <= spans_two_beats;
                 if (axi_arvalid && axi_arready) begin
+                    $display("Time=%0t: [ref_frame_buf] AR1 accepted for row_idx=%0d", $time, row_idx);
                     axi_arvalid <= 1'b0;
                     state       <= S_ROW_R1;
                 end
@@ -313,6 +312,7 @@ module ref_frame_buffer #(
             // ---------------------------------------------------------------
             S_ROW_R1: begin
                 if (axi_rvalid) begin
+                    $display("Time=%0t: [ref_frame_buf] R1 received for row_idx=%0d", $time, row_idx);
                     beat1_data <= axi_rdata;
                     state      <= need_beat2 ? S_ROW_AR2 : S_ROW_STORE;
                 end
@@ -430,9 +430,8 @@ module ref_frame_buffer #(
     // synthesis translate_off
     always @(posedge clk) begin
         if (ref_resp_valid)
-            $display("INFO [ref_frame_buf] resp: comp=%0d slot=%0d x=%0d y=%0d blk_ext=%0d",
-                     comp_r, slot_r,
-                     $signed(req_x_r), $signed(req_y_r), blk_ext_cur);
+            $display("Time=%0t: [ref_frame_buf] resp: comp=%0d slot=%0d x=%0d y=%0d blk_ext=%0d",
+                     $time, comp_r, slot_r, $signed(req_x_r), $signed(req_y_r), blk_ext_cur);
         if (state == S_ROW_STORE) begin
             if (cur_y_cl != cur_y_raw[11:0] && cur_y_raw >= 13'sd0)
                 $display("INFO [ref_frame_buf] y clamped: raw=%0d → %0d (frame_h=%0d)",

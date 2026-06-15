@@ -1,0 +1,41 @@
+library verilog;
+use verilog.vl_types.all;
+entity deblock_top is
+    port(
+        clk             : in     vl_logic;
+        rst_n           : in     vl_logic;
+        ctu_valid       : in     vl_logic;
+        ctu_ready       : out    vl_logic;
+        ctu_addr        : in     vl_logic_vector(15 downto 0);
+        ctu_x           : in     vl_logic_vector(9 downto 0);
+        ctu_y           : in     vl_logic_vector(9 downto 0);
+        frame_width_px  : in     vl_logic_vector(11 downto 0);
+        frame_height_px : in     vl_logic_vector(11 downto 0);
+        cu_map_pred_mode: in     vl_logic_vector(255 downto 0);
+        cu_map_cbf_luma : in     vl_logic_vector(255 downto 0);
+        cu_map_cbf_chroma: in     vl_logic_vector(255 downto 0);
+        cu_map_ref_l0   : in     vl_logic_vector(767 downto 0);
+        cu_map_ref_l1   : in     vl_logic_vector(767 downto 0);
+        cu_map_bi_pred  : in     vl_logic_vector(255 downto 0);
+        cu_map_mvx_l0   : in     vl_logic_vector(4095 downto 0);
+        cu_map_mvy_l0   : in     vl_logic_vector(4095 downto 0);
+        cu_map_mvx_l1   : in     vl_logic_vector(4095 downto 0);
+        cu_map_mvy_l1   : in     vl_logic_vector(4095 downto 0);
+        cu_map_qp       : in     vl_logic_vector(1535 downto 0);
+        pix_rd_valid    : out    vl_logic;
+        pix_rd_ready    : in     vl_logic;
+        pix_rd_x        : out    vl_logic_vector(5 downto 0);
+        pix_rd_y        : out    vl_logic_vector(5 downto 0);
+        pix_rd_comp     : out    vl_logic_vector(1 downto 0);
+        pix_resp_valid  : in     vl_logic;
+        pix_resp_ready  : out    vl_logic;
+        pix_resp_data   : in     vl_logic_vector(9 downto 0);
+        pix_wr_valid    : out    vl_logic;
+        pix_wr_ready    : in     vl_logic;
+        pix_wr_x        : out    vl_logic_vector(5 downto 0);
+        pix_wr_y        : out    vl_logic_vector(5 downto 0);
+        pix_wr_comp     : out    vl_logic_vector(1 downto 0);
+        pix_wr_data     : out    vl_logic_vector(9 downto 0);
+        ctu_done        : out    vl_logic
+    );
+end deblock_top;

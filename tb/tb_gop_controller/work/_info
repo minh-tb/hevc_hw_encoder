@@ -1,0 +1,51 @@
+m255
+K3
+13
+cModel Technology
+Z0 dD:\UIT_Doc\hevc_hw_encoder\tb\unit
+vgop_controller
+Z1 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+!i10b 1
+!s100 a5kZjTS]GBUM;Id@US4RK0
+I3lJ2h31bg]OZi1bFAWDV^1
+Z2 VDBW6ohGj;h3`jz=AlY4M12
+Z3 !s105 gop_controller_v_unit
+S1
+Z4 dD:\UIT_Doc\hevc_hw_encoder\tb\unit
+w1781209238
+Z5 8d:/UIT_Doc/hevc_hw_encoder/rtl/top/gop_controller.v
+Z6 Fd:/UIT_Doc/hevc_hw_encoder/rtl/top/gop_controller.v
+L0 16
+Z7 OV;L;10.1d;51
+r1
+!s85 0
+31
+Z8 !s108 1781209244.463000
+Z9 !s107 d:/UIT_Doc/hevc_hw_encoder/rtl/common/hevc_interfaces.vh|d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|d:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_gop_controller.v|d:/UIT_Doc/hevc_hw_encoder/rtl/top/gop_controller.v|
+Z10 !s90 -sv|d:/UIT_Doc/hevc_hw_encoder/rtl/top/gop_controller.v|d:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_gop_controller.v|+incdir+d:/UIT_Doc/hevc_hw_encoder/rtl/top|+incdir+d:/UIT_Doc/hevc_hw_encoder/rtl/common|
+!s101 -O0
+Z11 o-sv -O0
+Z12 !s92 -sv +incdir+d:/UIT_Doc/hevc_hw_encoder/rtl/top +incdir+d:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_gop_controller
+R1
+!i10b 1
+Z13 !s100 T]WV9]gRH4678]dEhc3m?2
+Z14 IBzSX>?d:@VXAT;mR>jj<@3
+Z15 V7W[UTEf6gAVRZaDhIzDf?0
+Z16 !s105 tb_gop_controller_v_unit
+S1
+R4
+Z17 w1781209178
+Z18 8d:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_gop_controller.v
+Z19 Fd:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_gop_controller.v
+L0 3
+R7
+r1
+!s85 0
+31
+R8
+R9
+R10
+!s101 -O0
+R11
+R12

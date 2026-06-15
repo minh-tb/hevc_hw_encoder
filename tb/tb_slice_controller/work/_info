@@ -1,0 +1,51 @@
+m255
+K3
+13
+cModel Technology
+Z0 dD:\UIT_Doc\hevc_hw_encoder\tb\unit
+vslice_controller
+Z1 DXx6 sv_std 3 std 0 22 F[19LRNL:5;XmIFh[XOPn1
+!i10b 1
+!s100 VVzA2oM]bLGXQHf0FOK<G3
+IL1i[OQ]ETXTOHVDQV>n9I3
+V6;]Q`RWYODNIgjPM<dWRm0
+!s105 slice_controller_v_unit
+S1
+Z2 dD:\UIT_Doc\hevc_hw_encoder\tb\unit
+w1781209602
+8d:/UIT_Doc/hevc_hw_encoder/rtl/top/slice_controller.v
+Fd:/UIT_Doc/hevc_hw_encoder/rtl/top/slice_controller.v
+L0 18
+Z3 OV;L;10.1d;51
+r1
+!s85 0
+31
+Z4 !s108 1781209628.837000
+Z5 !s107 d:/UIT_Doc/hevc_hw_encoder/rtl/common/hevc_interfaces.vh|d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh|d:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_slice_controller.v|d:/UIT_Doc/hevc_hw_encoder/rtl/top/slice_controller.v|
+Z6 !s90 -sv|d:/UIT_Doc/hevc_hw_encoder/rtl/top/slice_controller.v|d:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_slice_controller.v|+incdir+d:/UIT_Doc/hevc_hw_encoder/rtl/top|+incdir+d:/UIT_Doc/hevc_hw_encoder/rtl/common|
+!s101 -O0
+Z7 o-sv -O0
+Z8 !s92 -sv +incdir+d:/UIT_Doc/hevc_hw_encoder/rtl/top +incdir+d:/UIT_Doc/hevc_hw_encoder/rtl/common -O0
+vtb_slice_controller
+R1
+!i10b 1
+!s100 5KXBTWAPJW_QBj9CPn>1[0
+Il21O?QJkeDXhKY<;No>TL3
+VMocWkooP87YGYM0b3_8AE3
+!s105 tb_slice_controller_v_unit
+S1
+R2
+w1781209615
+8d:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_slice_controller.v
+Fd:/UIT_Doc/hevc_hw_encoder/tb/unit/tb_slice_controller.v
+L0 3
+R3
+r1
+!s85 0
+31
+R4
+R5
+R6
+!s101 -O0
+R7
+R8

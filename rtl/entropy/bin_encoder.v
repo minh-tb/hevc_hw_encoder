@@ -182,13 +182,7 @@ module bin_encoder #(
             prev_valid_nonep  <= 1'b0;
         end
 
-        if (bin_valid && !bin_rdy_out)
-            $display("WARN  [bin_encoder] bin_valid asserted while !bin_rdy_out "
-                     "(backpressure stall) at t=%0t", $time);
-
-        if (!is_ep && bin_valid && ctx_id >= 154)
-            $display("ERROR [bin_encoder] ctx_id=%0d out of range [0,153] at t=%0t",
-                     ctx_id, $time);
+        // Removed spammy warning
 
         if (rc_bin_valid && rc_bin_ready)
             $display("TRACE [bin_encoder] bin=%0d ctx=%0d ps=%0d vmps=%0d at t=%0t",

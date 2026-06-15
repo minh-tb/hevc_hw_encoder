@@ -60,13 +60,26 @@ module dct8 (
     // Input handshake
     input  wire         in_valid,
     output wire         in_ready,
-    input  wire signed [`COEFF_WIDTH-1:0] in_data [0:7][0:7],
+    input  wire [1023:0] in_data,
 
     // Output handshake
     output reg          out_valid,
     input  wire         out_ready,
-    output reg  signed [`COEFF_WIDTH-1:0] out_data [0:7][0:7]
+    output wire [1023:0] out_data
 );
+
+    wire signed [`COEFF_WIDTH-1:0] in_data_arr [0:7][0:7];
+    reg  signed [`COEFF_WIDTH-1:0] out_data_arr [0:7][0:7];
+
+    genvar gi, gj;
+    generate
+        for (gi = 0; gi < 8; gi = gi + 1) begin : gen_flat
+            for (gj = 0; gj < 8; gj = gj + 1) begin : gen_flat_col
+                assign in_data_arr[gi][gj] = in_data[(gi*8+gj)*16 +: 16];
+                assign out_data[(gi*8+gj)*16 +: 16] = out_data_arr[gi][gj];
+            end
+        end
+    endgenerate
 
     //-------------------------------------------------------------------------
     // DCT-8 basis coefficients (HEVC spec Table 9-15)
@@ -161,14 +174,14 @@ module dct8 (
                         reg signed [IW-1:0] EE0,EE1,EO0,EO1;
 
                         // Even/odd decomposition (HM partialButterfly8)
-                        E0 = in_data[r][0] + in_data[r][7];
-                        E1 = in_data[r][1] + in_data[r][6];
-                        E2 = in_data[r][2] + in_data[r][5];
-                        E3 = in_data[r][3] + in_data[r][4];
-                        O0 = in_data[r][0] - in_data[r][7];
-                        O1 = in_data[r][1] - in_data[r][6];
-                        O2 = in_data[r][2] - in_data[r][5];
-                        O3 = in_data[r][3] - in_data[r][4];
+                    E0 = in_data_arr[r][0] + in_data_arr[r][7];
+                    E1 = in_data_arr[r][1] + in_data_arr[r][6];
+                    E2 = in_data_arr[r][2] + in_data_arr[r][5];
+                    E3 = in_data_arr[r][3] + in_data_arr[r][4];
+                    O0 = in_data_arr[r][0] - in_data_arr[r][7];
+                    O1 = in_data_arr[r][1] - in_data_arr[r][6];
+                    O2 = in_data_arr[r][2] - in_data_arr[r][5];
+                    O3 = in_data_arr[r][3] - in_data_arr[r][4];
 
                         // Even-even / even-odd (maps to DCT-4 on E)
                         EE0 = E0 + E3;
@@ -202,10 +215,10 @@ module dct8 (
                         reg signed [IW-1:0] E0,E1,E2,E3;
 
                         // Read column r
-                        x[0] = in_data[0][r]; x[1] = in_data[1][r];
-                        x[2] = in_data[2][r]; x[3] = in_data[3][r];
-                        x[4] = in_data[4][r]; x[5] = in_data[5][r];
-                        x[6] = in_data[6][r]; x[7] = in_data[7][r];
+                    x[0] = in_data_arr[0][r]; x[1] = in_data_arr[1][r];
+                    x[2] = in_data_arr[2][r]; x[3] = in_data_arr[3][r];
+                    x[4] = in_data_arr[4][r]; x[5] = in_data_arr[5][r];
+                    x[6] = in_data_arr[6][r]; x[7] = in_data_arr[7][r];
 
                         // Odd outputs (rows 1,3,5,7 of IDCT matrix)
                         O0 = T89*x[1] + T75*x[3] + T50*x[5] + T18*x[7];
@@ -255,7 +268,7 @@ module dct8 (
             out_valid <= 1'b0;
             for (c = 0; c < 8; c = c + 1)
                 for (k = 0; k < 8; k = k + 1)
-                    out_data[c][k] <= {`COEFF_WIDTH{1'b0}};
+                    out_data_arr[c][k] <= {`COEFF_WIDTH{1'b0}};
         end else if (!out_ready) begin
             out_valid <= out_valid;
         end else begin
@@ -284,14 +297,14 @@ module dct8 (
                         EE0 = E0 + E3; EE1 = E1 + E2;
                         EO0 = E0 - E3; EO1 = E1 - E2;
 
-                        out_data[0][c] <= `CLIP16((T64*EE0 + T64*EE1 + FWD_RND_2) >>> FWD_SHIFT_2);
-                        out_data[2][c] <= `CLIP16((T83*EO0 + T36*EO1 + FWD_RND_2) >>> FWD_SHIFT_2);
-                        out_data[4][c] <= `CLIP16((T64*EE0 - T64*EE1 + FWD_RND_2) >>> FWD_SHIFT_2);
-                        out_data[6][c] <= `CLIP16((T36*EO0 - T83*EO1 + FWD_RND_2) >>> FWD_SHIFT_2);
-                        out_data[1][c] <= `CLIP16((T89*O0 + T75*O1 + T50*O2 + T18*O3 + FWD_RND_2) >>> FWD_SHIFT_2);
-                        out_data[3][c] <= `CLIP16((T75*O0 - T18*O1 - T89*O2 - T50*O3 + FWD_RND_2) >>> FWD_SHIFT_2);
-                        out_data[5][c] <= `CLIP16((T50*O0 - T89*O1 + T18*O2 + T75*O3 + FWD_RND_2) >>> FWD_SHIFT_2);
-                        out_data[7][c] <= `CLIP16((T18*O0 - T50*O1 + T75*O2 - T89*O3 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[0][c] <= `CLIP16((T64*EE0 + T64*EE1 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[2][c] <= `CLIP16((T83*EO0 + T36*EO1 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[4][c] <= `CLIP16((T64*EE0 - T64*EE1 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[6][c] <= `CLIP16((T36*EO0 - T83*EO1 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[1][c] <= `CLIP16((T89*O0 + T75*O1 + T50*O2 + T18*O3 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[3][c] <= `CLIP16((T75*O0 - T18*O1 - T89*O2 - T50*O3 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[5][c] <= `CLIP16((T50*O0 - T89*O1 + T18*O2 + T75*O3 + FWD_RND_2) >>> FWD_SHIFT_2);
+                    out_data_arr[7][c] <= `CLIP16((T18*O0 - T50*O1 + T75*O2 - T89*O3 + FWD_RND_2) >>> FWD_SHIFT_2);
                     end
 
                 end else begin
@@ -326,14 +339,14 @@ module dct8 (
                         E2 = EE1 - EO1;
                         E3 = EE0 - EO0;
 
-                        out_data[r][0] <= `CLIP16((E0 + O0 + INV_RND_2) >>> INV_SHIFT_2);
-                        out_data[r][1] <= `CLIP16((E1 + O1 + INV_RND_2) >>> INV_SHIFT_2);
-                        out_data[r][2] <= `CLIP16((E2 + O2 + INV_RND_2) >>> INV_SHIFT_2);
-                        out_data[r][3] <= `CLIP16((E3 + O3 + INV_RND_2) >>> INV_SHIFT_2);
-                        out_data[r][4] <= `CLIP16((E3 - O3 + INV_RND_2) >>> INV_SHIFT_2);
-                        out_data[r][5] <= `CLIP16((E2 - O2 + INV_RND_2) >>> INV_SHIFT_2);
-                        out_data[r][6] <= `CLIP16((E1 - O1 + INV_RND_2) >>> INV_SHIFT_2);
-                        out_data[r][7] <= `CLIP16((E0 - O0 + INV_RND_2) >>> INV_SHIFT_2);
+                    out_data_arr[r][0] <= `CLIP16((E0 + O0 + INV_RND_2) >>> INV_SHIFT_2);
+                    out_data_arr[r][1] <= `CLIP16((E1 + O1 + INV_RND_2) >>> INV_SHIFT_2);
+                    out_data_arr[r][2] <= `CLIP16((E2 + O2 + INV_RND_2) >>> INV_SHIFT_2);
+                    out_data_arr[r][3] <= `CLIP16((E3 + O3 + INV_RND_2) >>> INV_SHIFT_2);
+                    out_data_arr[r][4] <= `CLIP16((E3 - O3 + INV_RND_2) >>> INV_SHIFT_2);
+                    out_data_arr[r][5] <= `CLIP16((E2 - O2 + INV_RND_2) >>> INV_SHIFT_2);
+                    out_data_arr[r][6] <= `CLIP16((E1 - O1 + INV_RND_2) >>> INV_SHIFT_2);
+                    out_data_arr[r][7] <= `CLIP16((E0 - O0 + INV_RND_2) >>> INV_SHIFT_2);
                     end
                 end
             end
@@ -354,7 +367,7 @@ module dct8 (
     always @(posedge clk) begin
         if (rst_n && out_valid && fwd_inv_n_s1 && !check8_done) begin
             $display("INFO  [dct8] first fwd output [0][0]=%0d [1][0]=%0d",
-                     out_data[0][0], out_data[1][0]);
+                     out_data_arr[0][0], out_data_arr[1][0]);
             check8_done = 1;
         end
     end

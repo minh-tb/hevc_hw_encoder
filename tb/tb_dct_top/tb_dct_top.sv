@@ -30,6 +30,19 @@ module tb_dct_top;
 
     int total_errors;
 
+    logic [16383:0] in_data_flat;
+    logic [16383:0] out_data_flat;
+
+    genvar gi, gj;
+    generate
+        for (gi = 0; gi < 32; gi++) begin
+            for (gj = 0; gj < 32; gj++) begin
+                assign in_data_flat[(gi*32+gj)*16 +: 16] = in_data[gi][gj];
+                assign out_data[gi][gj] = out_data_flat[(gi*32+gj)*16 +: 16];
+            end
+        end
+    endgenerate
+
     //-------------------------------------------------------------------------
     // Device Under Test (DUT)
     //-------------------------------------------------------------------------
@@ -40,10 +53,10 @@ module tb_dct_top;
         .tu_size_log2     (tu_size_log2),
         .in_valid         (in_valid),
         .in_ready         (in_ready),
-        .in_data          (in_data),
+        .in_data          (in_data_flat),
         .out_valid        (out_valid),
         .out_ready        (out_ready),
-        .out_data         (out_data),
+        .out_data         (out_data_flat),
         .out_tu_size_log2 (out_tu_size_log2),
         .out_fwd_inv_n    (out_fwd_inv_n)
     );

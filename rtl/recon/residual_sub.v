@@ -23,6 +23,8 @@ module residual_sub #(
     // Inter prediction interface (from mc_unit)
     input  wire                        inter_pred_valid,
     input  wire [PIXEL_WIDTH-1:0]      inter_pred_pixel,
+    input  wire [5:0]                  inter_pred_x,
+    input  wire [5:0]                  inter_pred_y,
 
     // Output to Transform (dct_top)
     output reg                         res_valid,
@@ -49,8 +51,8 @@ module residual_sub #(
             res_valid <= orig_valid & active_pred_valid;
             if (orig_valid && active_pred_valid) begin
                 residual <= $signed({1'b0, orig_pixel}) - $signed({1'b0, active_pred_pixel});
-                res_x    <= is_intra ? intra_pred_x : 6'd0; // Add inter tracking if needed
-                res_y    <= is_intra ? intra_pred_y : 6'd0;
+                res_x    <= is_intra ? intra_pred_x : inter_pred_x;
+                res_y    <= is_intra ? intra_pred_y : inter_pred_y;
             end
         end
     end
