@@ -13,7 +13,9 @@
 `include "parameter_pkg.vh"
 `include "hevc_interfaces.vh"
 
-module gop_controller (
+module gop_controller #(
+    parameter GOP_STRUCTURE = 0  // 0: IPP, 1: IPBB (Low-Delay B), 2: Hierarchical B
+)(
     input  wire                     clk,
     input  wire                     rst_n,
 
@@ -54,8 +56,9 @@ module gop_controller (
     localparam SLICE_I = 2'd2;
 
     // NAL TYPES (Subset of HEVC Spec)
-    localparam NAL_TRAIL_R = 6'd1;
-    localparam NAL_CRA_NUT = 6'd21;
+    localparam NAL_TRAIL_R    = 6'd1;
+    localparam NAL_IDR_W_RADL = 6'd19;
+    localparam NAL_CRA_NUT    = 6'd21;
 
     // FSM States
     localparam S_IDLE       = 3'd0;
@@ -250,13 +253,10 @@ module gop_controller (
                 if (frame_done) next_state = S_NEXT;
             end
             S_NEXT: begin
-                if (frames_encoded >= total_frames - 1) begin
+                if (frames_encoded + 16'd1 >= total_frames) begin
                     next_state = S_DONE;
-                end else if (gop_idx == 15) begin
-                    // Finished GOP 16, start next GOP with CRA
-                    next_state = S_CRA;
                 end else begin
-                    // Move to next frame in GOP table
+                    // IP pattern: next frame is P (go to S_ALLOC)
                     next_state = S_ALLOC;
                 end
             end
@@ -305,11 +305,11 @@ module gop_controller (
                 end
 
                 S_CRA: begin
-                    // Setup CRA Intra Frame
+                    // Setup IDR Intra Frame
                     frame_slice_type <= SLICE_I;
                     frame_poc        <= base_poc;
                     temporal_id      <= 3'd0;
-                    nal_type         <= NAL_CRA_NUT;
+                    nal_type         <= NAL_IDR_W_RADL;
                     
                     alloc_poc        <= base_poc;
                     is_intra         <= 1'b1;
@@ -320,30 +320,41 @@ module gop_controller (
                 end
 
                 S_ALLOC: begin
-                    // Setup B Frame from ROM
                     if (!is_intra) begin
-                        frame_slice_type <= SLICE_B;
-                        frame_poc        <= target_frame_poc;
-                        temporal_id      <= rom_temp_id;
-                        nal_type         <= NAL_TRAIL_R;
-                        
-                        alloc_poc        <= target_frame_poc;
-                        
-                        // Populate Reference Lists by converting Delta POCs -> Absolute POCs -> Slot IDs
-                        ref_l0_count <= rom_l0_cnt;
-                        ref_l1_count <= rom_l1_cnt;
-                        
-                        int_ref_l0[0] <= find_slot(target_frame_poc + $signed({4'b0, rom_l0_d0}));
-                        int_ref_l0[1] <= find_slot(target_frame_poc + $signed({4'b0, rom_l0_d1}));
-                        int_ref_l0[2] <= find_slot(target_frame_poc + $signed({4'b0, rom_l0_d2}));
-                        int_ref_l0[3] <= find_slot(target_frame_poc + $signed({4'b0, rom_l0_d3}));
-                        int_ref_l0[4] <= find_slot(target_frame_poc + $signed({4'b0, rom_l0_d4}));
+                        if (GOP_STRUCTURE == 1 && frames_encoded >= 16'd2) begin
+                            // B-Slice for IPBB pattern
+                            frame_slice_type <= SLICE_B;
+                            frame_poc        <= base_poc;
+                            temporal_id      <= 3'd0;
+                            nal_type         <= NAL_TRAIL_R;
+                            alloc_poc        <= base_poc;
+                            
+                            ref_l0_count     <= 3'd1;
+                            ref_l1_count     <= 3'd1;
+                            int_ref_l0[0]    <= find_slot(base_poc - 10'd1);
+                            int_ref_l1[0]    <= find_slot(base_poc - 10'd1); // Aligned with HM RefPicList1 (RPS delta=-1)
+                        end else begin
+                            // P-Frame for IP pattern
+                            frame_slice_type <= SLICE_P;
+                            frame_poc        <= base_poc;
+                            temporal_id      <= 3'd0;
+                            nal_type         <= NAL_TRAIL_R;
+                            alloc_poc        <= base_poc;
+                            
+                            ref_l0_count     <= 3'd1;
+                            ref_l1_count     <= 3'd0;
+                            int_ref_l0[0]    <= find_slot(base_poc - 10'd1);
+                            int_ref_l1[0]    <= 3'd0;
+                        end
+                    end
 
-                        int_ref_l1[0] <= find_slot(target_frame_poc + $signed({4'b0, rom_l1_d0}));
-                        int_ref_l1[1] <= find_slot(target_frame_poc + $signed({4'b0, rom_l1_d1}));
-                        int_ref_l1[2] <= find_slot(target_frame_poc + $signed({4'b0, rom_l1_d2}));
-                        int_ref_l1[3] <= find_slot(target_frame_poc + $signed({4'b0, rom_l1_d3}));
-                        int_ref_l1[4] <= find_slot(target_frame_poc + $signed({4'b0, rom_l1_d4}));
+                    // DPB Slot Recycling: Free POC - 2 when base_poc >= 2 (sliding window RPS delta=-1)
+                    if (base_poc >= 10'd2) begin
+                        free_valid <= 1'b1;
+                        free_slot  <= find_slot(base_poc - 10'd2);
+                        slot_map_valid[find_slot(base_poc - 10'd2)] <= 1'b0;
+                        $display("Time=%0t: [GOP] FREE slot=%0d poc=%0d", 
+                                 $time, find_slot(base_poc - 10'd2), base_poc - 10'd2);
                     end
 
                     // Fire allocation to frame_store
@@ -351,7 +362,12 @@ module gop_controller (
                     if (alloc_ready) begin
                         // Map the physical slot so we can use it in the future
                         slot_map_valid[alloc_slot] <= 1'b1;
-                        slot_map_poc[alloc_slot]   <= alloc_poc;
+                        slot_map_poc[alloc_slot]   <= base_poc;
+                        $display("Time=%0t: [GOP] ALLOC slot=%0d poc=%0d is_intra=%0b ref_l0[0]=%0d find_slot(%0d)=%0d", 
+                                 $time, alloc_slot, base_poc, is_intra, find_slot(base_poc - 10'd1), base_poc - 10'd1, find_slot(base_poc - 10'd1));
+                        $display("Time=%0t: [GOP] slot_map: v[0]=%b p[0]=%0d, v[1]=%b p[1]=%0d, v[2]=%b p[2]=%0d, v[3]=%b p[3]=%0d",
+                                 $time, slot_map_valid[0], slot_map_poc[0], slot_map_valid[1], slot_map_poc[1],
+                                 slot_map_valid[2], slot_map_poc[2], slot_map_valid[3], slot_map_poc[3]);
                     end
                 end
 
@@ -363,38 +379,12 @@ module gop_controller (
                 S_NEXT: begin
                     frames_encoded <= frames_encoded + 16'd1;
                     
-                    if (is_intra) begin
-                        // Just finished an I-frame. Do not increment gop_idx.
-                        is_intra <= 1'b0;
-                        gop_idx  <= 5'd0;
-                    end else begin
-                        if (gop_idx == 15) begin
-                            // Advance to next 16-frame block
-                            base_poc <= base_poc + 10'd16;
-                        end else begin
-                            gop_idx <= gop_idx + 5'd1;
-                        end
-                    end
-                    
-                    // DPB Flush logic to prevent starvation with 8 slots.
-                    // TempID=6 frames (leaves) are never used as references.
-                    // We free them immediately after they are encoded.
-                    case (gop_idx)
-                        4:  begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 1);  end // POC 1
-                        5:  begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 3);  end // POC 3
-                        6:  begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 2);  end // POC 2 is no longer needed after POC 3
-                        7:  begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 5);  end // POC 5
-                        8:  begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 7);  end // POC 7
-                        9:  begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 6);  end // POC 6 is no longer needed after POC 7
-                        11: begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 9);  end // POC 9
-                        12: begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 11); end // POC 11
-                        13: begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 10); end // POC 10 no longer needed
-                        14: begin free_valid <= 1'b1; free_slot <= find_slot(base_poc + 13); end // POC 13
-                        15: begin 
-                            free_valid <= 1'b1; free_slot <= find_slot(base_poc + 15); 
-                            // At end of GOP, flush the deeper anchors too if needed, but 8 slots is enough.
-                        end
-                    endcase
+                    // Advance POC
+                    base_poc  <= base_poc + 10'd1;
+                    alloc_poc <= base_poc + 10'd1;
+                    frame_poc <= base_poc + 10'd1;
+                    is_intra  <= 1'b0;
+                    gop_idx   <= gop_idx + 5'd1;
                 end
 
                 S_DONE: begin

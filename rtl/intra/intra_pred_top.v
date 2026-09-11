@@ -23,7 +23,7 @@
 //   INTRA_ANG   2..34  → intra_angular
 //
 // Config:
-//   AMP_ENABLE = 1 — asymmetric PUs possible but all use same 35 modes
+//   AMP_ENABLE = 0 — no asymmetric PUs (FPGA simplification); all 35 modes used
 //   Chroma modes: DM (= luma mode), Planar, DC, Vertical, Horizontal, Diagonal
 //                 chroma always valid subset of luma modes — same modules used
 //

@@ -56,8 +56,7 @@ module inv_quant (
 
     input  wire [5:0]   qp,
     input  wire [1:0]   tu_comp,            // 0=Y, 1=Cb, 2=Cr
-    input  wire [2:0]   tu_size_log2,       // unused for IQ (no TU size factor)
-                                             // kept for interface symmetry
+    input  wire [2:0]   tu_size_log2,       // 2=4x4..5=32x32, used for iTransformShift
 
     // Input quantized level stream
     input  wire         in_valid,
@@ -146,8 +145,9 @@ module inv_quant (
 
     //-------------------------------------------------------------------------
     // Shift direction and amount
-    // Mapped exactly from HM TComTrQuant::xDeQuant:
-    // shift = IQUANT_SHIFT - cQP.per - (transformSkip ? iTransformShift : 0)
+    // Mapped from HM TComTrQuant::xDeQuant:
+    // shift = IQUANT_SHIFT - cQP.per + iTransformShift
+    // iTransformShift = MAX_TR_DYNAMIC_RANGE - BIT_DEPTH - tu_size_log2
     //-------------------------------------------------------------------------
     localparam IQUANT_SHIFT  = 6;
     localparam MAX_TR_DYNAMIC_RANGE = 15;
@@ -155,7 +155,10 @@ module inv_quant (
 
     wire [4:0] cQP_per = qp_div6 + BIT_DEPTH_ADJ[4:0];
     
-    wire signed [6:0] shift_full = $signed(IQUANT_SHIFT) - $signed({2'b0, cQP_per});
+    // iTransformShift compensates for forward quant's TU-size-dependent shift
+    wire signed [6:0] iTransformShift = $signed(MAX_TR_DYNAMIC_RANGE) - $signed(`BIT_DEPTH) - $signed({4'b0, tu_size_log2});
+    
+    wire signed [6:0] shift_full = $signed(IQUANT_SHIFT) - $signed({2'b0, cQP_per}) - iTransformShift;
 
     wire        do_right_shift = (shift_full > 0);
     wire [4:0]  right_shift    = do_right_shift ? shift_full[4:0] : 5'd0;
@@ -169,7 +172,7 @@ module inv_quant (
     // After shift: clips to [-32768, 32767]
     //-------------------------------------------------------------------------
     localparam signed [15:0] COEFF_MAX =  16'sd32767;
-    localparam signed [15:0] COEFF_MIN = -16'sd32768;
+    localparam signed [16:0] COEFF_MIN = -17'sd32768;
 
     wire signed [31:0] product = $signed(in_level) * $signed({1'b0, IQS});
 

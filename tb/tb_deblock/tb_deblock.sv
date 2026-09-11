@@ -26,18 +26,18 @@ module tb_deblock;
     logic [11:0]  frame_width_px;
     logic [11:0]  frame_height_px;
 
-    // CU info shadow map
-    logic         cu_map_pred_mode  [0:15][0:15];
-    logic         cu_map_cbf_luma   [0:15][0:15];
-    logic         cu_map_cbf_chroma [0:15][0:15];
-    logic [2:0]   cu_map_ref_l0     [0:15][0:15];
-    logic [2:0]   cu_map_ref_l1     [0:15][0:15];
-    logic         cu_map_bi_pred    [0:15][0:15];
-    logic signed [15:0] cu_map_mvx_l0 [0:15][0:15];
-    logic signed [15:0] cu_map_mvy_l0 [0:15][0:15];
-    logic signed [15:0] cu_map_mvx_l1 [0:15][0:15];
-    logic signed [15:0] cu_map_mvy_l1 [0:15][0:15];
-    logic [5:0]   cu_map_qp         [0:15][0:15];
+    // CU info shadow map (packed multidimensional arrays)
+    logic [15:0][15:0]       cu_map_pred_mode;
+    logic [15:0][15:0]       cu_map_cbf_luma;
+    logic [15:0][15:0]       cu_map_cbf_chroma;
+    logic [15:0][15:0][2:0]  cu_map_ref_l0;
+    logic [15:0][15:0][2:0]  cu_map_ref_l1;
+    logic [15:0][15:0]       cu_map_bi_pred;
+    logic [15:0][15:0][15:0] cu_map_mvx_l0;
+    logic [15:0][15:0][15:0] cu_map_mvy_l0;
+    logic [15:0][15:0][15:0] cu_map_mvx_l1;
+    logic [15:0][15:0][15:0] cu_map_mvy_l1;
+    logic [15:0][15:0][5:0]  cu_map_qp;
 
     // Pixel Read I/F
     logic         pix_rd_valid;
@@ -57,7 +57,6 @@ module tb_deblock;
     logic [5:0]   pix_wr_y;
     logic [1:0]   pix_wr_comp;
     logic [`PIXEL_WIDTH-1:0] pix_wr_data;
-
     logic         ctu_done;
 
     // Instantiation

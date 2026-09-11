@@ -79,12 +79,14 @@ module deblock_top (
 );
 
     //-------------------------------------------------------------------------
-    // Processing pass encoding
+    // Processing pass encoding: 6 passes per CTU (Luma V/H, Cb V/H, Cr V/H)
     //-------------------------------------------------------------------------
-    localparam [1:0] PASS_LUMA_VERT  = 2'd0;
-    localparam [1:0] PASS_LUMA_HORIZ = 2'd1;
-    localparam [1:0] PASS_CHR_VERT   = 2'd2;
-    localparam [1:0] PASS_CHR_HORIZ  = 2'd3;
+    localparam [2:0] PASS_LUMA_VERT  = 3'd0;
+    localparam [2:0] PASS_LUMA_HORIZ = 3'd1;
+    localparam [2:0] PASS_CB_VERT    = 3'd2;
+    localparam [2:0] PASS_CB_HORIZ   = 3'd3;
+    localparam [2:0] PASS_CR_VERT    = 3'd4;
+    localparam [2:0] PASS_CR_HORIZ   = 3'd5;
 
     //-------------------------------------------------------------------------
     // FSM states
@@ -101,7 +103,7 @@ module deblock_top (
         S_DONE        = 4'd8;
 
     reg [3:0]    state;
-    reg [1:0]    pass;            // current processing pass
+    reg [2:0]    pass;            // current processing pass (0..5)
     reg [3:0]    edge_col;        // 0..15 (4×4 edge column within CTU)
     reg [3:0]    edge_row;        // 0..15
     reg [2:0]    sample_grp;      // which 4-sample group along the edge (0..3 luma, 0..1 chroma)
@@ -120,17 +122,20 @@ module deblock_top (
     // Edge geometry helpers
     //-------------------------------------------------------------------------
     wire is_luma, is_vert, is_chroma;
+    wire [1:0] cur_comp;
     
     assign is_luma   = (pass == PASS_LUMA_VERT || pass == PASS_LUMA_HORIZ);
-    assign is_vert   = (pass == PASS_LUMA_VERT || pass == PASS_CHR_VERT);
+    assign is_vert   = (pass == PASS_LUMA_VERT || pass == PASS_CB_VERT || pass == PASS_CR_VERT);
     assign is_chroma = !is_luma;
+    assign cur_comp  = is_luma ? 2'd0 :
+                       (pass == PASS_CB_VERT || pass == PASS_CB_HORIZ) ? 2'd1 : 2'd2;
 
     wire [3:0] max_col, max_row;
     assign max_col = is_luma ? 4'd15 : 4'd7;
     assign max_row = is_luma ? 4'd15 : 4'd7;
 
     wire [2:0] max_grp;
-    assign max_grp = is_luma ? 3'd3 : 3'd1;
+    assign max_grp = 3'd3;
 
     // CU Map coordinates (Scale chroma 8x8 grid to 16x16 luma grid)
     wire [3:0] edge_col_cu;
@@ -145,9 +150,21 @@ module deblock_top (
     assign q_col = edge_col_cu;
     assign q_row = edge_row_cu;
 
+    // In HEVC Clause 8.7.2, deblocking is applied on an 8x8 grid exclusively at TU and PU boundaries.
+    // In our encoder (64x64 CU, 32x32 TUs, 16x16 chroma TUs):
+    // - Luma: valid internal TU boundary is at x = 32 (edge_col == 8) for vertical,
+    //         and y = 32 (edge_row == 8) for horizontal.
+    // - Chroma: valid internal TU boundary is at x = 16 (edge_col == 4) for vertical,
+    //           and y = 16 (edge_row == 4) for horizontal.
+    // - CTU outer boundaries (edge_col == 0 or edge_row == 0) are skipped to protect against
+    //   6-bit SRAM address underflow/wrap-around in the local CTU SRAM buffer.
+    wire is_valid_edge;
+    assign is_valid_edge = is_luma ? (is_vert ? (edge_col == 4'd8) : (edge_row == 4'd8))
+                                   : (is_vert ? (edge_col == 4'd4) : (edge_row == 4'd4));
+
     wire is_ctu_boundary, skip_edge;
     assign is_ctu_boundary = is_vert ? (edge_col == 4'd0) : (edge_row == 4'd0);
-    assign skip_edge       = is_ctu_boundary && (is_vert ? (cur_ctu_x == 10'd0) : (cur_ctu_y == 10'd0));
+    assign skip_edge       = !is_valid_edge;
 
     //-------------------------------------------------------------------------
     // boundary_strength instance
@@ -228,7 +245,7 @@ module deblock_top (
         .clk(clk), .rst_n(rst_n),
         .in_valid(chr_in_valid), .in_ready(chr_in_ready),
         .bs(latched_bs), .edge_qp(latched_edge_qp),
-        .comp(pass == PASS_CHR_VERT ? 2'd1 : 2'd2),
+        .comp(cur_comp),
         .p0(px_p[0]), .p1(px_p[1]), .q0(px_q[0]), .q1(px_q[1]),
         .out_valid(chr_out_valid), .out_ready(chr_out_ready),
         .p0_f(chr_p0f), .q0_f(chr_q0f), .p1_pass(chr_p1p), .q1_pass(chr_q1p),
@@ -255,7 +272,6 @@ module deblock_top (
             chr_in_valid <= 1'b0;
             chr_out_ready<= 1'b0;
             pix_rd_valid <= 1'b0;
-            pix_wr_valid <= 1'b0;
         end else begin
             ctu_done     <= 1'b0;
             bs_in_valid  <= 1'b0;
@@ -282,7 +298,7 @@ module deblock_top (
                         state <= S_NEXT_EDGE;
                     end else begin
                         bs_in_valid  <= 1'b1;
-                        bs_out_ready <= 1'b0;
+                        bs_out_ready <= 1'b1;
                         if (bs_in_valid && bs_in_ready)
                             state <= S_BS_WAIT;
                     end
@@ -317,7 +333,7 @@ module deblock_top (
                         end
                     end else if (load_cnt == 3'd0 && state == S_PIX_LOAD) begin
                         pix_rd_valid <= 1'b1;
-                        pix_rd_comp  <= is_luma ? 2'd0 : (pass == PASS_CHR_VERT ? 2'd1 : 2'd2);
+                        pix_rd_comp  <= cur_comp;
                     end
                 end
                 S_FILT_WAIT: begin
@@ -331,28 +347,11 @@ module deblock_top (
                     end
                 end
                 S_PIX_WRITE: begin
-                    if (pix_wr_ready || !pix_wr_valid) begin
-                        pix_wr_valid <= 1'b1;
-                        pix_wr_comp  <= is_luma ? 2'd0 : (pass == PASS_CHR_VERT ? 2'd1 : 2'd2);
-
-                        if (is_luma) begin
-                            case (write_cnt)
-                                3'd0: pix_wr_data <= luma_p0f;  3'd1: pix_wr_data <= luma_p1f;
-                                3'd2: pix_wr_data <= luma_p2f;  3'd3: pix_wr_data <= luma_q0f;
-                                3'd4: pix_wr_data <= luma_q1f;  3'd5: pix_wr_data <= luma_q2f;
-                                default: pix_wr_data <= {`PIXEL_WIDTH{1'b0}};
-                            endcase
-                        end else begin
-                            case (write_cnt)
-                                3'd0: pix_wr_data <= chr_p0f;   3'd1: pix_wr_data <= chr_q0f;
-                                default: pix_wr_data <= {`PIXEL_WIDTH{1'b0}};
-                            endcase
-                        end
+                    if (write_cnt == (is_luma ? 3'd5 : 3'd1)) begin
+                        write_cnt <= 3'd0;
+                        state     <= S_NEXT_EDGE;
+                    end else begin
                         write_cnt <= write_cnt + 3'd1;
-                        if (write_cnt == (is_luma ? 3'd5 : 3'd1)) begin
-                            pix_wr_valid <= 1'b0;
-                            state        <= S_NEXT_EDGE;
-                        end
                     end
                 end
                 S_NEXT_EDGE: begin
@@ -377,12 +376,13 @@ module deblock_top (
                     end
                 end
                 S_NEXT_PASS: begin
-                    if (pass == PASS_CHR_HORIZ) begin
+                    if (pass == PASS_CR_HORIZ) begin
                         state    <= S_DONE;
                     end else begin
-                        pass     <= pass + 2'd1;
+                        pass     <= pass + 3'd1;
                         edge_col <= 4'd0;
                         edge_row <= 4'd0;
+                        sample_grp <= 3'd0;
                         state    <= S_BS_REQ;
                     end
                 end
@@ -396,7 +396,7 @@ module deblock_top (
     end
 
     //-------------------------------------------------------------------------
-    // Pixel combinational address generation
+    // Pixel combinational address and data generation
     //-------------------------------------------------------------------------
     wire [2:0] px_idx;
     wire       loading_q;
@@ -410,9 +410,9 @@ module deblock_top (
     assign q_idx     = is_luma ? (px_idx - 3'd4) : (px_idx - 3'd2);
     assign wr_q_idx  = is_luma ? (write_cnt - 3'd3) : (write_cnt - 3'd1);
 
-    assign ec = is_chroma ? {1'b0, edge_col[3:1]} : edge_col;
-    assign er = is_chroma ? {1'b0, edge_row[3:1]} : edge_row;
-    assign sg = is_chroma ? {1'b0, sample_grp[2:1]} : sample_grp;
+    assign ec = edge_col;
+    assign er = edge_row;
+    assign sg = sample_grp;
 
     always @(*) begin
         // Defaults to prevent latches
@@ -431,10 +431,31 @@ module deblock_top (
     end
 
     always @(*) begin
-        // Defaults to prevent latches
+        pix_wr_valid = (state == S_PIX_WRITE);
+        pix_wr_comp  = cur_comp;
+
+        // Combinational write data
+        if (is_luma) begin
+            case (write_cnt)
+                3'd0: pix_wr_data = luma_p0f;
+                3'd1: pix_wr_data = luma_p1f;
+                3'd2: pix_wr_data = luma_p2f;
+                3'd3: pix_wr_data = luma_q0f;
+                3'd4: pix_wr_data = luma_q1f;
+                3'd5: pix_wr_data = luma_q2f;
+                default: pix_wr_data = {`PIXEL_WIDTH{1'b0}};
+            endcase
+        end else begin
+            case (write_cnt)
+                3'd0: pix_wr_data = chr_p0f;
+                3'd1: pix_wr_data = chr_q0f;
+                default: pix_wr_data = {`PIXEL_WIDTH{1'b0}};
+            endcase
+        end
+
+        // Combinational write address
         pix_wr_x = 6'd0;
         pix_wr_y = 6'd0;
-        
         if (is_vert) begin
             pix_wr_y = {er, 2'b00} + {3'b0, sg};
             if (write_cnt <= (is_luma ? 3'd2 : 3'd0)) pix_wr_x = {ec, 2'b00} - 6'd1 - {3'b0, write_cnt};

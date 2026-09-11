@@ -31,6 +31,13 @@ module tb_mode_decision();
     reg  [11:0] inter_best_mv_x;
     reg  [11:0] inter_best_mv_y;
     
+    reg  [9:0]  poc;
+    
+    // Merge Candidates
+    reg  [4:0]  merge_cand_valid;
+    reg  [49:0] merge_cand_mv_x_flat;
+    reg  [49:0] merge_cand_mv_y_flat;
+
     // Cost inputs from CABAC
     reg         rate_cost_valid;
     reg  [31:0] est_bit_rate;
@@ -46,6 +53,9 @@ module tb_mode_decision();
     wire [5:0]  best_intra_mode;
     wire [11:0] best_inter_mv_x;
     wire [11:0] best_inter_mv_y;
+    wire        best_merge_flag;
+    wire [2:0]  best_merge_idx;
+    wire        best_skip_flag;
 
     //-------------------------------------------------------------------------
     // Device Under Test (DUT)
@@ -61,6 +71,7 @@ module tb_mode_decision();
         .pu_depth(pu_depth),
         .slice_type(slice_type),
         .qp(qp),
+        .poc(poc),
         .intra_cost_valid(intra_cost_valid),
         .intra_rd_cost(intra_rd_cost),
         .intra_best_mode(intra_best_mode),
@@ -68,6 +79,9 @@ module tb_mode_decision();
         .inter_rd_cost(inter_rd_cost),
         .inter_best_mv_x(inter_best_mv_x),
         .inter_best_mv_y(inter_best_mv_y),
+        .merge_cand_valid(merge_cand_valid),
+        .merge_cand_mv_x_flat(merge_cand_mv_x_flat),
+        .merge_cand_mv_y_flat(merge_cand_mv_y_flat),
         .rate_cost_valid(rate_cost_valid),
         .est_bit_rate(est_bit_rate),
         .eval_intra_start(eval_intra_start),
@@ -77,7 +91,10 @@ module tb_mode_decision();
         .best_is_intra(best_is_intra),
         .best_intra_mode(best_intra_mode),
         .best_inter_mv_x(best_inter_mv_x),
-        .best_inter_mv_y(best_inter_mv_y)
+        .best_inter_mv_y(best_inter_mv_y),
+        .best_merge_flag(best_merge_flag),
+        .best_merge_idx(best_merge_idx),
+        .best_skip_flag(best_skip_flag)
     );
 
     //-------------------------------------------------------------------------
@@ -113,11 +130,15 @@ module tb_mode_decision();
         pu_depth = 0;
         slice_type = 0;
         qp = 32;
+        poc = 0;
         intra_rd_cost = 0;
         intra_best_mode = 0;
         inter_rd_cost = 0;
         inter_best_mv_x = 0;
         inter_best_mv_y = 0;
+        merge_cand_valid = 5'b00000;
+        merge_cand_mv_x_flat = 50'd0;
+        merge_cand_mv_y_flat = 50'd0;
         rate_cost_valid = 0;
         est_bit_rate = 0;
 
@@ -193,6 +214,71 @@ module tb_mode_decision();
             $display("PASS: B-Slice 8x8 correctly forced leaf (split_flag=0) despite high cost.");
         else
             $display("FAIL: B-Slice 8x8 tried to split deeper than max depth!");
+
+        #50;
+        
+        $display("=== TEST 4: P-Slice 16x16 (Merge Mode Wins, Skip Mode Triggered) ===");
+        slice_type = 1; // P-Slice
+        pu_size = 16;
+        pu_depth = 2;   // 16x16 depth = 2
+        qp = 32;
+        
+        // Mock AMVP costs (Threshold is 15,000 for 16x16)
+        intra_rd_cost = 30000;
+        inter_rd_cost = 25000; 
+        inter_best_mv_x = 12'd40;
+        inter_best_mv_y = 12'd20;
+
+        // Mock Merge candidate: candidate 0 is valid and has MV very close to inter_best_mv
+        // Candidate 0: mv_x = 10 (which is 10 << 2 = 40 qpel), mv_y = 5 (5 << 2 = 20 qpel)
+        merge_cand_valid = 5'b00001;
+        merge_cand_mv_x_flat = {40'd0, 10'sd10}; // index 0: 10
+        merge_cand_mv_y_flat = {40'd0, 10'sd5};  // index 0: 5
+        
+        @(posedge clk);
+        pu_valid = 1;
+        @(posedge clk);
+        pu_valid = 0;
+
+        wait(split_valid);
+        @(posedge clk);
+        // Best cost with Merge = Inter Cost (25000) - rate delta (saving 9 bits * lambda)
+        // With lambda=86 (QP=32), saving 9 bits is 9 * 86 = 774.
+        // Therefore, merge cost = 25000 - 774 = 24226. Wait! In mode_decision.v:
+        // latched_inter_cost = inter_rd_cost (25000) + lambda * 12 (1032) = 26032
+        // best_merge_cost    = inter_rd_cost (25000) + lambda * 3 (258)   = 25258
+        // Clearly, best_merge_cost < latched_inter_cost, so Merge wins!
+        // Also, skip_threshold for QP=32 is 16.
+        // Wait, best_skip_flag is set if best_merge_cost < skip_threshold?
+        // Let's check skip_threshold in mode_decision.v:
+        // skip_threshold = (cur_qp < 40) ? 16 ...
+        // Wait, best_merge_cost (25258) is way larger than skip_threshold (16).
+        // Let's modify QP or make the mock cost extremely low so skip triggers.
+        // Let's set QP = 16 (lambda = 2, skip_threshold = 2)
+        // Or keep QP = 32, but mock inter_rd_cost = 5 (very low distortion).
+        // Then best_merge_cost = 5 + 86 * 3 = 263, still > 16.
+        // Oh, wait! The lambda cost estimation is included in best_merge_cost.
+        // So for skip to trigger, the total rate-distortion cost (including bits) must be low.
+        // Let's make QP = 10 (lambda = 0, skip_threshold = 2).
+        // If QP = 10, lambda = 0.
+        // inter_rd_cost = 1 (very low distortion).
+        // Then best_merge_cost = 1 + 0 = 1, which is < skip_threshold (2).
+        // This will trigger skip_flag!
+        qp = 10;
+        inter_rd_cost = 1;
+        intra_rd_cost = 50;
+
+        @(posedge clk);
+        pu_valid = 1;
+        @(posedge clk);
+        pu_valid = 0;
+
+        wait(split_valid);
+        @(posedge clk);
+        if (best_merge_flag == 1'b1 && best_skip_flag == 1'b1 && split_flag == 1'b0)
+            $display("PASS: P-Slice 16x16 Merge wins and skip_flag=1 triggered successfully. Cost: %0d", best_rd_cost);
+        else
+            $display("FAIL: P-Slice 16x16 Merge/Skip failed. Merge: %b, Skip: %b, Split: %b, Cost: %0d", best_merge_flag, best_skip_flag, split_flag, best_rd_cost);
 
         #50;
         $display("All tests completed.");

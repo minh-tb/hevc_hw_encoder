@@ -58,6 +58,8 @@ module ctu_partitioner (
     //-------------------------------------------------------------------------
     input  wire         ctu_valid,
     output wire         ctu_ready,
+    output wire         ctu_accepted,
+    input  wire         ctu_is_last,
 
     //-------------------------------------------------------------------------
     // CU output stream to mode_decision
@@ -69,7 +71,8 @@ module ctu_partitioner (
     output reg  [5:0]   cu_y,          // CU top-left y within CTU
     output reg  [6:0]   cu_size,       // 8, 16, 32, 64
     output reg  [1:0]   cu_depth,      // 0=64, 1=32, 2=16, 3=8
-    output reg          cu_is_last_in_ctu,  // last leaf CU of this CTU
+    output wire         cu_is_last_in_ctu,  // last leaf CU of this CTU
+    output wire         cu_is_last_ctu,     // CTU was the last in slice/frame
 
     //-------------------------------------------------------------------------
     // Split feedback from mode_decision
@@ -127,18 +130,22 @@ module ctu_partitioner (
     reg [6:0]  leaf_count;
     reg [6:0]  expected_leaves; // set when CTU is fully determined (not used in simplified version)
 
-    assign ctu_ready   = (state == S_IDLE);
-    assign split_ready = (state == S_SPLIT);
+    assign ctu_ready    = (state == S_IDLE);
+    assign ctu_accepted = (state == S_IDLE) && ctu_valid;
+    assign split_ready  = (state == S_SPLIT);
 
     integer ki;
 
+    reg        cur_is_last_ctu;
+    assign cu_is_last_ctu = cur_is_last_ctu;
+
     always @(posedge clk) begin
         if (!rst_n) begin
-            state       <= S_IDLE;
-            sp          <= 4'd0;
-            cu_valid    <= 1'b0;
-            cu_is_last_in_ctu <= 1'b0;
-            leaf_count  <= 7'd0;
+            state           <= S_IDLE;
+            sp              <= 4'd0;
+            cu_valid        <= 1'b0;
+            leaf_count      <= 7'd0;
+            cur_is_last_ctu <= 1'b0;
             for (ki = 0; ki < STACK_DEPTH; ki = ki + 1)
                 stack[ki] <= {STACK_W{1'b0}};
         end else begin
@@ -148,9 +155,9 @@ module ctu_partitioner (
                 //--------------------------------------------------------------
                 S_IDLE: begin
                     cu_valid <= 1'b0;
-                    cu_is_last_in_ctu <= 1'b0;
                     if (ctu_valid) begin
-                        leaf_count    <= 7'd0;
+                        leaf_count      <= 7'd0;
+                        cur_is_last_ctu <= ctu_is_last;
 
                         // Push root CU: x=0, y=0, size=64, depth=0
                         stack[0] <= {6'd0, 6'd0, 7'd64, 2'd0};
@@ -174,7 +181,6 @@ module ctu_partitioner (
                         cu_y           <= top_y;
                         cu_size        <= top_size;
                         cu_depth       <= top_depth;
-                        cu_is_last_in_ctu <= 1'b0;  // updated on split decision
 
                         if (cu_valid && split_valid) begin
                             state <= S_SPLIT;
@@ -206,17 +212,11 @@ module ctu_partitioner (
                     end
                 end
             endcase
-
-            // Assert is_last_in_ctu on the final leaf
-            // Detected when stack goes to 0 after a leaf pop
-            if (state == S_SPLIT && split_valid &&
-                (!split_flag || top_depth == 2'd3) &&
-                sp == 4'd1) begin
-                // This is the last leaf — mark it
-                cu_is_last_in_ctu <= 1'b1;
-            end
         end
     end
+
+    // The CU is the last in the CTU if its bottom-right corner reaches (64,64)
+    assign cu_is_last_in_ctu = ({1'b0, cu_x} + cu_size == 7'd64) && ({1'b0, cu_y} + cu_size == 7'd64);
 
     //-------------------------------------------------------------------------
     // Simulation checks

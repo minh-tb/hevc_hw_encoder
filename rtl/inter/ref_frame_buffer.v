@@ -1,3 +1,4 @@
+`timescale 1ns / 1ps
 //=============================================================================
 // ref_frame_buffer.v
 // Decoded Reference Frame Buffer — Ping-Pong SRAM + AXI DDR Interface
@@ -167,7 +168,7 @@ module ref_frame_buffer #(
     // =========================================================================
 
     // Clamp signed coordinate to [0, max-1]
-    function [11:0] clamp_coord;
+    function automatic [11:0] clamp_coord;
         input signed [12:0] v;
         input [11:0]         maxv;
         begin
@@ -182,7 +183,7 @@ module ref_frame_buffer #(
 
     // Compute DDR byte address for pixel (x, y, comp, slot)
     // Matches frame_store.v address formula
-    function [AXI_AW-1:0] pixel_byte_addr;
+    function automatic [AXI_AW-1:0] pixel_byte_addr;
         input [11:0]  px, py;
         input [11:0]  pstride;
         input [32:0]  pcomp_base;
@@ -195,7 +196,7 @@ module ref_frame_buffer #(
     endfunction
 
     // Extract pixel from 256-bit beat at byte-address px_addr within beat
-    function [PIXEL_WIDTH-1:0] extract_pixel;
+    function automatic [PIXEL_WIDTH-1:0] extract_pixel;
         input [AXI_DW-1:0] beat;
         input [AXI_AW-1:0] px_addr;   // full pixel byte address
         reg   [2:0]  word_idx;
@@ -228,6 +229,24 @@ module ref_frame_buffer #(
                         cur_y_cl, stride, comp_base, slot_base);
     wire spans_two_beats = (px_last_addr[AXI_AW-1:5] != px0_addr[AXI_AW-1:5]);
 
+    // Continuous parallel extraction for all columns
+    wire signed [12:0]     row_x_raw   [0:BLK_EXT_Y-1];
+    wire [11:0]            row_x_cl    [0:BLK_EXT_Y-1];
+    wire [AXI_AW-1:0]      row_px_addr [0:BLK_EXT_Y-1];
+    wire [AXI_DW-1:0]      row_src_beat[0:BLK_EXT_Y-1];
+    wire [PIXEL_WIDTH-1:0] row_pixel   [0:BLK_EXT_Y-1];
+
+    genvar gci;
+    generate
+        for (gci = 0; gci < BLK_EXT_Y; gci = gci + 1) begin : gen_row_px
+            assign row_x_raw[gci]    = req_x_r + gci;
+            assign row_x_cl[gci]     = clamp_coord(row_x_raw[gci], frame_w);
+            assign row_px_addr[gci]  = pixel_byte_addr(row_x_cl[gci], cur_y_cl, stride, comp_base, slot_base);
+            assign row_src_beat[gci] = (row_px_addr[gci][AXI_AW-1:5] == beat1_addr[AXI_AW-1:5]) ? beat1_data : beat2_data;
+            assign row_pixel[gci]    = extract_pixel(row_src_beat[gci], row_px_addr[gci]);
+        end
+    endgenerate
+
     // =========================================================================
     // Main FSM
     // =========================================================================
@@ -240,6 +259,18 @@ module ref_frame_buffer #(
             ref_resp_valid <= 1'b0;
             axi_arvalid    <= 1'b0;
             row_idx        <= 4'd0;
+            comp_r         <= 2'd0;
+            slot_r         <= 3'd0;
+            req_x_r        <= 13'sd0;
+            req_y_r        <= 13'sd0;
+            frame_w        <= FRAME_W_Y[11:0];
+            frame_h        <= FRAME_H_Y[11:0];
+            stride         <= FRAME_W_Y[11:0];
+            comp_base      <= 33'd0;
+            slot_base      <= 33'd0;
+            need_beat2     <= 1'b0;
+            beat1_data     <= {AXI_DW{1'b0}};
+            beat2_data     <= {AXI_DW{1'b0}};
         end else begin
             axi_arvalid    <= 1'b0;
             ref_resp_valid <= 1'b0;
@@ -247,27 +278,29 @@ module ref_frame_buffer #(
             case (state)
 
             // ---------------------------------------------------------------
+            // ---------------------------------------------------------------
             S_IDLE: begin
                 ref_req_ready <= 1'b1;
                 if (ref_req_valid) begin
                     ref_req_ready <= 1'b0;
+                    // Latch all request inputs NOW while they are valid
+                    comp_r    <= ref_req_comp;
+                    slot_r    <= ref_req_slot;
+                    req_x_r   <= {ref_req_x[11], ref_req_x};
+                    req_y_r   <= {ref_req_y[11], ref_req_y};
                     state         <= S_INIT;
                 end
             end
 
             // ---------------------------------------------------------------
-            // INIT — latch request, resolve frame parameters
+            // INIT — resolve frame parameters from latched request
             // ---------------------------------------------------------------
             S_INIT: begin
-                comp_r    <= ref_req_comp;
-                slot_r    <= ref_req_slot;
-                req_x_r   <= {ref_req_x[11], ref_req_x}; // fix: properly sign-extend for border math
-                req_y_r   <= {ref_req_y[11], ref_req_y};
                 row_idx   <= 4'd0;
-                slot_base <= {30'b0, ref_req_slot} * SLOT_STRIDE;
+                slot_base <= {30'b0, slot_r} * SLOT_STRIDE;
 
                 // Component-specific frame dimensions and DDR base offset
-                case (ref_req_comp)
+                case (comp_r)
                     2'd0: begin  // Luma
                         frame_w   <= FRAME_W_Y;
                         frame_h   <= FRAME_H_Y;
@@ -287,39 +320,42 @@ module ref_frame_buffer #(
                         comp_base <= CR_OFFSET;
                     end
                 endcase
+
                 state <= S_ROW_AR1;
             end
 
             // ---------------------------------------------------------------
-            // ROW_AR1 — issue AXI AR for beat 1 of current row
+            // ROW_AR1 — send AXI read request for beat 1 of current row
             // ---------------------------------------------------------------
             S_ROW_AR1: begin
-                axi_arvalid  <= 1'b1;
-                axi_araddr   <= beat1_addr;
-                axi_arlen    <= 8'd0;         // 1 beat
-                axi_arsize   <= 3'b101;       // 32 bytes
-                axi_arburst  <= 2'b01;        // INCR
-                need_beat2   <= spans_two_beats;
+                axi_arvalid <= 1'b1;
+                axi_araddr  <= beat1_addr;
+                axi_arlen   <= 8'd0;       // 1 beat
+                axi_arsize  <= 3'b101;     // 32 bytes (256 bits)
+                axi_arburst <= 2'b01;      // INCR
+                need_beat2  <= spans_two_beats;
                 if (axi_arvalid && axi_arready) begin
-                    $display("Time=%0t: [ref_frame_buf] AR1 accepted for row_idx=%0d", $time, row_idx);
                     axi_arvalid <= 1'b0;
                     state       <= S_ROW_R1;
                 end
             end
 
             // ---------------------------------------------------------------
-            // ROW_R1 — receive beat 1 data
+            // ROW_R1 — wait for read data from beat 1
             // ---------------------------------------------------------------
             S_ROW_R1: begin
-                if (axi_rvalid) begin
-                    $display("Time=%0t: [ref_frame_buf] R1 received for row_idx=%0d", $time, row_idx);
+                axi_arvalid <= 1'b0;
+                if (axi_rvalid && axi_rready) begin
                     beat1_data <= axi_rdata;
-                    state      <= need_beat2 ? S_ROW_AR2 : S_ROW_STORE;
+                    if (need_beat2)
+                        state <= S_ROW_AR2;
+                    else
+                        state <= S_ROW_STORE;
                 end
             end
 
             // ---------------------------------------------------------------
-            // ROW_AR2 / ROW_R2 — second beat (when row spans beat boundary)
+            // ROW_AR2 — send AXI read request for beat 2 (only if needed)
             // ---------------------------------------------------------------
             S_ROW_AR2: begin
                 axi_arvalid <= 1'b1;
@@ -333,38 +369,24 @@ module ref_frame_buffer #(
                 end
             end
 
+            // ---------------------------------------------------------------
+            // ROW_R2 — wait for read data from beat 2
+            // ---------------------------------------------------------------
             S_ROW_R2: begin
-                if (axi_rvalid) begin
+                axi_arvalid <= 1'b0;
+                if (axi_rvalid && axi_rready) begin
                     beat2_data <= axi_rdata;
                     state      <= S_ROW_STORE;
                 end
             end
 
             // ---------------------------------------------------------------
-            // ROW_STORE — extract BLK_EXT pixels for this row into ext_buf
-            //
-            // For each column ci (0 .. blk_ext_cur-1):
-            //   x_raw = req_x + ci  (possibly negative / out of frame)
-            //   x_cl  = clamp(x_raw, 0, frame_w-1)
-            //   px_addr = pixel_byte_addr(x_cl, cur_y_cl)
-            //   If px_addr in beat1: use beat1_data, else beat2_data
-            //   Extract pixel using extract_pixel()
+            // ROW_STORE — extract all blk_ext_cur pixels from beat1 / beat2
             // ---------------------------------------------------------------
             S_ROW_STORE: begin
                 for (ci = 0; ci < BLK_EXT_Y; ci = ci + 1) begin
-                    if (ci < blk_ext_cur) begin : px_extract
-                        reg signed [12:0] x_raw;
-                        reg [11:0]         x_cl;
-                        reg [AXI_AW-1:0]  px_addr;
-                        reg [AXI_DW-1:0]  src_beat;
-                        x_raw    = req_x_r + ci;
-                        x_cl     = clamp_coord(x_raw, frame_w);
-                        px_addr  = pixel_byte_addr(x_cl, cur_y_cl,
-                                                   stride, comp_base, slot_base);
-                        // Select which beat the pixel came from
-                        src_beat = (px_addr[AXI_AW-1:5] == beat1_addr[AXI_AW-1:5])
-                                 ? beat1_data : beat2_data;
-                        ext_buf[row_idx][ci] <= extract_pixel(src_beat, px_addr);
+                    if (ci < blk_ext_cur) begin
+                        ext_buf[row_idx][ci] <= row_pixel[ci];
                     end
                 end
                 state <= S_NEXT_ROW;
@@ -428,16 +450,15 @@ module ref_frame_buffer #(
     // Simulation assertions
     // =========================================================================
     // synthesis translate_off
-    always @(posedge clk) begin
-        if (ref_resp_valid)
-            $display("Time=%0t: [ref_frame_buf] resp: comp=%0d slot=%0d x=%0d y=%0d blk_ext=%0d",
-                     $time, comp_r, slot_r, $signed(req_x_r), $signed(req_y_r), blk_ext_cur);
-        if (state == S_ROW_STORE) begin
-            if (cur_y_cl != cur_y_raw[11:0] && cur_y_raw >= 13'sd0)
-                $display("INFO [ref_frame_buf] y clamped: raw=%0d → %0d (frame_h=%0d)",
-                         $signed(cur_y_raw), cur_y_cl, frame_h);
-        end
-    end
-    // synthesis translate_off
+    // always @(posedge clk) begin
+    //     if (rst_n && state != S_IDLE) begin
+    //         $display("Time=%0t: [ref_frame_buf] state=%0d row_idx=%0d arvalid=%b arready=%b rvalid=%b rready=%b need_b2=%b",
+    //                  $time, state, row_idx, axi_arvalid, axi_arready, axi_rvalid, axi_rready, need_beat2);
+    //     end
+    //     if (ref_resp_valid)
+    //         $display("Time=%0t: [ref_frame_buf] resp: comp=%0d slot=%0d x=%0d y=%0d blk_ext=%0d",
+    //                  $time, comp_r, slot_r, $signed(req_x_r), $signed(req_y_r), blk_ext_cur);
+    // end
+    // synthesis translate_on
 
 endmodule

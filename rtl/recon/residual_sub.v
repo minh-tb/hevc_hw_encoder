@@ -1,8 +1,10 @@
 `timescale 1ns / 1ps
 
+`include "parameter_pkg.vh"
+
 module residual_sub #(
-    parameter PIXEL_WIDTH = 10,   // 10-bit HEVC profile
-    parameter RESIDUAL_WIDTH = 11 // 11-bit signed for 10-bit differences
+    parameter PIXEL_WIDTH    = `PIXEL_WIDTH,
+    parameter RESIDUAL_WIDTH = PIXEL_WIDTH + 1 // signed difference needs +1 bit
 )(
     input  wire                        clk,
     input  wire                        rst_n,

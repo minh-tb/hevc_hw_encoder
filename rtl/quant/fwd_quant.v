@@ -52,6 +52,7 @@ module fwd_quant (
     // QP input — fixed at QP_DEFAULT=32 when MaxDeltaQP=0
     // Accept as port for future delta-QP extension
     input  wire [5:0]   qp,                     // 0..51
+    input  wire [1:0]   tu_comp,                // 0=Y, 1=Cb, 2=Cr
 
     // TU context
     input  wire [2:0]   tu_size_log2,           // 2=4x4 .. 5=32x32
@@ -92,6 +93,37 @@ module fwd_quant (
     endfunction
 
     //-------------------------------------------------------------------------
+    // HEVC Table 8-9 Chroma QP Mapping
+    //-------------------------------------------------------------------------
+    function automatic [5:0] chroma_qp_map;
+        input [5:0] qp_y;
+        begin
+            if (qp_y < 30) chroma_qp_map = qp_y;
+            else if (qp_y == 30) chroma_qp_map = 29;
+            else if (qp_y == 31) chroma_qp_map = 30;
+            else if (qp_y == 32) chroma_qp_map = 31;
+            else if (qp_y == 33) chroma_qp_map = 32;
+            else if (qp_y == 34) chroma_qp_map = 33;
+            else if (qp_y == 35) chroma_qp_map = 33;
+            else if (qp_y == 36) chroma_qp_map = 34;
+            else if (qp_y == 37) chroma_qp_map = 34;
+            else if (qp_y == 38) chroma_qp_map = 35;
+            else if (qp_y == 39) chroma_qp_map = 35;
+            else if (qp_y == 40) chroma_qp_map = 36;
+            else if (qp_y == 41) chroma_qp_map = 36;
+            else if (qp_y == 42) chroma_qp_map = 37;
+            else if (qp_y == 43) chroma_qp_map = 37;
+            else if (qp_y == 44) chroma_qp_map = 37;
+            else if (qp_y == 45) chroma_qp_map = 38;
+            else if (qp_y == 46) chroma_qp_map = 38;
+            else if (qp_y == 47) chroma_qp_map = 38;
+            else chroma_qp_map = 39;
+        end
+    endfunction
+
+    wire [5:0] actual_qp = (tu_comp == 0) ? qp : chroma_qp_map(qp);
+
+    //-------------------------------------------------------------------------
     // qbits computation
     // Mapped exactly from HM TComTrQuant::xQuant:
     // iTransformShift = MAX_TR_DYNAMIC_RANGE - BIT_DEPTH - tu_size_log2
@@ -103,14 +135,14 @@ module fwd_quant (
     localparam MAX_TR_DYNAMIC_RANGE = 15;
     localparam BIT_DEPTH_ADJ       = (`BIT_DEPTH > 8) ? (`BIT_DEPTH - 8) : 0;
 
-    wire [3:0] qp_div6 = (qp >= 48) ? 4'd8 :
-                         (qp >= 42) ? 4'd7 :
-                         (qp >= 36) ? 4'd6 :
-                         (qp >= 30) ? 4'd5 :
-                         (qp >= 24) ? 4'd4 :
-                         (qp >= 18) ? 4'd3 :
-                         (qp >= 12) ? 4'd2 :
-                         (qp >=  6) ? 4'd1 : 4'd0;
+    wire [3:0] qp_div6 = (actual_qp >= 48) ? 4'd8 :
+                         (actual_qp >= 42) ? 4'd7 :
+                         (actual_qp >= 36) ? 4'd6 :
+                         (actual_qp >= 30) ? 4'd5 :
+                         (actual_qp >= 24) ? 4'd4 :
+                         (actual_qp >= 18) ? 4'd3 :
+                         (actual_qp >= 12) ? 4'd2 :
+                         (actual_qp >=  6) ? 4'd1 : 4'd0;
 
     wire [4:0] cQP_per = qp_div6 + BIT_DEPTH_ADJ[4:0];
 
@@ -121,14 +153,14 @@ module fwd_quant (
     //-------------------------------------------------------------------------
     // Multiply factor MF = g_quantScales[QP%6]
     //-------------------------------------------------------------------------
-    wire [2:0]  qp_mod6 = (qp >= 48) ? (qp - 48) :
-                           (qp >= 42) ? (qp - 42) :
-                           (qp >= 36) ? (qp - 36) :
-                           (qp >= 30) ? (qp - 30) :
-                           (qp >= 24) ? (qp - 24) :
-                           (qp >= 18) ? (qp - 18) :
-                           (qp >= 12) ? (qp - 12) :
-                           (qp >=  6) ? (qp -  6) : qp[2:0];
+    wire [2:0]  qp_mod6 = (actual_qp >= 48) ? (actual_qp - 48) :
+                           (actual_qp >= 42) ? (actual_qp - 42) :
+                           (actual_qp >= 36) ? (actual_qp - 36) :
+                           (actual_qp >= 30) ? (actual_qp - 30) :
+                           (actual_qp >= 24) ? (actual_qp - 24) :
+                           (actual_qp >= 18) ? (actual_qp - 18) :
+                           (actual_qp >= 12) ? (actual_qp - 12) :
+                           (actual_qp >=  6) ? (actual_qp -  6) : actual_qp[2:0];
 
     wire [16:0] MF = quant_scale(qp_mod6);
 
@@ -193,7 +225,7 @@ module fwd_quant (
     // Levels above 32767 are extremely rare in practice at QP=32
     wire signed [`COEFF_WIDTH-1:0] level_clipped =
         (level_signed >  32767) ?  16'sd32767 :
-        (level_signed < -32768) ? -16'sd32768 :
+        (level_signed < -32768) ? -17'sd32768 :
         level_signed[`COEFF_WIDTH-1:0];
 
     //-------------------------------------------------------------------------

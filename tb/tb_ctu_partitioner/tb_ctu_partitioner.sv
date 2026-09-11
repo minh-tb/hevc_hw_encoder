@@ -47,12 +47,8 @@ module tb_ctu_partitioner;
     ctu_partitioner dut (
         .clk(clk), .rst_n(rst_n),
         .ctu_valid(ctu_valid), .ctu_ready(ctu_ready),
-        .ctu_addr(ctu_addr), .ctu_x(ctu_x), .ctu_y(ctu_y), .poc(poc),
-        .slice_type(slice_type), .qp(qp),
         .cu_valid(cu_valid), .cu_ready(cu_ready),
         .cu_x(cu_x_out), .cu_y(cu_y_out), .cu_size(cu_size), .cu_depth(cu_depth),
-        .cu_ctu_addr(cu_ctu_addr), .cu_ctu_x(cu_ctu_x), .cu_ctu_y(cu_ctu_y),
-        .cu_poc(cu_poc), .cu_slice_type(cu_slice_type), .cu_qp(cu_qp),
         .cu_is_last_in_ctu(cu_is_last_in_ctu),
         .split_valid(split_valid), .split_flag(split_flag), .split_ready(split_ready)
     );
@@ -100,10 +96,23 @@ module tb_ctu_partitioner;
     eval_t exp;
     bit ctu_done_pulse = 0;
 
+    bit decision_q[$];
+
+    reg in_eval;
+    reg new_cu_presented_r;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            in_eval <= 0;
+            new_cu_presented_r <= 0;
+        end else begin
+            in_eval <= (dut.state == 2'd2);
+            new_cu_presented_r <= (dut.state == 2'd2) && !in_eval;
+        end
+    end
+
     always @(posedge clk) begin
         // Randomize the CU ready signal to test pipeline back-pressure
         cu_ready <= ($urandom() % 100 < 80); 
-        split_valid <= 1'b0;
 
         if (cu_is_last_in_ctu) begin
             ctu_done_pulse = 1;
@@ -113,12 +122,15 @@ module tb_ctu_partitioner;
             end
         end
 
-        if (cu_valid && cu_ready) begin
+        if (new_cu_presented_r && cu_valid) begin
             if (exp_q.size() == 0) begin
                 $display("ERROR: Unexpected CU output from DUT at t=%0t", $time);
                 total_errors++;
             end else begin
                 exp = exp_q.pop_front();
+                $display("Time=%0t | Monitor: Pop CU (%0d,%0d) size=%0d depth=%0d, split=%0d. exp_q left=%0d", 
+                         $time, exp.x, exp.y, exp.size, exp.depth, exp.split, exp_q.size());
+                decision_q.push_back(exp.split);
                 
                 // Check coordinates
                 if (cu_x_out !== exp.x || cu_y_out !== exp.y || cu_size !== exp.size || cu_depth !== exp.depth) begin
@@ -126,14 +138,29 @@ module tb_ctu_partitioner;
                              exp.x, exp.y, exp.size, exp.depth, cu_x_out, cu_y_out, cu_size, cu_depth);
                     total_errors++;
                 end
-                
-                // Simulate Mode Decision Engine delay (1 to 4 cycles)
-                repeat($urandom_range(1, 4)) @(posedge clk);
-                wait(split_ready); // Wait for partitioner to be ready to receive decision
-                
-                split_valid <= 1'b1;
-                split_flag  <= exp.split;
             end
+        end
+    end
+
+    // Separate non-blocking thread to handle split decision feedback
+    initial begin
+        split_valid = 0;
+        split_flag  = 0;
+        forever begin
+            wait(decision_q.size() > 0);
+            $display("Time=%0t | MD Thread: Found decision pending. Delaying...", $time);
+            repeat($urandom_range(1, 4)) @(posedge clk);
+            @(negedge clk);
+            split_valid <= 1'b1;
+            split_flag  <= decision_q.pop_front();
+            $display("Time=%0t | MD Thread: Asserting split_valid=%0d, split_flag=%0d", $time, 1'b1, split_flag);
+            @(posedge clk);
+            wait(split_ready);
+            $display("Time=%0t | MD Thread: split_ready asserted. Waiting for exit...", $time);
+            wait(!split_ready);
+            $display("Time=%0t | MD Thread: S_SPLIT exited. Deasserting split_valid.", $time);
+            @(negedge clk);
+            split_valid <= 1'b0;
         end
     end
 
@@ -141,6 +168,7 @@ module tb_ctu_partitioner;
     // Test Sequence
     //=========================================================================
     task automatic test_depth(int target_depth);
+        $display("Time=%0t | Test Sequence: Starting test_depth(%0d)", $time, target_depth);
         @(negedge clk);
         gen_tree(0, 0, 64, 0, target_depth);
         ctu_done_pulse = 0;
@@ -148,11 +176,14 @@ module tb_ctu_partitioner;
         ctu_valid <= 1'b1;
         ctu_addr  <= target_depth; // Just a dummy ID
         @(negedge clk);
+        $display("Time=%0t | Test Sequence: Waiting for ctu_ready...", $time);
         wait(ctu_ready);
         ctu_valid <= 1'b0;
+        $display("Time=%0t | Test Sequence: ctu_ready seen. Waiting for exp_q empty and ctu_done...", $time);
         
         // Wait until queue is completely drained and completion pulse is seen
         wait(exp_q.size() == 0 && ctu_done_pulse == 1);
+        $display("Time=%0t | Test Sequence: test_depth(%0d) finished!", $time, target_depth);
         repeat(10) @(posedge clk);
     endtask
 

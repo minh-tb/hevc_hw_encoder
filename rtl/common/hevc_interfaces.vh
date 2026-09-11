@@ -80,10 +80,12 @@
 // Used between: slice_controller → ctu_partitioner → all prediction units
 //
 // Signal            Width   Description
-// ctu_addr          16      Linear CTU address (raster scan)
-// ctu_x, ctu_y      10      CTU position in frame (unit: CTU = 64px)
-// frame_width       11      Frame width  in CTUs (max 4096/64=64 → 7-bit, use 11 for px)
-// frame_height      11      Frame height in CTUs
+// ctu_addr          13      Linear CTU address (raster scan)
+//                           4K: ceil(3840/64)*ceil(2160/64) = 60*34 = 2040 CTUs → 11-bit;
+//                           use 13 bits for headroom up to 8K
+// ctu_x, ctu_y      6       CTU column/row index (max 4096/64=64 → 6-bit)
+// frame_width       12      Frame width  in pixels (max 4095 → covers 3840 4K)
+// frame_height      12      Frame height in pixels (max 4095 → covers 2160 4K)
 // slice_type        2       0=B, 1=P, 2=I  (matches HM SliceType)
 // poc               10      Picture order count
 // temporal_id       3       Temporal layer 0..4
@@ -93,18 +95,18 @@
 // ready             1
 //=============================================================================
 `define CTU_INFO_BUS_SIGNALS \
-    logic [15:0]  ctu_addr;     \
-    logic [9:0]   ctu_x;        \
-    logic [9:0]   ctu_y;        \
-    logic [10:0]  frame_width;  \
-    logic [10:0]  frame_height; \
-    logic [1:0]   slice_type;   \
-    logic [9:0]   poc;          \
-    logic [2:0]   temporal_id;  \
-    logic         is_irap;      \
-    logic [5:0]   qp;           \
-    logic         valid;        \
-    logic         ready;
+    logic [`CTU_ADDR_WIDTH-1:0]   ctu_addr;     \
+    logic [`CTU_COORD_WIDTH-1:0]  ctu_x;        \
+    logic [`CTU_COORD_WIDTH-1:0]  ctu_y;        \
+    logic [`FRAME_DIM_WIDTH-1:0]  frame_width;  \
+    logic [`FRAME_DIM_WIDTH-1:0]  frame_height; \
+    logic [1:0]                    slice_type;   \
+    logic [9:0]                    poc;          \
+    logic [2:0]                    temporal_id;  \
+    logic                          is_irap;      \
+    logic [`QP_WIDTH-1:0]          qp;           \
+    logic                          valid;        \
+    logic                          ready;
 
 // Slice type encoding (matches HM SliceType enum)
 `define SLICE_B   2'd0
@@ -222,31 +224,32 @@
 //   integer pel (384) → stored as 384*4 = 1536 → needs 11 bits signed
 //
 // Signal            Width   Description
-// mvx, mvy          16      MV components in qpel units (signed)
-//                           Matches TComMv::m_iHor/m_iVer (Short = int16)
-//                           Range: -32768..+32767 qpel = ±8191 integer pels
-//                           Covers HEVC spec max log2_max_mv_length=15
-//                           For this config SearchRange=384 → max qpel=1536
+// mvx, mvy          12      MV components in qpel units (signed)
+//                           Matches MV_TOTAL_BITS=12 from parameter_pkg.vh
+//                           Range: -2048..+2047 qpel = ±512 integer pels
+//                           Covers SearchRange=32 integer pels (±128 qpel)
+//                           Bus kept at 12 bits; sign-extend to 16 if
+//                           interfacing with HM TComMv (int16) via coercion
 // ref_idx           3       Reference picture index 0..7
 // list              1       RefPicList: 0=L0, 1=L1
-// pu_x, pu_y        7       PU top-left in CTU-relative pixels
-// pu_w, pu_h        7       PU width/height in pixels
+// pu_x, pu_y        6       PU top-left in CTU-relative pixels (0..63)
+// pu_w, pu_h        7       PU width/height in pixels (4..64)
 // mvp_idx           1       MVP index (0 or 1) for MVD coding
 // valid             1
 // ready             1
 //=============================================================================
 `define MV_BUS_SIGNALS \
-    logic signed [15:0]  mvx;     \
-    logic signed [15:0]  mvy;     \
-    logic [2:0]           ref_idx; \
-    logic                 list;    \
-    logic [6:0]           pu_x;   \
-    logic [6:0]           pu_y;   \
-    logic [6:0]           pu_w;   \
-    logic [6:0]           pu_h;   \
-    logic                 mvp_idx;\
-    logic                 valid;  \
-    logic                 ready;
+    logic signed [`MV_TOTAL_BITS-1:0]  mvx;     \
+    logic signed [`MV_TOTAL_BITS-1:0]  mvy;     \
+    logic [`MAX_REF_PICS-1:0]           ref_idx; \
+    logic                               list;    \
+    logic [`CTU_SIZE_LOG2-1:0]          pu_x;   \
+    logic [`CTU_SIZE_LOG2-1:0]          pu_y;   \
+    logic [`CTU_SIZE_LOG2:0]            pu_w;   \
+    logic [`CTU_SIZE_LOG2:0]            pu_h;   \
+    logic                               mvp_idx;\
+    logic                               valid;  \
+    logic                               ready;
 
 // Reference list selector
 `define REF_LIST_0   1'b0

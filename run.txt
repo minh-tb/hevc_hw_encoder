@@ -1,3 +1,0 @@
-mingw32-make all toolset=gcc
-.\TAppEncoder.exe -c D:\UIT_Doc\hevc_hw_encoder\HM\cfg\encoder_randomaccess_main10.cfg -i test.yuv -wdt 1024 -hgt 576 -fr 60 -f 4 -b bitstream.bin --SEIDecodedPictureHash=1 --ConformanceWindowMode=1
-.\TAppDecoder -b bitstream.bin -o dec.yuv 

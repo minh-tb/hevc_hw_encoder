@@ -85,6 +85,13 @@ module recon_unit (
     // Since PU max size is 64x64, we need 4096 depth
     //-------------------------------------------------------------------------
     reg [`PIXEL_WIDTH-1:0] pred_sram [0:4095];
+`ifndef SYNTHESIS
+    integer rec_init_i;
+    initial begin
+        for (rec_init_i = 0; rec_init_i < 4096; rec_init_i = rec_init_i + 1)
+            pred_sram[rec_init_i] = 10'd512;
+    end
+`endif
 
     // Write Port (Prediction)
     always @(posedge clk) begin

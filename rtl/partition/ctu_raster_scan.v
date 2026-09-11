@@ -50,25 +50,26 @@ module ctu_raster_scan #(
     input  wire         frame_start,    // pulse: begin new frame scan
     input  wire [9:0]   frame_poc,      // POC for this frame
     input  wire [1:0]   frame_slice_type, // SLICE_B/P/I
+    input  wire [5:0]   frame_qp_in,    // Dynamic QP from rate controller
 
     // CTU output stream
     output reg          ctu_valid,
     input  wire         ctu_ready,
 
     // CTU address outputs (CTU_INFO_BUS_SIGNALS subset)
-    output reg  [15:0]  ctu_addr,       // linear raster address
-    output reg  [9:0]   ctu_x,          // CTU column (unit: CTU = 64px)
-    output reg  [9:0]   ctu_y,          // CTU row
-    output reg  [13:0]  frame_width_px, // frame width in pixels
-    output reg  [13:0]  frame_height_px,// frame height in pixels
+    output wire [`CTU_ADDR_WIDTH-1:0]  ctu_addr,       // linear raster address
+    output wire [`CTU_COORD_WIDTH-1:0] ctu_x,          // CTU column (unit: CTU = 64px)
+    output wire [`CTU_COORD_WIDTH-1:0] ctu_y,          // CTU row
+    output reg  [`FRAME_DIM_WIDTH-1:0] frame_width_px, // frame width in pixels
+    output reg  [`FRAME_DIM_WIDTH-1:0] frame_height_px,// frame height in pixels
     output reg  [9:0]   poc,
     output reg  [1:0]   slice_type,
     output reg  [5:0]   qp,             // base QP from parameter_pkg
 
     // Position flags
-    output reg          is_first_in_row,
-    output reg          is_last_in_row,
-    output reg          is_last_ctu,    // last CTU of frame
+    output wire         is_first_in_row,
+    output wire         is_last_in_row,
+    output wire         is_last_ctu,    // last CTU of frame
 
     // Frame-level status
     output reg          frame_active,   // 1 while scanning a frame
@@ -87,17 +88,24 @@ module ctu_raster_scan #(
     localparam H_CTUS     = (FRAME_HEIGHT + `CTU_SIZE - 1) >> CTU_LOG2;  // 34 for 2160
     localparam TOTAL_CTUS = W_CTUS * H_CTUS;                    // 2040 for 4K
 
-    // Width/height fit in 10-bit (max 4096/64=64 CTUs per dim for 4K, easily 10-bit)
-    localparam [9:0] W_CTUS_10 = W_CTUS[9:0];
-    localparam [9:0] H_CTUS_10 = H_CTUS[9:0];
-    localparam [15:0] TOTAL_16 = TOTAL_CTUS[15:0];
+    // Width/height fit in CTU_COORD_WIDTH (max 4096/64=64 CTUs per dim for 4K, easily 6-bit)
+    localparam [`CTU_COORD_WIDTH-1:0] W_CTUS_COORD = W_CTUS[`CTU_COORD_WIDTH-1:0];
+    localparam [`CTU_COORD_WIDTH-1:0] H_CTUS_COORD = H_CTUS[`CTU_COORD_WIDTH-1:0];
+    localparam [`CTU_ADDR_WIDTH-1:0] TOTAL_ADDR = TOTAL_CTUS[`CTU_ADDR_WIDTH-1:0];
 
     //-------------------------------------------------------------------------
     // Counters
     //-------------------------------------------------------------------------
-    reg [9:0]  cur_x;       // current CTU column 0..W_CTUS-1
-    reg [9:0]  cur_y;       // current CTU row    0..H_CTUS-1
-    reg [15:0] cur_addr;    // linear raster addr 0..TOTAL_CTUS-1
+    reg [`CTU_COORD_WIDTH-1:0] cur_x;       // current CTU column 0..W_CTUS-1
+    reg [`CTU_COORD_WIDTH-1:0] cur_y;       // current CTU row    0..H_CTUS-1
+    reg [`CTU_ADDR_WIDTH-1:0]  cur_addr;    // linear raster addr 0..TOTAL_CTUS-1
+
+    assign ctu_addr        = cur_addr;
+    assign ctu_x           = cur_x;
+    assign ctu_y           = cur_y;
+    assign is_first_in_row = (cur_x == 0);
+    assign is_last_in_row  = (cur_x == W_CTUS_COORD - 1);
+    assign is_last_ctu     = (cur_addr == TOTAL_ADDR - 1);
 
     //-------------------------------------------------------------------------
     // Fire condition
@@ -113,91 +121,53 @@ module ctu_raster_scan #(
             frame_active   <= 1'b0;
             frame_wait_last<= 1'b0;
             frame_done     <= 1'b0;
-            cur_x          <= 10'd0;
-            cur_y          <= 10'd0;
-            cur_addr       <= 16'd0;
-            ctu_addr       <= 16'd0;
-            ctu_x          <= 10'd0;
-            ctu_y          <= 10'd0;
-            frame_width_px <= 14'd0;
-            frame_height_px<= 14'd0;
-            poc            <= 10'd0;
+            cur_x          <= 0;
+            cur_y          <= 0;
+            cur_addr       <= 0;
+            poc            <= 0;
             slice_type     <= `SLICE_B;
             qp             <= `QP_DEFAULT;
-            is_first_in_row<= 1'b0;
-            is_last_in_row <= 1'b0;
-            is_last_ctu    <= 1'b0;
+            frame_width_px <= 0;
+            frame_height_px<= 0;
         end else begin
             frame_done <= 1'b0;   // default pulse-low
 
             if (frame_start && !frame_active) begin
                 // Latch frame parameters and begin scan
                 frame_active    <= 1'b1;
-                cur_x           <= 10'd0;
-                cur_y           <= 10'd0;
-                cur_addr        <= 16'd0;
+                cur_x           <= 0;
+                cur_y           <= 0;
+                cur_addr        <= 0;
+                frame_wait_last <= 1'b0;
                 poc             <= frame_poc;
                 slice_type      <= frame_slice_type;
-                $display("Time=%0t: [CTU_RASTER] Frame started. Latching slice_type=%0d", $time, frame_slice_type);
-                qp              <= `QP_DEFAULT;
+                $display("Time=%0t: [CTU_RASTER] Frame started. Latching slice_type=%0d, qp=%0d", $time, frame_slice_type, (frame_qp_in != 6'd0) ? frame_qp_in : `QP_DEFAULT);
+                qp              <= (frame_qp_in != 6'd0) ? frame_qp_in : `QP_DEFAULT;
                 frame_width_px  <= FRAME_WIDTH[13:0];
                 frame_height_px <= FRAME_HEIGHT[13:0];
-
-                // Present first CTU immediately
                 ctu_valid       <= 1'b1;
-                ctu_addr        <= 16'd0;
-                ctu_x           <= 10'd0;
-                ctu_y           <= 10'd0;
-                is_first_in_row <= 1'b1;
-                is_last_in_row  <= (W_CTUS_10 == 10'd1);
-                is_last_ctu     <= (TOTAL_16  == 16'd1);
             end else if (frame_active && fire) begin
-                // Current CTU accepted — advance to next
-                if (cur_addr == TOTAL_16 - 16'd1) begin
-                    // Last CTU just accepted → transition to wait for completion
+                // Current CTU completed — advance to next or finish frame
+                if (cur_addr == TOTAL_ADDR - 1) begin
+                    // Entire frame completed
                     frame_active    <= 1'b0;
-                    frame_wait_last <= 1'b1;
+                    frame_done      <= 1'b1;
                     ctu_valid       <= 1'b0;
-                    cur_x           <= 10'd0;
-                    cur_y           <= 10'd0;
-                    cur_addr        <= 16'd0;
+                    cur_x           <= 0;
+                    cur_y           <= 0;
+                    cur_addr        <= 0;
                 end else begin
                     // Advance raster position
-                    cur_addr <= cur_addr + 16'd1;
+                    cur_addr <= cur_addr + 1;
 
-                    if (cur_x == W_CTUS_10 - 10'd1) begin
-                        cur_x <= 10'd0;
-                        cur_y <= cur_y + 10'd1;
+                    if (cur_x == W_CTUS_COORD - 1) begin
+                        cur_x <= 0;
+                        cur_y <= cur_y + 1;
                     end else begin
-                        cur_x <= cur_x + 10'd1;
+                        cur_x <= cur_x + 1;
                     end
 
-                    // Register next CTU outputs (one cycle after fire)
-                    // Output reflects the NEXT CTU (the one now being presented)
                     ctu_valid <= 1'b1;
-                end
-            end else if (frame_wait_last && ctu_ready) begin
-                frame_wait_last <= 1'b0;
-                frame_done <= 1'b1;
-            end
-
-            // Update output registers to reflect current (cur_x, cur_y)
-            // These are combinational from the updated counters via a
-            // registered stage — driven from cur_x/cur_y after increment
-            if (frame_active && fire && cur_addr < TOTAL_16 - 16'd1) begin
-                ctu_addr <= cur_addr + 16'd1;
-                is_last_ctu <= ((cur_addr + 16'd1) == TOTAL_16 - 16'd1);
-                
-                if (cur_x == W_CTUS_10 - 10'd1) begin
-                    ctu_x           <= 10'd0;
-                    ctu_y           <= cur_y + 10'd1;
-                    is_first_in_row <= 1'b1;
-                    is_last_in_row  <= (W_CTUS_10 == 10'd1);
-                end else begin
-                    ctu_x           <= cur_x + 10'd1;
-                    ctu_y           <= cur_y;
-                    is_first_in_row <= 1'b0;
-                    is_last_in_row  <= ((cur_x + 10'd1) == W_CTUS_10 - 10'd1);
                 end
             end
         end

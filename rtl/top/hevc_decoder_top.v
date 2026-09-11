@@ -235,8 +235,10 @@ module hevc_decoder_top (
         .res_valid        (idct_valid),
         .res_ready        (),
         .res_coeff        (idct_data[15:0]),
-        .res_x            (6'd0),
-        .res_y            (6'd0),
+        .res_x_pu         (6'd0),
+        .res_y_pu         (6'd0),
+        .res_x_ctu        (6'd0),
+        .res_y_ctu        (6'd0),
         .res_last         (1'b0),
         .out_valid        (recon_valid),
         .out_ready        (1'b1),
@@ -251,16 +253,47 @@ module hevc_decoder_top (
     // 5. In-Loop Filters & Decoded Picture Buffer (DPB)
     //=========================================================================
     decoder_inloop_filters u_filters (
-        .clk              (clk),
-        .rst_n            (rst_n),
-        .in_valid         (recon_valid),
-        .in_pixel         (recon_pixel),
-        .in_x             (recon_x),
-        .in_y             (recon_y),
-        .out_valid        (filter_valid),
-        .out_pixel        (filter_pixel),
-        .out_abs_x        (filter_abs_x),
-        .out_abs_y        (filter_abs_y)
+        .clk                 (clk),
+        .rst_n               (rst_n),
+        .ctu_x               (6'd0),
+        .ctu_y               (6'd0),
+        .ctu_addr            (13'd0),
+        .frame_width_px      (12'd1920),
+        .frame_height_px     (12'd1080),
+        .in_valid            (recon_valid),
+        .in_pixel            (recon_pixel),
+        .in_x                (recon_x),
+        .in_y                (recon_y),
+        .in_comp             (2'd0),
+        .orig_in_valid       (1'b0),
+        .orig_in_y           (10'd0),
+        .orig_in_u           (10'd0),
+        .orig_in_v           (10'd0),
+        .map_update_valid    (1'b0),
+        .map_update_x        (6'd0),
+        .map_update_y        (6'd0),
+        .map_update_size_log2(3'd0),
+        .map_update_comp     (2'd0),
+        .map_update_cbf      (1'b0),
+        .map_update_pred_mode(1'b0),
+        .map_update_qp       (6'd26),
+        .map_update_mvx      (16'd0),
+        .map_update_mvy      (16'd0),
+        .map_update_ref_l0   (3'd0),
+        .map_update_ref_l1   (3'd0),
+        .map_update_bi_pred  (1'b0),
+        .out_valid           (filter_valid),
+        .out_ready           (1'b1),
+        .out_pixel           (filter_pixel),
+        .out_comp            (),
+        .out_abs_x           (filter_abs_x),
+        .out_abs_y           (filter_abs_y),
+        .out_sao_type        (),
+        .out_eo_class        (),
+        .out_eo_offset       (),
+        .out_band_pos        (),
+        .out_bo_offset       (),
+        .inloop_ctu_done     ()
     );
 
     frame_store u_dpb (
@@ -324,7 +357,14 @@ module hevc_decoder_top (
         .axi_rvalid       (axi_rvalid),
         .axi_rready       (axi_rready),
         .axi_rdata        (axi_rdata),
-        .axi_rlast        (axi_rlast)
+        .axi_rlast        (axi_rlast),
+        
+        // CTU cache
+        .cache_valid      (),
+        .cache_pixel      (),
+        .cache_x          (12'd0),
+        .cache_y          (12'd0),
+        .cache_comp       (2'd0)
     );
 
     // Connect Recon Output to Display Output

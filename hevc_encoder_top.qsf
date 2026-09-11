@@ -1,0 +1,146 @@
+# -------------------------------------------------------------------------- #
+#
+# Copyright (C) 1991-2013 Altera Corporation
+# Your use of Altera Corporation's design tools, logic functions 
+# and other software and tools, and its AMPP partner logic 
+# functions, and any output files from any of the foregoing 
+# (including device programming or simulation files), and any 
+# associated documentation or information are expressly subject 
+# to the terms and conditions of the Altera Program License 
+# Subscription Agreement, Altera MegaCore Function License 
+# Agreement, or other applicable license agreement, including, 
+# without limitation, that your use is for the sole purpose of 
+# programming logic devices manufactured by Altera and sold by 
+# Altera or its authorized distributors.  Please refer to the 
+# applicable agreement for further details.
+#
+# -------------------------------------------------------------------------- #
+#
+# Quartus II 64-Bit
+# Version 13.0.1 Build 232 06/12/2013 Service Pack 1 SJ Web Edition
+# Date created = 12:32:07  September 05, 2026
+#
+# -------------------------------------------------------------------------- #
+#
+# Notes:
+#
+# 1) The default values for assignments are stored in the file:
+#		hevc_encoder_top_assignment_defaults.qdf
+#    If this file doesn't exist, see file:
+#		assignment_defaults.qdf
+#
+# 2) Altera recommends that you do not modify this file. This
+#    file is updated automatically by the Quartus II software
+#    and any changes you make may be lost or overwritten.
+#
+# -------------------------------------------------------------------------- #
+
+
+set_global_assignment -name FAMILY "Cyclone V"
+set_global_assignment -name DEVICE 5CGXFC7D6F31C6
+set_global_assignment -name ORIGINAL_QUARTUS_VERSION "13.0 SP1"
+set_global_assignment -name PROJECT_CREATION_TIME_DATE "12:32:07  SEPTEMBER 05, 2026"
+set_global_assignment -name LAST_QUARTUS_VERSION "13.0 SP1"
+set_global_assignment -name VERILOG_INPUT_VERSION SYSTEMVERILOG_2005
+set_global_assignment -name NUM_PARALLEL_PROCESSORS ALL
+set_global_assignment -name OPTIMIZATION_TECHNIQUE BALANCED
+set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
+set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING OFF
+set_global_assignment -name SYNTH_TIMING_DRIVEN_SYNTHESIS OFF
+set_global_assignment -name OPTIMIZE_HOLD_TIMING "ALL PATHS"
+set_global_assignment -name OPTIMIZE_MULTI_CORNER_TIMING ON
+set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
+set_instance_assignment -name VIRTUAL_PIN ON -to *
+set_instance_assignment -name VIRTUAL_PIN OFF -to clk
+set_instance_assignment -name VIRTUAL_PIN OFF -to rst_n
+set_global_assignment -name SEARCH_PATH rtl/common
+set_global_assignment -name SEARCH_PATH rtl/entropy
+set_global_assignment -name SEARCH_PATH rtl/inloop_filters
+set_global_assignment -name SEARCH_PATH rtl/input_output
+set_global_assignment -name SEARCH_PATH rtl/inter
+set_global_assignment -name SEARCH_PATH rtl/intra
+set_global_assignment -name SEARCH_PATH rtl/partition
+set_global_assignment -name SEARCH_PATH rtl/quant
+set_global_assignment -name SEARCH_PATH rtl/rate_control
+set_global_assignment -name SEARCH_PATH rtl/recon
+set_global_assignment -name SEARCH_PATH rtl/top
+set_global_assignment -name SEARCH_PATH rtl/transform
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/common/axi_read_arbiter.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/common/clk_gate.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/common/fifo_sync.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/common/hadamard_satd_4x4.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/common/pipeline_reg.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/common/ram_dp_10b.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/common/ram_sp_generic.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/common/radix2_div_signed.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/bin_decoder.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/bin_encoder.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/cabac_dec_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/cabac_enc_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/coeff_buffer.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/ctx_model_store.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/param_set_writer.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/range_coder.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/syntax_coeff.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/syntax_cu.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/syntax_dec_coeff.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/syntax_dec_cu.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/syntax_dec_pred.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/entropy/syntax_pred.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/boundary_strength.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/db_filter_chroma.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/db_filter_luma.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/deblock_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/sao_band_offset.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/sao_edge_offset.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/sao_stats.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/sao_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inloop_filters/sao_window_buffer.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/input_output/input_buffer.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/input_output/nal_parser.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/input_output/nal_writer.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/input_output/output_fifo.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/fme_search.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/hpel_filter_chroma.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/hpel_filter_luma.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/inter_pred_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/mc_unit.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/mvp_predictor.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/ref_frame_buffer.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/sad_4x4.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/sad_8x8.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/inter/tz_search.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/intra/intra_angular.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/intra/intra_dc.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/intra/intra_planar.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/intra/intra_rmd.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/intra/intra_pred_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/intra/ref_sample_filter.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/partition/ctu_partitioner.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/partition/ctu_raster_scan.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/partition/mode_decision.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/partition/pu_cu_splitter.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/partition/rate_estimator.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/quant/fwd_quant.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/quant/inv_quant.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rate_control/lambda_calc.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rate_control/rate_controller.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/recon/frame_store.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/recon/recon_unit.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/recon/residual_sub.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/top/address_generator.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/top/decoder_inloop_filters.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/top/gop_controller.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/top/hevc_decoder_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/top/hevc_encoder_top.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/top/prediction_unit.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/top/slice_controller.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/transform/dct16.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/transform/dct32.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/transform/dct4.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/transform/dct8.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/transform/dct_top.v
+set_global_assignment -name SDC_FILE synth/hevc_encoder_top.sdc
+set_global_assignment -name VERILOG_CONSTANT_LOOP_LIMIT 50000
+set_global_assignment -name TOP_LEVEL_ENTITY hevc_encoder_top
+set_global_assignment -name VERILOG_MACRO "SYNTHESIS=1"

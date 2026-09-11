@@ -65,9 +65,13 @@ module cabac_enc_top #(
     input  wire        cu_merge,
     input  wire [2:0]  cu_merge_idx,
     input  wire        cu_pred_intra,
+    input  wire [5:0]  cu_intra_mode,
+    input  wire [5:0]  cu_left_intra_mode,
+    input  wire [5:0]  cu_above_intra_mode,
     input  wire [1:0]  cu_part_mode,
     input  wire        cu_cbf,
     input  wire [1:0]  cu_skip_ctx,
+    input  wire [1:0]  cu_split_ctx,
 
     // ── Prediction syntax request ────────────────────────────────────────
     input  wire        pred_req,
@@ -88,7 +92,12 @@ module cabac_enc_top #(
     output wire        coeff_done,
     input  wire [1:0]  coeff_comp,
     input  wire        coeff_is_intra,
-    input  wire [COEFF_W*N_COEFF-1:0] coeff_flat,
+    input  wire [2:0]  coeff_tu_size_log2,
+    input  wire        coeff_tu_cbf,
+    input  wire [9:0]  coeff_last_sig_pos,
+    output wire        coeff_rd_en,
+    output wire [11:0] coeff_rd_addr,
+    input  wire signed [COEFF_W-1:0] coeff_rd_data,
 
     // ── Terminating bin + flush ──────────────────────────────────────────
     input  wire        trm_req,        // encode terminating bin (end of slice)
@@ -139,14 +148,17 @@ module cabac_enc_top #(
     wire        rc_coder_busy;
     wire        rc_muxed_bin_value;
 
+    wire [CTX_ID_W-1:0] rc_ctx_id;
+
     range_coder u_rc (
         .clk        (clk),
         .rst_n      (rst_n),
         .coder_init (slice_init),
         .bin_valid  (rc_bin_valid),
-        .bin_value  (rc_muxed_bin_value),
+        .bin_value  (trm_req ? trm_bin_val : rc_bin_value),
         .bin_pstate (rc_pstate),
         .bin_valmps (rc_valmps),
+        .bin_ctx_id (rc_ctx_id),
         .bin_ready  (rc_bin_ready),
         .ep_valid   (rc_ep_valid),
         .trm_valid  (trm_req),
@@ -185,7 +197,8 @@ module cabac_enc_top #(
         .rc_pstate   (rc_pstate),
         .rc_valmps   (rc_valmps),
         .rc_bin_ready(rc_bin_ready),
-        .rc_ep_valid (rc_ep_valid)
+        .rc_ep_valid (rc_ep_valid),
+        .rc_ctx_id   (rc_ctx_id)
     );
 
     // =========================================================================
@@ -209,6 +222,7 @@ module cabac_enc_top #(
         .cu_part_mode  (cu_part_mode),
         .cu_cbf        (cu_cbf),
         .cu_skip_ctx   (cu_skip_ctx),
+        .cu_split_ctx  (cu_split_ctx),
         .bin_valid     (sc_bin_valid),
         .bin_value     (sc_bin_value),
         .bin_ctx_id    (sc_ctx_id),
@@ -222,6 +236,58 @@ module cabac_enc_top #(
     wire sp_bin_valid, sp_bin_value, sp_is_ep;
     wire [CTX_ID_W-1:0] sp_ctx_id;
 
+    // Standard HEVC MPM Derivation (Clause 8.4.2 / HM getIntraDirPredictor)
+    reg [5:0] cand0, cand1, cand2;
+    always @(*) begin
+        if (cu_left_intra_mode == cu_above_intra_mode) begin
+            if (cu_left_intra_mode > 6'd1) begin
+                cand0 = cu_left_intra_mode;
+                cand1 = 6'd2 + ((cu_left_intra_mode - 6'd2 + 6'd29) % 6'd32);
+                cand2 = 6'd2 + ((cu_left_intra_mode - 6'd2 + 6'd1) % 6'd32);
+            end else begin
+                cand0 = 6'd0;  // Planar
+                cand1 = 6'd1;  // DC
+                cand2 = 6'd26; // Vertical
+            end
+        end else begin
+            cand0 = cu_left_intra_mode;
+            cand1 = cu_above_intra_mode;
+            if (cu_left_intra_mode != 6'd0 && cu_above_intra_mode != 6'd0)
+                cand2 = 6'd0;
+            else if (cu_left_intra_mode != 6'd1 && cu_above_intra_mode != 6'd1)
+                cand2 = 6'd1;
+            else
+                cand2 = 6'd26;
+        end
+    end
+
+    wire prev_intra_luma_flag = (cu_intra_mode == cand0) || (cu_intra_mode == cand1) || (cu_intra_mode == cand2);
+    wire [1:0] intra_mpm_idx  = (cu_intra_mode == cand0) ? 2'd0 :
+                                (cu_intra_mode == cand1) ? 2'd1 : 2'd2;
+
+    // Sort MPMs for remaining mode derivation
+    reg [5:0] s0, s1, s2;
+    always @(*) begin
+        s0 = cand0; s1 = cand1; s2 = cand2;
+        if (s0 > s1) begin s0 = cand1; s1 = cand0; end
+        if (s0 > s2) begin s2 = s0; s0 = cand2; end
+        if (s1 > s2) begin s1 = s2; s2 = cand1; end
+    end
+
+    wire [4:0] intra_rem_mode = (cu_intra_mode > s2) ? (cu_intra_mode[4:0] - 5'd3) :
+                                (cu_intra_mode > s1) ? (cu_intra_mode[4:0] - 5'd2) :
+                                (cu_intra_mode > s0) ? (cu_intra_mode[4:0] - 5'd1) :
+                                                       cu_intra_mode[4:0];
+
+    // synthesis translate_off
+    always @(posedge clk) begin
+        if (pred_req) begin
+            $display("Time=%0t: [CABAC_ENC_TOP] pred_req fired! cu_intra_mode=%0d, left=%0d, above=%0d, cand0=%0d, cand1=%0d, cand2=%0d, prev_flag=%b, mpm_idx=%0d",
+                     $time, cu_intra_mode, cu_left_intra_mode, cu_above_intra_mode, cand0, cand1, cand2, prev_intra_luma_flag, intra_mpm_idx);
+        end
+    end
+    // synthesis translate_on
+
     syntax_pred #(.CTX_ID_W(CTX_ID_W), .MVD_W(MVD_W)) u_sp (
         .clk         (clk),
         .rst_n       (rst_n),
@@ -233,9 +299,9 @@ module cabac_enc_top #(
         
         // Intra prediction
         .cu_pred_intra    (cu_pred_intra),
-        .prev_intra_luma_pred_flag (1'b1), // stub: mode is always 0 (planar), so it's always MPM 0
-        .mpm_idx          (2'd0),          // MPM 0
-        .rem_intra_luma_pred_mode  (5'd0),
+        .prev_intra_luma_pred_flag (prev_intra_luma_flag),
+        .mpm_idx          (intra_mpm_idx),
+        .rem_intra_luma_pred_mode  (intra_rem_mode),
         .intra_chroma_pred_mode    (3'd4), // derived from luma
         
         // L0 prediction
@@ -261,18 +327,26 @@ module cabac_enc_top #(
     wire [CTX_ID_W-1:0] sf_ctx_id;
 
     syntax_coeff #(.CTX_ID_W(CTX_ID_W), .COEFF_W(COEFF_W)) u_sc (
-        .clk         (clk),
-        .rst_n       (rst_n),
-        .coeff_valid (coeff_req),
-        .coeff_done  (coeff_done),
-        .comp_id     (coeff_comp),
-        .is_intra    (coeff_is_intra),
-        .coeff_flat  (coeff_flat),
-        .bin_valid   (sf_bin_valid),
-        .bin_value   (sf_bin_value),
-        .bin_ctx_id  (sf_ctx_id),
-        .bin_is_ep   (sf_is_ep),
-        .bin_rdy     (be_bin_rdy)
+        .clk           (clk),
+        .rst_n         (rst_n),
+        .coeff_valid   (coeff_req),
+        .cu_valid      (cu_req),
+        .cu_depth      (cu_depth),
+        .coeff_done    (coeff_done),
+        .comp_id       (coeff_comp),
+        .is_intra      (coeff_is_intra),
+        .is_merge      (cu_merge),
+        .tu_size_log2  (coeff_tu_size_log2),
+        .tu_cbf        (coeff_tu_cbf),
+        .last_sig_pos  (coeff_last_sig_pos),
+        .coeff_rd_en   (coeff_rd_en),
+        .coeff_rd_addr (coeff_rd_addr),
+        .coeff_rd_data (coeff_rd_data),
+        .bin_valid     (sf_bin_valid),
+        .bin_value     (sf_bin_value),
+        .bin_ctx_id    (sf_ctx_id),
+        .bin_is_ep     (sf_is_ep),
+        .bin_rdy       (be_bin_rdy)
     );
 
     // =========================================================================
@@ -312,12 +386,12 @@ module cabac_enc_top #(
         if (flush_done)
             $display("INFO [cabac_enc_top] flush done — slice bitstream complete");
             
-        if (be_bin_valid && be_bin_rdy) begin
-            $display("CABAC_BIN_ENC: value=%b is_ep=%b ctx=%0d at t=%0t", be_bin_value, be_is_ep, be_ctx_id, $time);
-        end
-        if (rc_bin_valid && rc_bin_ready) begin
-            $display("CABAC_RANGE_CODER: in_val=%b pstate=%0d valmps=%b at t=%0t", rc_muxed_bin_value, rc_pstate, rc_valmps, $time);
-        end
+        // if (be_bin_valid && be_bin_rdy) begin
+        //     $display("CABAC_BIN_ENC: value=%b is_ep=%b ctx=%0d at t=%0t", be_bin_value, be_is_ep, be_ctx_id, $time);
+        // end
+        // if (rc_bin_valid && rc_bin_ready) begin
+        //     $display("CABAC_RANGE_CODER: in_val=%b pstate=%0d valmps=%b at t=%0t", rc_muxed_bin_value, rc_pstate, rc_valmps, $time);
+        // end
     end
     // synthesis translate_on
 

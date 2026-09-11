@@ -53,7 +53,7 @@
 module syntax_pred #(
     parameter CTX_ID_W = 8,
     parameter MVD_W    = 12,    // signed MVD width (1/4-pel units), ±2048 max
-    parameter MAX_REF  = 4      // max reference frames per list (for unary code)
+    parameter MAX_REF  = 1      // max reference frames per list (1 = no ref_idx syntax coded)
 )(
     input  wire                  clk,
     input  wire                  rst_n,
@@ -95,14 +95,14 @@ module syntax_pred #(
 );
 
     // =========================================================================
-    // Context constants (matching ctx_model_store.v assignment)
+    // Context constants (matching HM 18.0 TDecSbac / ContextModel3DBuffer mapping)
     // =========================================================================
-    localparam CTX_INTER_DIR_BASE = 8'd18;  // +depth for the 5 inter_dir contexts
-    localparam CTX_REF_IDX_0      = 8'd23;
-    localparam CTX_REF_IDX_1      = 8'd24;
-    localparam CTX_MVP_FLAG        = 8'd25;
-    localparam CTX_MVD_GT0         = 8'd27;  // abs_mvd_greater0_flag
-    localparam CTX_MVD_GT1         = 8'd28;  // abs_mvd_greater1_flag
+    localparam CTX_INTER_DIR_BASE = 8'd19;  // inter_dir (19..23)
+    localparam CTX_REF_IDX_0      = 8'd24;  // ref_idx bin 0 (24)
+    localparam CTX_REF_IDX_1      = 8'd25;  // ref_idx bin 1 (25)
+    localparam CTX_MVD_GT0        = 8'd26;  // abs_mvd_greater0_flag (26)
+    localparam CTX_MVD_GT1        = 8'd27;  // abs_mvd_greater1_flag (27)
+    localparam CTX_MVP_FLAG       = 8'd180; // mvp_flag (180)
 
     // =========================================================================
     // FSM state encoding
@@ -274,11 +274,11 @@ module syntax_pred #(
             S_INTRA_PREV: begin // prev_intra_luma_pred_flag
                 bin_valid  = 1'b1;
                 bin_value  = 1'b1; // say 1
-                bin_ctx_id = 8'd14; // prev_intra_luma_pred_flag ctx
+                bin_ctx_id = 8'd13; // INTRA_PRED_MODE ctx (flat idx 13)
             end
             S_INTRA_MPM: begin
                 bin_valid = 1'b1;
-                bin_value = (eg_symbol == 0) ? 1'b0 : (eg_symbol == 1) ? 1'b1 : mpm_idx_r[0]; // Wait, eg_symbol used as step!
+                bin_value = (eg_symbol == 0) ? (mpm_idx_r != 0) : (mpm_idx_r == 2);
                 bin_is_ep = 1'b1;
             end
             S_INTRA_REM: begin
@@ -290,7 +290,7 @@ module syntax_pred #(
                 bin_valid = 1'b1;
                 if (eg_symbol == 0) begin
                     bin_value = (chroma_mode_r != 4);
-                    bin_ctx_id = 8'd16; // intra_chroma_pred_mode ctx
+                    bin_ctx_id = 8'd14; // intra_chroma_pred_mode ctx
                 end else begin
                     bin_value = chroma_mode_r[2 - eg_symbol];
                     bin_is_ep = 1'b1;
@@ -314,9 +314,10 @@ module syntax_pred #(
                 bin_is_ep = 1'b1;
             end
             S_MVP0: begin
-                bin_valid = 1'b1;
-                bin_value = mvp_l0_r;
-                bin_is_ep = 1'b1;
+                bin_valid  = 1'b1;
+                bin_value  = mvp_l0_r;
+                bin_ctx_id = CTX_MVP_FLAG;
+                bin_is_ep  = 1'b0;
             end
             S_REF1_BIN0: begin
                 bin_valid  = 1'b1;
@@ -386,9 +387,32 @@ module syntax_pred #(
                 bin_is_ep = 1'b1;
             end
             S_MVP1: begin
+                bin_valid  = 1'b1;
+                bin_value  = mvp_l1_r;
+                bin_ctx_id = CTX_MVP_FLAG;
+                bin_is_ep  = 1'b0;
+            end
+            S_INTRA_PREV: begin
+                bin_valid  = 1'b1;
+                bin_value  = prev_intra_r;
+                bin_ctx_id = 8'd14;
+                bin_is_ep  = 1'b0;
+            end
+            S_INTRA_MPM: begin
                 bin_valid = 1'b1;
-                bin_value = mvp_l1_r;
+                bin_value = (eg_symbol == 0) ? (mpm_idx_r != 2'd0) : (mpm_idx_r == 2'd2);
                 bin_is_ep = 1'b1;
+            end
+            S_INTRA_REM: begin
+                bin_valid = 1'b1;
+                bin_value = rem_intra_r[4 - eg_symbol];
+                bin_is_ep = 1'b1;
+            end
+            S_INTRA_CHROMA: begin
+                bin_valid  = 1'b1;
+                bin_value  = (chroma_mode_r == 3'd4) ? 1'b0 : 1'b1;
+                bin_ctx_id = 8'd16;
+                bin_is_ep  = 1'b0;
             end
             default: begin
                 bin_valid = 1'b0;
@@ -465,26 +489,26 @@ module syntax_pred #(
                         mvp_l1_r    <= mvp_flag_l1;
                         is_b_r      <= slice_is_b;
                         depth_r     <= cu_depth;
-                        // Compute absolute values and signs
-                        abs_mvd_l0_x <= mvd_l0_x[MVD_W-1] ? -mvd_l0_x : mvd_l0_x;
-                        abs_mvd_l0_y <= mvd_l0_y[MVD_W-1] ? -mvd_l0_y : mvd_l0_y;
-                        abs_mvd_l1_x <= mvd_l1_x[MVD_W-1] ? -mvd_l1_x : mvd_l1_x;
-                        abs_mvd_l1_y <= mvd_l1_y[MVD_W-1] ? -mvd_l1_y : mvd_l1_y;
-                        sign_mvd_l0_x <= mvd_l0_x[MVD_W-1];
-                        sign_mvd_l0_y <= mvd_l0_y[MVD_W-1];
-                        sign_mvd_l1_x <= mvd_l1_x[MVD_W-1];
-                        sign_mvd_l1_y <= mvd_l1_y[MVD_W-1];
-                        state <= slice_is_b ? S_INTER_DIR : S_REF0_BIN0;
+                        // Compute absolute values and signs robustly
+                        abs_mvd_l0_x <= (mvd_l0_x[MVD_W-1] === 1'b1) ? -$signed(mvd_l0_x) : ((^mvd_l0_x === 1'bx) ? 12'd0 : mvd_l0_x);
+                        abs_mvd_l0_y <= (mvd_l0_y[MVD_W-1] === 1'b1) ? -$signed(mvd_l0_y) : ((^mvd_l0_y === 1'bx) ? 12'd0 : mvd_l0_y);
+                        abs_mvd_l1_x <= (mvd_l1_x[MVD_W-1] === 1'b1) ? -$signed(mvd_l1_x) : ((^mvd_l1_x === 1'bx) ? 12'd0 : mvd_l1_x);
+                        abs_mvd_l1_y <= (mvd_l1_y[MVD_W-1] === 1'b1) ? -$signed(mvd_l1_y) : ((^mvd_l1_y === 1'bx) ? 12'd0 : mvd_l1_y);
+                        sign_mvd_l0_x <= (mvd_l0_x[MVD_W-1] === 1'b1);
+                        sign_mvd_l0_y <= (mvd_l0_y[MVD_W-1] === 1'b1);
+                        sign_mvd_l1_x <= (mvd_l1_x[MVD_W-1] === 1'b1);
+                        sign_mvd_l1_y <= (mvd_l1_y[MVD_W-1] === 1'b1);
+                        state <= slice_is_b ? S_INTER_DIR : (MAX_REF > 1 ? S_REF0_BIN0 : S_MVD0_X_GT0);
                     end
                 end
             end
 
             S_INTER_DIR: begin
-                if (bin_rdy) state <= (inter_dir_r == 2'd2) ? S_REF0_BIN0 : S_INTER_DIR_B1;
+                if (bin_rdy) state <= (inter_dir_r == 2'd2) ? (MAX_REF > 1 ? S_REF0_BIN0 : S_MVD0_X_GT0) : S_INTER_DIR_B1;
             end
 
             S_INTER_DIR_B1: begin
-                if (bin_rdy) state <= (inter_dir_r == 2'd1) ? S_REF1_BIN0 : S_REF0_BIN0;
+                if (bin_rdy) state <= (inter_dir_r == 2'd1) ? (MAX_REF > 1 ? S_REF1_BIN0 : S_MVD1_X_GT0) : (MAX_REF > 1 ? S_REF0_BIN0 : S_MVD0_X_GT0);
             end
             S_REF0_BIN0: begin
                 if (bin_rdy) state <= (ref_l0_r == 3'd0) ? S_MVD0_X_GT0 : S_REF0_BIN1;
@@ -586,26 +610,12 @@ module syntax_pred #(
                 end
             end
 
-            S_IDLE: begin
-                if (pred_valid) begin
-                    $display("Time=%0t: [syntax_pred] S_IDLE -> starting. is_b=%b, intra=%b", $time, slice_is_b, pred_intra_r);
-                    pred_done <= 1'b0;
-                    if (pred_intra_r) begin
-                        state <= S_INTRA_PREV;
-                    end else if (slice_is_b) begin
-                        state <= S_INTER_DIR;
-                    end else begin
-                        state <= S_REF0_BIN0;
-                    end
-                end
-            end
-
             S_MVD0_Y_SIGN: begin
                 if (bin_rdy) state <= S_MVP0;
             end
 
             S_MVP0: begin
-                if (bin_rdy) state <= slice_is_b ? S_REF1_BIN0 : S_DONE;
+                if (bin_rdy) state <= (is_b_r && inter_dir_r == 2'd2) ? (MAX_REF > 1 ? S_REF1_BIN0 : S_MVD1_X_GT0) : S_DONE;
             end
             S_REF1_BIN0: begin
                 if (bin_rdy) state <= (ref_l1_r == 3'd0) ? S_MVD1_X_GT0 : S_REF1_BIN1;

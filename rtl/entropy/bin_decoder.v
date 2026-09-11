@@ -404,8 +404,8 @@ module bin_decoder #(
                 $display("ERROR [bin_decoder] range=%0d < 256 in READY state at t=%0t",
                          range_r, $time);
             if (dec_valid)
-                $display("TRACE [bin_decoder] bin=%0d ctx=%0d range=%0d value=%0d t=%0t",
-                         dec_bin, wb_ctx_id, range_r, value_r, $time);
+                /* $display("TRACE [bin_decoder] bin=%0d ctx=%0d range=%0d value=%0d t=%0t",
+                         dec_bin, wb_ctx_id, range_r, value_r, $time); */
             if (dec_req && !dec_ready)
                 $display("WARN  [bin_decoder] dec_req while !dec_ready at t=%0t", $time);
         end

@@ -77,7 +77,7 @@
 `include "parameter_pkg.vh"
 
 module mvp_predictor #(
-    parameter MV_W      = 10,   // signed MV bits (integer-pel), same as mc_unit
+    parameter MV_W      = `MV_TOTAL_BITS - `MV_FRAC_BITS,   // signed MV bits (integer-pel), same as mc_unit
     parameter RIF_W     = 4,    // reference index bits (0..15)
     parameter N_MERGE   = 5,    // HEVC merge candidate count (spec max = 5)
     parameter N_NBR     = 5,    // spatial neighbors: A1, A0, B1, B0, B2

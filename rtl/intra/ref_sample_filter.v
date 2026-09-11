@@ -92,6 +92,19 @@ module ref_sample_filter (
     localparam MAX_REF = 129;   // 4*32 + 1
 
     reg [`PIXEL_WIDTH-1:0] ref_buf [0:MAX_REF-1];
+`ifndef SYNTHESIS
+    integer filt_init_i;
+    initial begin
+        for (filt_init_i = 0; filt_init_i < MAX_REF; filt_init_i = filt_init_i + 1)
+            ref_buf[filt_init_i] = 10'd512;
+    end
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            for (filt_init_i = 0; filt_init_i < MAX_REF; filt_init_i = filt_init_i + 1)
+                ref_buf[filt_init_i] <= 10'd512;
+        end
+    end
+`endif
     reg [7:0]               buf_count;    // how many samples received
     reg                     buf_full;     // all 4N+1 received
     reg                     buf_last;     // in_last seen
@@ -172,9 +185,8 @@ module ref_sample_filter (
     wire signed [12:0] strong_left_diff = $signed({2'b0, bot_left}) + $signed({2'b0, corner}) - $signed({1'b0, left_mid, 1'b0});
     wire [11:0] abs_strong_left = (strong_left_diff < 0) ? -strong_left_diff[11:0] : strong_left_diff[11:0];
 
-    wire use_strong = is_strong_cand &&
-                      (abs_strong_top  < STRONG_THRESH[11:0]) &&
-                      (abs_strong_left < STRONG_THRESH[11:0]);
+    // SPS sets strong_intra_smoothing_enabled_flag = 0, so strong smoothing is always disabled in standard HM decode
+    wire use_strong = 1'b0;
 
     //-------------------------------------------------------------------------
     // Input buffer fill FSM

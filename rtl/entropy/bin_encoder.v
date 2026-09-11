@@ -91,7 +91,8 @@ module bin_encoder #(
 
     // ── range_coder bypass (EP) port ─────────────────────────────────────────
     // HM: encodeBinEP() → low = (low<<1) + (bin ? range : 0)
-    output reg                 rc_ep_valid
+    output reg                 rc_ep_valid,
+    output reg  [CTX_ID_W-1:0] rc_ctx_id
 );
 
     // =========================================================================
@@ -128,8 +129,9 @@ module bin_encoder #(
         rc_bin_value = bin_value;
         rc_pstate    = cur_pstate;
         rc_valmps    = cur_valmps;
+        rc_ctx_id    = ctx_id;
 
-        if (bin_valid && can_dispatch) begin
+        if (bin_valid && bin_rdy_out) begin
             if (is_ep) begin
                 rc_ep_valid  = 1'b1;
             end else begin
@@ -173,8 +175,8 @@ module bin_encoder #(
             if (!is_ep && prev_valid_nonep && (ctx_id == prev_ctx_id)) begin
                 // Same ctx back-to-back: verify write-back resolves before next read
                 // (Should be fine by RTL analysis, but flag for debug)
-                $display("INFO  [bin_encoder] consecutive same-ctx bins: ctx=%0d at t=%0t",
-                         ctx_id, $time);
+                /* $display("INFO  [bin_encoder] consecutive same-ctx bins: ctx=%0d at t=%0t",
+                         ctx_id, $time); */
             end
             prev_ctx_id       <= ctx_id;
             prev_valid_nonep  <= !is_ep;
@@ -184,9 +186,10 @@ module bin_encoder #(
 
         // Removed spammy warning
 
-        if (rc_bin_valid && rc_bin_ready)
-            $display("TRACE [bin_encoder] bin=%0d ctx=%0d ps=%0d vmps=%0d at t=%0t",
-                     rc_bin_value, upd_ctx_id, rc_pstate, rc_valmps, $time);
+        if (rc_bin_valid && rc_bin_ready) begin
+            /* $display("TRACE [bin_encoder] bin=%0d ctx=%0d ps=%0d vmps=%0d at t=%0t",
+                     rc_bin_value, upd_ctx_id, rc_pstate, rc_valmps, $time); */
+        end
     end
 
     initial begin

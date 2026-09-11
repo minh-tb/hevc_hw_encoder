@@ -68,8 +68,8 @@
 module mc_unit #(
     parameter PIXEL_WIDTH  = `PIXEL_WIDTH,   // 10
     parameter BLK_SIZE     = 4,              // luma block size (NxN)
-    parameter MV_QP_W      = 14,            // MV width in quarter-luma-pel units (signed)
-    parameter CU_COORD_W   = 12,            // frame coordinate width
+    parameter MV_QP_W      = `MV_TOTAL_BITS,            // MV width in quarter-luma-pel units (signed)
+    parameter CU_COORD_W   = `FRAME_DIM_WIDTH,            // frame coordinate width
 
     // Derived
     parameter BLK_C        = BLK_SIZE / 2,          // chroma block size (2 for 4:2:0)
@@ -150,8 +150,8 @@ module mc_unit #(
     //   c_int_x  = cMV_x >>> 2 = mv_x >>> 3
     //   c_frac_x = cMV_x & 7  = (mv_x >>> 1) & 7
     // =========================================================================
-    wire signed [CU_COORD_W-1:0] y_int_x  = $signed(cu_x_r) + (mv_x_r >>> 2);
-    wire signed [CU_COORD_W-1:0] y_int_y  = $signed(cu_y_r) + (mv_y_r >>> 2);
+    wire signed [CU_COORD_W-1:0] y_int_x  = $signed({1'b0, cu_x_r}) + (mv_x_r >>> 2);
+    wire signed [CU_COORD_W-1:0] y_int_y  = $signed({1'b0, cu_y_r}) + (mv_y_r >>> 2);
     wire [1:0]  y_frac_x = mv_x_r[1:0];   // luma: 2-bit fractional (0..3)
     wire [1:0]  y_frac_y = mv_y_r[1:0];
 
@@ -163,10 +163,10 @@ module mc_unit #(
     wire [2:0]  c_frac_y = mv_y_r[2:0];
 
     // Extended block top-left (subtract filter border)
-    wire signed [CU_COORD_W-1:0] y_fetch_x = y_int_x - 3;
-    wire signed [CU_COORD_W-1:0] y_fetch_y = y_int_y - 3;
-    wire signed [CU_COORD_W-1:0] c_fetch_x = c_int_x - 1;
-    wire signed [CU_COORD_W-1:0] c_fetch_y = c_int_y - 1;
+    wire signed [CU_COORD_W-1:0] y_fetch_x = y_int_x - $signed({{(CU_COORD_W-2){1'b0}}, 2'd3});
+    wire signed [CU_COORD_W-1:0] y_fetch_y = y_int_y - $signed({{(CU_COORD_W-2){1'b0}}, 2'd3});
+    wire signed [CU_COORD_W-1:0] c_fetch_x = c_int_x - $signed({{(CU_COORD_W-1){1'b0}}, 1'd1});
+    wire signed [CU_COORD_W-1:0] c_fetch_y = c_int_y - $signed({{(CU_COORD_W-1){1'b0}}, 1'd1});
 
     // =========================================================================
     // Luma filter instance (hpel_filter_luma)
@@ -318,7 +318,8 @@ module mc_unit #(
                 ref_req_slot  <= slot_r;
                 ref_req_x     <= y_fetch_x[CU_COORD_W-1:0];
                 ref_req_y     <= y_fetch_y[CU_COORD_W-1:0];
-                if (ref_req_ready) begin
+                if (ref_req_valid && ref_req_ready) begin
+                    ref_req_valid <= 1'b0;
                     state <= S_WAIT_Y;
                 end
             end
@@ -327,12 +328,14 @@ module mc_unit #(
                 ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     y_filt_ref      <= ref_resp_y_flat;   // latch extended ref
+                    $display("Time=%0t: [mc_unit] Y response ref_resp_y_flat=%0h", $time, ref_resp_y_flat);
                     y_filt_valid_in <= 1'b1;              // start filter pipeline
                     state           <= S_FILT_Y;
                 end
             end
 
             S_FILT_Y: begin
+                y_filt_valid_in <= 1'b0;
                 // Wait 3 cycles for hpel_filter_luma pipeline
                 // (valid_out fires on cycle 3 after valid_in)
                 if (y_filt_valid_out) begin
@@ -359,7 +362,8 @@ module mc_unit #(
                 ref_req_slot  <= slot_r;
                 ref_req_x     <= c_fetch_x[CU_COORD_W-1:0];
                 ref_req_y     <= c_fetch_y[CU_COORD_W-1:0];
-                if (ref_req_ready) begin
+                if (ref_req_valid && ref_req_ready) begin
+                    ref_req_valid <= 1'b0;
                     state <= S_WAIT_CB;
                 end
             end
@@ -368,12 +372,14 @@ module mc_unit #(
                 ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     cb_filt_ref      <= ref_resp_cb_flat;
+                    $display("Time=%0t: [mc_unit] Cb response ref_resp_cb_flat=%0h", $time, ref_resp_cb_flat);
                     cb_filt_valid_in <= 1'b1;
                     state            <= S_FILT_CB;
                 end
             end
 
             S_FILT_CB: begin
+                cb_filt_valid_in <= 1'b0;
                 if (cb_filt_valid_out) begin
                     if (c_is_int)      pred_cb_flat <= cb_int_out;
                     else if (c_is_h)   pred_cb_flat <= cb_h_out;
@@ -392,7 +398,8 @@ module mc_unit #(
                 ref_req_slot  <= slot_r;
                 ref_req_x     <= c_fetch_x[CU_COORD_W-1:0];
                 ref_req_y     <= c_fetch_y[CU_COORD_W-1:0];
-                if (ref_req_ready) begin
+                if (ref_req_valid && ref_req_ready) begin
+                    ref_req_valid <= 1'b0;
                     state <= S_WAIT_CR;
                 end
             end
@@ -401,12 +408,14 @@ module mc_unit #(
                 ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     cr_filt_ref      <= ref_resp_cr_flat;
+                    $display("Time=%0t: [mc_unit] Cr response ref_resp_cr_flat=%0h", $time, ref_resp_cr_flat);
                     cr_filt_valid_in <= 1'b1;
                     state            <= S_FILT_CR;
                 end
             end
 
             S_FILT_CR: begin
+                cr_filt_valid_in <= 1'b0;
                 if (cr_filt_valid_out) begin
                     if (c_is_int)      pred_cr_flat <= cr_int_out;
                     else if (c_is_h)   pred_cr_flat <= cr_h_out;
@@ -423,6 +432,8 @@ module mc_unit #(
             S_DONE: begin
                 mc_done  <= 1'b1;
                 mc_ready <= 1'b1;
+                $display("Time=%0t: [mc_unit] DONE pred_y=%0h pred_cb=%0h pred_cr=%0h",
+                         $time, pred_y_flat, pred_cb_flat, pred_cr_flat);
                 state    <= S_IDLE;
             end
 
@@ -445,12 +456,12 @@ module mc_unit #(
         end
         // Warn on extreme MVs (beyond ±512 integer pixels)
         if (mc_start) begin
-            if (mc_mv_x > $signed(14'sd2048) || mc_mv_x < -$signed(14'sd2048))
-                $display("WARN [mc_unit] mv_x=%0d exceeds ±512 integer-pel range",
-                         $signed(mc_mv_x));
-            if (mc_mv_y > $signed(14'sd2048) || mc_mv_y < -$signed(14'sd2048))
-                $display("WARN [mc_unit] mv_y=%0d exceeds ±512 integer-pel range",
-                         $signed(mc_mv_y));
+            // if (mc_mv_x > $signed(14'sd2048) || mc_mv_x < -$signed(14'sd2048))
+                // $display("WARN [mc_unit] mv_x=%0d exceeds ±512 integer-pel range",
+                //          $signed(mc_mv_x));
+            // if (mc_mv_y > $signed(14'sd2048) || mc_mv_y < -$signed(14'sd2048))
+                // $display("WARN [mc_unit] mv_y=%0d exceeds ±512 integer-pel range",
+                //          $signed(mc_mv_y));
         end
     end
     // synthesis translate_on

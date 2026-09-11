@@ -166,7 +166,7 @@ module db_filter_chroma (
     // Stage 1 register — QP remap + threshold lookup
     //-------------------------------------------------------------------------
     reg [`PIXEL_WIDTH-1:0] s1_p0, s1_p1, s1_q0, s1_q1;
-    reg [6:0]  s1_tc;
+    reg [9:0]  s1_tc;
     reg [1:0]  s1_bs;
     reg        s1_valid;
     reg        s1_filter_enable;
@@ -177,18 +177,20 @@ module db_filter_chroma (
     wire [5:0] qpc    = chroma_qp_table(edge_qp);
     // Tc index: QpC + 2*(BS-1). Chroma only filters at BS=2 → +2
     wire [6:0] tc_idx = {1'b0, qpc} + 7'd2;
+    wire [9:0] tc_val = {3'b0, tc_table(tc_idx)} << (`BIT_DEPTH - 8);
 
     always @(posedge clk) begin
         if (!rst_n) begin
             s1_valid <= 1'b0;
             s1_filter_enable <= 1'b0;
+            s1_tc <= 10'd0;
         end else if (in_ready) begin
             s1_valid <= in_valid;
             s1_filter_enable <= (bs == 2'd2); // Chroma only filters at BS=2 per HEVC spec
             s1_p0 <= p0; s1_p1 <= p1;
             s1_q0 <= q0; s1_q1 <= q1;
             s1_bs <= bs;
-            s1_tc <= tc_table(tc_idx);
+            s1_tc <= tc_val;
         end
     end
 
@@ -199,27 +201,20 @@ module db_filter_chroma (
     //   delta = Clip3(-tc, tc, ((((q0-p0) << 2) + p1 - q1 + 4) >> 3))
     //   p0'   = Clip1(p0 + delta)
     //   q0'   = Clip1(q0 - delta)
-    //
-    // Bit widths:
-    //   (q0-p0) max = 1023 → 11-bit signed
-    //   (q0-p0)<<2  max = 4092 → 13-bit signed
-    //   + p1 - q1 + 4: add ±1023 → 14-bit signed
-    //   >>3: 11-bit signed result
-    //   Clip3(-tc, tc): tc max = 11 → clip to ±11
     //-------------------------------------------------------------------------
     wire signed [13:0] q0_minus_p0  = $signed({4'b0, s1_q0})
                                     - $signed({4'b0, s1_p0});
     wire signed [13:0] p1_minus_q1  = $signed({4'b0, s1_p1})
                                     - $signed({4'b0, s1_q1});
 
-    wire signed [13:0] raw_sum = ({q0_minus_p0[11:0], 2'b0}) // <<2
+    wire signed [13:0] raw_sum = (q0_minus_p0 <<< 2)
                                 + p1_minus_q1
                                 + 14'sd4;
 
-    wire signed [10:0] raw_delta = raw_sum[13:3];   // >>3
+    wire signed [10:0] raw_delta = raw_sum >>> 3;
 
-    wire signed [11:0] tc_pos  =  $signed({5'b0, s1_tc});
-    wire signed [11:0] tc_neg  = -$signed({5'b0, s1_tc});
+    wire signed [11:0] tc_pos  =  $signed({2'b0, s1_tc});
+    wire signed [11:0] tc_neg  = -$signed({2'b0, s1_tc});
 
     wire signed [11:0] delta   = clip3(tc_neg, tc_pos, {{1{raw_delta[10]}}, raw_delta});
 

@@ -260,7 +260,7 @@ module frame_store #(
     // Compute AXI byte address for current write pixel
     wire [11:0] wr_cx = wr_x; // coordinates are natively in component scale
     wire [11:0] wr_cy = wr_y;
-    wire [11:0] wr_stride = (wr_comp != 2'd0) ? 12'd1920 : 12'd3840;
+    wire [11:0] wr_stride = (wr_comp != 2'd0) ? (FRAME_WIDTH / 2) : FRAME_WIDTH;
 
     wire [31:0] wr_comp_base = (wr_comp == 2'd0) ? 32'd0 :
                                 (wr_comp == 2'd1) ? CB_OFFSET_BYTES :
@@ -311,6 +311,13 @@ module frame_store #(
                                 end
                                 beat_data <= temp_data;
                                 beat_strb <= temp_strb;
+
+                                // synthesis translate_off
+                                if (wr_comp == 2'd1 && beat_addr == 8192) begin
+                                    $display("Time=%0t: [frame_store] Cb beat write idx=%0d val=%0d data=%0h", 
+                                             $time, pixel_idx, wr_pixel, temp_data);
+                                end
+                                // synthesis translate_on
 
                                 // Flush immediately if beat is full or it's the last pixel
                                 if (pixel_idx == 4'd15 || wr_last) begin
@@ -403,7 +410,7 @@ module frame_store #(
 
     wire [11:0] rd_eff_x = rd_cur_x;
     wire [11:0] rd_eff_y = rd_cur_y;
-    wire [11:0] rd_stride = (rd_comp_r != 2'd0) ? 12'd1920 : 12'd3840;
+    wire [11:0] rd_stride = (rd_comp_r != 2'd0) ? (FRAME_WIDTH / 2) : FRAME_WIDTH;
 
     wire [31:0] rd_comp_base = (rd_comp_r == 2'd0) ? 32'd0 :
                                 (rd_comp_r == 2'd1) ? CB_OFFSET_BYTES :

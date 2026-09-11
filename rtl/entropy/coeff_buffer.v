@@ -20,6 +20,13 @@ module coeff_buffer #(
 );
 
     reg [DATA_W-1:0] mem [0:DEPTH-1];
+`ifndef SYNTHESIS
+    integer cb_i;
+    initial begin
+        for (cb_i = 0; cb_i < DEPTH; cb_i = cb_i + 1)
+            mem[cb_i] = {DATA_W{1'b0}};
+    end
+`endif
 
     always @(posedge clk) begin
         if (we) begin

@@ -76,9 +76,9 @@
 
 module tz_search #(
     parameter PIXEL_WIDTH  = `PIXEL_WIDTH,   // 10
-    parameter MV_W         = 10,             // signed MV bits, ±512 range
-    parameter CU_COORD_W   = 12,             // frame coordinate bits (4096 max)
-    parameter SRCH_RNG     = 64,             // ±64 integer-pel search range
+    parameter MV_W         = `MV_TOTAL_BITS - `MV_FRAC_BITS,             // signed MV bits, ±512 range
+    parameter CU_COORD_W   = `FRAME_DIM_WIDTH,             // frame coordinate bits (4096 max)
+    parameter SRCH_RNG     = `ME_SEARCH_RANGE,             // integer-pel search range
     parameter N_STEPS      = 6,             // step levels: 32,16,8,4,2,1
     parameter N_REFINE     = 4,             // diamond refinement rounds (HM default)
 
@@ -281,6 +281,9 @@ module tz_search #(
                 if (search_valid) begin
                     search_ready <= 1'b0;
                     state        <= S_INIT;
+                    // synthesis translate_off
+                    $display("Time=%0t: [tz_search] search_valid accepted, going to S_INIT", $time);
+                    // synthesis translate_on
                 end
             end
 
@@ -317,8 +320,11 @@ module tz_search #(
                 ref_req_valid <= 1'b1;
                 ref_req_x     <= ref_x_req;
                 ref_req_y     <= ref_y_req;
-                if (ref_req_ready) begin
+                if (ref_req_valid && ref_req_ready) begin
+                    // synthesis translate_off
                     $display("Time=%0t: [tz_search] REQ_REF accepted for x=%0d, y=%0d", $time, ref_x_req, ref_y_req);
+                    // synthesis translate_on
+                    ref_req_valid <= 1'b0;
                     state <= S_WAIT_REF;
                 end
             end
@@ -328,7 +334,9 @@ module tz_search #(
             // ---------------------------------------------------------------
             S_WAIT_REF: begin
                 if (ref_resp_valid) begin
+                    // synthesis translate_off
                     $display("Time=%0t: [tz_search] WAIT_REF got resp_valid", $time);
+                    // synthesis translate_on
                     sad_ref_flat <= ref_resp_data;
                     sad_valid_in <= 1'b1;    // launch SAD computation
                     state        <= S_SAD_S1;
@@ -357,9 +365,14 @@ module tz_search #(
                     best_sad  <= sad_out;
                     best_mv_x <= cand_x;
                     best_mv_y <= cand_y;
-                    $display("Time=%0t: [tz_search] New best MV=(%0d,%0d) SAD=%0d", $time, cand_x, cand_y, sad_out);
+                    if (sad_out == 0) begin
+                        state <= S_DONE;
+                    end else begin
+                        state <= S_NEXT_PT;
+                    end
+                end else begin
+                    state <= S_NEXT_PT;
                 end
-                state <= S_NEXT_PT;
             end
 
             // ---------------------------------------------------------------
@@ -431,7 +444,9 @@ module tz_search #(
             // HM: rcMv = MV(rcStruct.iBestX, rcStruct.iBestY)
             // ---------------------------------------------------------------
             S_DONE: begin
+                // synthesis translate_off
                 $display("Time=%0t: [tz_search] DONE best_mv=(%0d,%0d) best_sad=%0d", $time, best_mv_x, best_mv_y, best_sad);
+                // synthesis translate_on
                 result_valid <= 1'b1;
                 search_ready <= 1'b1;
                 state        <= S_IDLE;
@@ -455,12 +470,12 @@ module tz_search #(
     // synthesis translate_off
     always @(posedge clk) begin
         if (state == S_CMP) begin
-            if (sad_out > 12'd4092)
-                $display("WARN [tz_search] sad_out=%0d at t=%0t — exceeds 4×4 max (4092)", sad_out, $time);
+            // if (sad_out > 12'd4092)
+                // $display("WARN [tz_search] sad_out=%0d at t=%0t — exceeds 4×4 max (4092)", sad_out, $time);
         end
         if (result_valid) begin
-            $display("INFO [tz_search] best_mv=(%0d,%0d) best_sad=%0d at t=%0t",
-                     $signed(best_mv_x), $signed(best_mv_y), best_sad, $time);
+            // $display("INFO [tz_search] best_mv=(%0d,%0d) best_sad=%0d at t=%0t",
+            //          $signed(best_mv_x), $signed(best_mv_y), best_sad, $time);
         end
     end
     // synthesis translate_on

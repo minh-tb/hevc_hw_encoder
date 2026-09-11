@@ -1,0 +1,67 @@
+# IDE and AI Tooling (CRITICAL: DO NOT TRACK)
+.gemini/
+.vscode/
+
+# External Reference Software
+HM/
+
+# Personal Documents & Presentation Slides (Non-HW)
+resume/
+*.docx
+*.pptx
+*.pdf
+slides_text.txt
+
+
+# Waveforms & Simulation Dumps
+*.vcd
+*.vpd
+*.fsdb
+*.wlf
+dump.vcd
+vsim.wlf
+
+# ModelSim / QuestaSim Work & Library Directories
+work/
+**/work/
+modelsim.ini
+transcript
+transcript.txt
+**/transcript
+**/transcript.txt
+*.log
+*.cr.mti
+*.mpf
+
+# Quartus Compilation Artifacts & Databases
+db/
+**/db/
+incremental_db/
+**/incremental_db/
+output_files/
+**/output_files/
+greybox_tmp/
+**/greybox_tmp/
+*.rpt
+*.summary
+*.smsg
+*.jdi
+*.pin
+*.pof
+*.sof
+*.done
+*.qws
+
+# Raw video, stream dumps & generated artifacts
+*.yuv
+*.bin
+*.hex
+*.bmp
+Trace*.txt
+test.png
+
+# System & Python caches
+.system_generated/
+artifact_link/
+__pycache__/
+*.pyc

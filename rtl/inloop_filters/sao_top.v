@@ -29,10 +29,10 @@ module sao_top (
     input  wire [9:0]   ctu_y,
 
     // SAO parameters per component (from CABAC decoder/encoder decision)
-    input  wire [5:0]   sao_type,    // 0=none,1=EO,2=BO (packed 3 x 2-bit)
-    input  wire [5:0]   eo_class,    // (packed 3 x 2-bit)
+    input  wire [5:0]   sao_type,    // 0=none,1=EO,2=BO (packed 3 x 2-bit: [1:0]=Y, [3:2]=Cb, [5:4]=Cr)
+    input  wire [5:0]   eo_class,    // (packed 3 x 2-bit: [1:0]=Y, [3:2]=Cb, [5:4]=Cr)
     input  wire [(3*5*`SAO_OFFSET_WIDTH)-1:0] eo_offset, // (packed 3 x 5 x 5-bit)
-    input  wire [14:0]  band_pos,    // (packed 3 x 5-bit)
+    input  wire [14:0]  band_pos,    // (packed 3 x 5-bit: [4:0]=Y, [9:5]=Cb, [14:10]=Cr)
     input  wire [(3*4*`SAO_OFFSET_WIDTH)-1:0] bo_offset, // (packed 3 x 4 x 5-bit)
 
     // Pixel read (from deblocked frame buffer)
@@ -75,163 +75,247 @@ module sao_top (
     output reg          ctu_done
 );
 
-    localparam SAO_NONE = 2'd0, SAO_EO = 2'd1, SAO_BO = 2'd2;
-
-    localparam S_IDLE    = 3'd0;
-    localparam S_START   = 3'd1;
-    localparam S_FETCH   = 3'd2;
-    localparam S_FILT    = 3'd3;
-    localparam S_WRITE   = 3'd4;
-    localparam S_NCOMP   = 3'd5;
-    localparam S_DONE    = 3'd6;
+    //-------------------------------------------------------------------------
+    // FSM States
+    //-------------------------------------------------------------------------
+    localparam [2:0]
+        S_IDLE     = 3'd0,
+        S_REQ_PIX  = 3'd1,
+        S_WAIT_PIX = 3'd2,
+        S_APPLY    = 3'd3,
+        S_WRITE    = 3'd4,
+        S_DONE     = 3'd5;
 
     reg [2:0] state;
-    reg [1:0] cur_comp;
-    reg [5:0] px, py;
-    reg [9:0] cur_ctu_x, cur_ctu_y;
-
-    wire [5:0] max_p;
-    assign max_p = (cur_comp != 2'd0) ? 6'd31 : 6'd63;
-
-    wire [1:0] cur_type;
-    wire [1:0] cur_eocls;
-    wire [4:0] cur_bandpos;
-    wire [24:0] cur_eo_offset;
-    wire [19:0] cur_bo_offset;
-    
-    assign cur_type      = (cur_comp == 2'd0) ? sao_type[1:0] : (cur_comp == 2'd1) ? sao_type[3:2] : sao_type[5:4];
-    assign cur_eocls     = (cur_comp == 2'd0) ? eo_class[1:0] : (cur_comp == 2'd1) ? eo_class[3:2] : eo_class[5:4];
-    assign cur_bandpos   = (cur_comp == 2'd0) ? band_pos[4:0] : (cur_comp == 2'd1) ? band_pos[9:5] : band_pos[14:10];
-    assign cur_eo_offset = (cur_comp == 2'd0) ? eo_offset[24:0] : (cur_comp == 2'd1) ? eo_offset[49:25] : eo_offset[74:50];
-    assign cur_bo_offset = (cur_comp == 2'd0) ? bo_offset[19:0] : (cur_comp == 2'd1) ? bo_offset[39:20] : bo_offset[59:40];
-
-    // EO neighbour offsets
-    wire signed [7:0] n0dx, n0dy, n1dx, n1dy;
-    assign n0dx = (cur_eocls==0) ? -8'sd1 : (cur_eocls==1) ?  8'sd0 :
-                              (cur_eocls==2) ? -8'sd1 :  8'sd1;
-    assign n0dy = (cur_eocls==0) ?  8'sd0 : (cur_eocls==1) ? -8'sd1 :
-                              (cur_eocls==2) ? -8'sd1 : -8'sd1;
-    assign n1dx = (cur_eocls==0) ?  8'sd1 : (cur_eocls==1) ?  8'sd0 :
-                              (cur_eocls==2) ?  8'sd1 : -8'sd1;
-    assign n1dy = (cur_eocls==0) ?  8'sd0 : (cur_eocls==1) ?  8'sd1 :
-                              (cur_eocls==2) ?  8'sd1 :  8'sd1;
-
-    wire signed [7:0] n0x, n0y, n1x, n1y;
-    assign n0x = $signed({2'b0, px}) + n0dx;
-    assign n0y = $signed({2'b0, py}) + n0dy;
-    assign n1x = $signed({2'b0, px}) + n1dx;
-    assign n1y = $signed({2'b0, py}) + n1dy;
-
-    reg [`PIXEL_WIDTH-1:0] cur_samp, cur_n0, cur_n1;
-    reg samp_got, n0_got, n1_got;
 
     assign ctu_ready      = (state == S_IDLE);
-    assign pix_resp_ready = (state == S_FETCH);
-    assign n0_resp_ready  = (state == S_FETCH);
-    assign n1_resp_ready  = (state == S_FETCH);
+    assign pix_resp_ready = 1'b1;
+    assign n0_resp_ready  = 1'b1;
+    assign n1_resp_ready  = 1'b1;
 
-    // EO instance
-    wire eo_in_rdy, eo_out_vld;
-    reg eo_in_vld, eo_out_rdy;
-    wire [`PIXEL_WIDTH-1:0] eo_res;
+    // Component and coordinate counters
+    reg [1:0] comp_idx;      // 0=Y, 1=Cb, 2=Cr
+    reg [5:0] scan_x, scan_y;
+    wire [5:0] max_dim = (comp_idx == 2'd0) ? 6'd63 : 6'd31;
 
-    sao_edge_offset u_eo (
-        .clk(clk),.rst_n(rst_n),
-        .edge_type(cur_eocls),.offset(cur_eo_offset),
-        .in_valid(eo_in_vld),.in_ready(eo_in_rdy),
-        .pixel_in(cur_samp),.neigh0(cur_n0),.neigh1(cur_n1),
-        .in_last(1'b0),
-        .out_valid(eo_out_vld),.out_ready(eo_out_rdy),.pixel_out(eo_res),.out_last()
+    // Active SAO params for current component
+    wire [1:0] cur_sao_type = (comp_idx == 2'd0) ? sao_type[1:0] :
+                              (comp_idx == 2'd1) ? sao_type[3:2] : sao_type[5:4];
+
+    wire [1:0] cur_eo_class = (comp_idx == 2'd0) ? eo_class[1:0] :
+                              (comp_idx == 2'd1) ? eo_class[3:2] : eo_class[5:4];
+
+    wire [24:0] cur_eo_offset = (comp_idx == 2'd0) ? eo_offset[24:0] :
+                               (comp_idx == 2'd1) ? eo_offset[49:25] : eo_offset[74:50];
+
+    wire [4:0] cur_band_pos = (comp_idx == 2'd0) ? band_pos[4:0] :
+                              (comp_idx == 2'd1) ? band_pos[9:5] : band_pos[14:10];
+
+    wire [19:0] cur_bo_offset = (comp_idx == 2'd0) ? bo_offset[19:0] :
+                               (comp_idx == 2'd1) ? bo_offset[39:20] : bo_offset[59:40];
+
+    // Sub-module instances
+    reg         eo_in_valid;
+    wire        eo_in_ready, eo_out_valid;
+    wire [`PIXEL_WIDTH-1:0] eo_pixel_out;
+
+    sao_edge_offset u_sao_eo (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .edge_type  (cur_eo_class),
+        .offset     (cur_eo_offset),
+        .in_valid   (eo_in_valid),
+        .in_ready   (eo_in_ready),
+        .pixel_in   (pix_resp_data),
+        .neigh0     (n0_resp_data),
+        .neigh1     (n1_resp_data),
+        .in_last    (1'b0),
+        .out_valid  (eo_out_valid),
+        .out_ready  (1'b1),
+        .pixel_out  (eo_pixel_out),
+        .out_last   ()
     );
 
-    // BO instance
-    wire bo_in_rdy, bo_out_vld;
-    reg bo_in_vld, bo_out_rdy;
-    wire [`PIXEL_WIDTH-1:0] bo_res;
+    reg         bo_in_valid;
+    wire        bo_in_ready, bo_out_valid;
+    wire [`PIXEL_WIDTH-1:0] bo_pixel_out;
 
-    sao_band_offset u_bo (
-        .clk(clk),.rst_n(rst_n),
-        .band_position(cur_bandpos),.offset(cur_bo_offset),
-        .in_valid(bo_in_vld),.in_ready(bo_in_rdy),
-        .pixel_in(cur_samp),
-        .in_last(1'b0),
-        .out_valid(bo_out_vld),.out_ready(bo_out_rdy),.pixel_out(bo_res),.out_last()
+    sao_band_offset u_sao_bo (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .band_position(cur_band_pos),
+        .offset     (cur_bo_offset),
+        .in_valid   (bo_in_valid),
+        .in_ready   (bo_in_ready),
+        .pixel_in   (pix_resp_data),
+        .in_last    (1'b0),
+        .out_valid  (bo_out_valid),
+        .out_ready  (1'b1),
+        .pixel_out  (bo_pixel_out),
+        .out_last   ()
     );
+
+    // Pipeline coordinate shift registers
+    reg [5:0] p_x_q1, p_y_q1, p_x_q2, p_y_q2;
+    reg [1:0] p_comp_q1, p_comp_q2;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state<=S_IDLE; cur_comp<=0; px<=0; py<=0;
-            ctu_done<=0; eo_in_vld<=0; bo_in_vld<=0;
-            eo_out_rdy<=1; bo_out_rdy<=1; // Init to 1
-            pix_rd_valid<=0; n0_rd_valid<=0; n1_rd_valid<=0;
-            pix_wr_valid<=0; samp_got<=0; n0_got<=0; n1_got<=0;
+            state        <= S_IDLE;
+            ctu_done     <= 1'b0;
+            comp_idx     <= 2'd0;
+            scan_x       <= 6'd0;
+            scan_y       <= 6'd0;
+            pix_rd_valid <= 1'b0;
+            n0_rd_valid  <= 1'b0;
+            n1_rd_valid  <= 1'b0;
+            pix_wr_valid <= 1'b0;
+            eo_in_valid  <= 1'b0;
+            bo_in_valid  <= 1'b0;
+            p_x_q1       <= 6'd0;
+            p_y_q1       <= 6'd0;
+            p_comp_q1    <= 2'd0;
+            p_x_q2       <= 6'd0;
+            p_y_q2       <= 6'd0;
+            p_comp_q2    <= 2'd0;
         end else begin
-            ctu_done<=0; 
             case (state)
-                S_IDLE: if (ctu_valid) begin
-                    cur_ctu_x<=ctu_x; cur_ctu_y<=ctu_y;
-                    cur_comp<=0; px<=0; py<=0; state<=S_START;
-                end
-                S_START: begin
-                    px<=0; py<=0; samp_got<=0; n0_got<=0; n1_got<=0;
-                    state <= (cur_type==SAO_NONE) ? S_NCOMP : S_FETCH;
-                end
-                S_FETCH: begin
-                    if (!samp_got && pix_rd_ready) begin
-                        pix_rd_valid<=1; pix_rd_x<=px; pix_rd_y<=py; pix_rd_comp<=cur_comp;
-                    end
-                    if (cur_type==SAO_EO) begin
-                    if (!n0_got && n0_rd_ready) begin
-                        n0_rd_valid<=1; n0_rd_x<=n0x; n0_rd_y<=n0y; n0_rd_comp<=cur_comp;
-                        end
-                    if (!n1_got && n1_rd_ready) begin
-                        n1_rd_valid<=1; n1_rd_x<=n1x; n1_rd_y<=n1y; n1_rd_comp<=cur_comp;
+                S_IDLE: begin
+                    ctu_done     <= 1'b0;
+                    pix_wr_valid <= 1'b0;
+                    if (ctu_valid) begin
+                        if (sao_type == 6'd0) begin
+                            // Bypass SAO if all components are NONE
+                            state    <= S_DONE;
+                            ctu_done <= 1'b1;
+                        end else begin
+                            state    <= S_REQ_PIX;
+                            comp_idx <= 2'd0;
+                            scan_x   <= 6'd0;
+                            scan_y   <= 6'd0;
                         end
                     end
-                    if (pix_resp_valid) begin cur_samp<=pix_resp_data; samp_got<=1; pix_rd_valid<=0; end
-                    if (n0_resp_valid)  begin cur_n0<=n0_resp_data;    n0_got<=1;   n0_rd_valid<=0; end
-                    if (n1_resp_valid)  begin cur_n1<=n1_resp_data;    n1_got<=1;   n1_rd_valid<=0; end
+                end
 
-                if (samp_got && (cur_type==SAO_BO || (cur_type==SAO_EO && n0_got && n1_got))) begin
-                        samp_got<=0; n0_got<=0; n1_got<=0;
-                        if (cur_type==SAO_EO) eo_in_vld<=1; else bo_in_vld<=1;
-                        state<=S_FILT;
+                S_REQ_PIX: begin
+                    if (cur_sao_type == 2'd0) begin
+                        // Skip this component if NONE
+                        if (comp_idx == 2'd2) begin
+                            state    <= S_DONE;
+                            ctu_done <= 1'b1;
+                        end else begin
+                            comp_idx <= comp_idx + 2'd1;
+                            scan_x   <= 6'd0;
+                            scan_y   <= 6'd0;
+                        end
+                    end else begin
+                        // Issue read for current pixel and neighbours
+                        pix_rd_valid <= 1'b1;
+                        pix_rd_x     <= scan_x;
+                        pix_rd_y     <= scan_y;
+                        pix_rd_comp  <= comp_idx;
+
+                        if (cur_sao_type == 2'd1) begin // EO
+                            n0_rd_valid <= 1'b1;
+                            n1_rd_valid <= 1'b1;
+                            n0_rd_comp  <= comp_idx;
+                            n1_rd_comp  <= comp_idx;
+                            case (cur_eo_class)
+                                2'd0: begin // Horizontal: (x-1,y) and (x+1,y)
+                                    n0_rd_x <= $signed({2'b00, scan_x}) - 8'sd1;
+                                    n0_rd_y <= $signed({2'b00, scan_y});
+                                    n1_rd_x <= $signed({2'b00, scan_x}) + 8'sd1;
+                                    n1_rd_y <= $signed({2'b00, scan_y});
+                                end
+                                2'd1: begin // Vertical: (x,y-1) and (x,y+1)
+                                    n0_rd_x <= $signed({2'b00, scan_x});
+                                    n0_rd_y <= $signed({2'b00, scan_y}) - 8'sd1;
+                                    n1_rd_x <= $signed({2'b00, scan_x});
+                                    n1_rd_y <= $signed({2'b00, scan_y}) + 8'sd1;
+                                end
+                                2'd2: begin // 135 deg: (x-1,y-1) and (x+1,y+1)
+                                    n0_rd_x <= $signed({2'b00, scan_x}) - 8'sd1;
+                                    n0_rd_y <= $signed({2'b00, scan_y}) - 8'sd1;
+                                    n1_rd_x <= $signed({2'b00, scan_x}) + 8'sd1;
+                                    n1_rd_y <= $signed({2'b00, scan_y}) + 8'sd1;
+                                end
+                                2'd3: begin // 45 deg: (x+1,y-1) and (x-1,y+1)
+                                    n0_rd_x <= $signed({2'b00, scan_x}) + 8'sd1;
+                                    n0_rd_y <= $signed({2'b00, scan_y}) - 8'sd1;
+                                    n1_rd_x <= $signed({2'b00, scan_x}) - 8'sd1;
+                                    n1_rd_y <= $signed({2'b00, scan_y}) + 8'sd1;
+                                end
+                            endcase
+                        end
+
+                        p_x_q1    <= scan_x;
+                        p_y_q1    <= scan_y;
+                        p_comp_q1 <= comp_idx;
+                        state     <= S_WAIT_PIX;
                     end
                 end
-                S_FILT: begin
-                    if (cur_type==SAO_EO && eo_in_rdy) eo_in_vld<=0; // Hold until ready
-                    if (cur_type==SAO_BO && bo_in_rdy) bo_in_vld<=0;
 
-                    if ((cur_type==SAO_EO&&eo_out_vld)||(cur_type==SAO_BO&&bo_out_vld)) begin
-                        eo_in_vld<=0; bo_in_vld<=0; // Safety clear
-                        eo_out_rdy<=0; bo_out_rdy<=0; // Lower when data is consumed
-                        pix_wr_valid<=1; pix_wr_x<=px; pix_wr_y<=py; pix_wr_comp<=cur_comp;
-                        pix_wr_data<=(cur_type==SAO_EO)?eo_res:bo_res;
-                        state<=S_WRITE;
+                S_WAIT_PIX: begin
+                    pix_rd_valid <= 1'b0;
+                    n0_rd_valid  <= 1'b0;
+                    n1_rd_valid  <= 1'b0;
+
+                    // Feed sub-modules when SRAM read returns
+                    if (cur_sao_type == 2'd1) eo_in_valid <= 1'b1;
+                    if (cur_sao_type == 2'd2) bo_in_valid <= 1'b1;
+
+                    p_x_q2    <= p_x_q1;
+                    p_y_q2    <= p_y_q1;
+                    p_comp_q2 <= p_comp_q1;
+                    state     <= S_APPLY;
+                end
+
+                S_APPLY: begin
+                    eo_in_valid <= 1'b0;
+                    bo_in_valid <= 1'b0;
+                    state       <= S_WRITE;
+                end
+
+                S_WRITE: begin
+                    // Write back filtered sample
+                    pix_wr_valid <= 1'b1;
+                    pix_wr_x     <= p_x_q2;
+                    pix_wr_y     <= p_y_q2;
+                    pix_wr_comp  <= p_comp_q2;
+
+                    if (cur_sao_type == 2'd1) pix_wr_data <= eo_pixel_out;
+                    else if (cur_sao_type == 2'd2) pix_wr_data <= bo_pixel_out;
+                    else pix_wr_data <= pix_resp_data;
+
+                    // Advance coordinates
+                    if (scan_x == max_dim) begin
+                        scan_x <= 6'd0;
+                        if (scan_y == max_dim) begin
+                            scan_y <= 6'd0;
+                            if (comp_idx == 2'd2) begin
+                                state    <= S_DONE;
+                                ctu_done <= 1'b1;
+                            end else begin
+                                comp_idx <= comp_idx + 2'd1;
+                                state    <= S_REQ_PIX;
+                            end
+                        end else begin
+                            scan_y <= scan_y + 6'd1;
+                            state  <= S_REQ_PIX;
+                        end
+                    end else begin
+                        scan_x <= scan_x + 6'd1;
+                        state  <= S_REQ_PIX;
                     end
                 end
-                S_WRITE: if (pix_wr_ready) begin
-                    pix_wr_valid<=0;
-                    eo_out_rdy<=1; bo_out_rdy<=1; // Raise again for the next pixel
-                    if (px==max_p) begin
-                        px<=0;
-                        if (py==max_p) begin py<=0; state<=S_NCOMP; end
-                        else begin py<=py+1; state<=S_FETCH; end
-                    end else begin px<=px+1; state<=S_FETCH; end
+
+                S_DONE: begin
+                    pix_wr_valid <= 1'b0;
+                    ctu_done     <= 1'b0;
+                    state        <= S_IDLE;
                 end
-                S_NCOMP: begin
-                    if (cur_comp==2'd2) state<=S_DONE;
-                    else begin cur_comp<=cur_comp+2'd1; state<=S_START; end
-                end
-                S_DONE: begin ctu_done<=1; state<=S_IDLE; end
             endcase
         end
     end
-
-    // synthesis translate_off
-    always @(posedge clk)
-        if (rst_n && ctu_done)
-            $display("INFO [sao_top] CTU (%0d,%0d) done t=%0t", cur_ctu_x, cur_ctu_y, $time);
-    // synthesis translate_on
 
 endmodule

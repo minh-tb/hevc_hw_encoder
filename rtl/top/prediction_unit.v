@@ -24,7 +24,7 @@ module prediction_unit (
 
     // Output to Recon Unit
     output reg          pred_valid,
-    output reg [9:0]    pred_pixel,
+    output reg [`PIXEL_WIDTH-1:0] pred_pixel,
     output reg [5:0]    pred_x,
     output reg [5:0]    pred_y
 );
@@ -33,7 +33,7 @@ module prediction_unit (
     // Intra Prediction
     // =========================================================================
     wire        intra_out_valid;
-    wire [9:0]  intra_out_pixel;
+    wire [`PIXEL_WIDTH-1:0] intra_out_pixel;
     wire [5:0]  intra_out_x;
     wire [5:0]  intra_out_y;
 
@@ -100,7 +100,7 @@ module prediction_unit (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pred_valid <= 1'b0;
-            pred_pixel <= 10'd0;
+            pred_pixel <= {`PIXEL_WIDTH{1'b0}};
             pred_x <= 6'd0;
             pred_y <= 6'd0;
         end else begin

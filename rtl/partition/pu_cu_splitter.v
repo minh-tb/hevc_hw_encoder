@@ -248,9 +248,15 @@ module pu_cu_splitter (
                             end else begin
                                 // Initialize TU stack with CU-level entry (luma first)
                                 // TU size capped at TU_SIZE_MAX (32x32)
-                                init_log2 = ($clog2(lcu_size) > 3'd5) ?
-                                             3'd5 :
-                                             $clog2(lcu_size[6:0]);
+                                // $clog2 on variable not supported in Quartus II 13;
+                                // use casez lookup (lcu_size is always power-of-2, cap at 5)
+                                casez (lcu_size)
+                                    7'b1??????: init_log2 = 3'd5; // 64 → log2=6, capped to 5
+                                    7'b01?????: init_log2 = 3'd5; // 32 → 5
+                                    7'b001????: init_log2 = 3'd4; // 16 → 4
+                                    7'b0001???: init_log2 = 3'd3; // 8  → 3
+                                    default:    init_log2 = 3'd3;
+                                endcase
                                 $display("Time=%0t: [pu_cu_splitter] S_PU_OUT lcu_size=%0d init_log2=%0d", $time, lcu_size, init_log2);
                                 if (lcu_size == 7'd64) begin
                                     tu_stack[3] <= {lcu_x,                 lcu_y,                 3'd5, 3'd1, 2'd0}; // TL
@@ -279,11 +285,8 @@ module pu_cu_splitter (
                 // S_TU_EVAL: check if top TU needs splitting
                 //--------------------------------------------------------------
                 S_TU_EVAL: begin
-                    if (tu_valid && !tu_ready) begin
-                        // wait for downstream to accept previous TU
-                    end else begin
-                        tu_valid <= 1'b0;
-                        if (tu_sp == 5'd0) begin
+                    tu_valid <= 1'b0;
+                    if (tu_sp == 5'd0) begin
                         // All TUs for all components processed
                         state <= S_IDLE;
                     end else if (tu_must_split) begin
@@ -309,7 +312,6 @@ module pu_cu_splitter (
                     end else begin
                         // Ask residual coder if splitting needed
                         state <= S_TU_WAIT;
-                    end
                     end
                 end
 
@@ -346,7 +348,7 @@ module pu_cu_splitter (
                 // S_TU_OUT: output leaf TU, then handle chroma / next TU
                 //--------------------------------------------------------------
                 S_TU_OUT: begin
-                    if (!tu_valid || tu_ready) begin
+                    if (tu_ready) begin
 $display("Time=%0t: [pu_cu_splitter] S_TU_OUT outputting tu_size_log2=%0d tu_comp=%0d", $time, tu_top_log2, tu_top_comp);
                         // Output this TU
                         tu_valid          <= 1'b1;
@@ -370,8 +372,9 @@ $display("Time=%0t: [pu_cu_splitter] S_TU_OUT outputting tu_size_log2=%0d tu_com
                                 chr_log2 = (tu_top_log2 > 3'd2) ? (tu_top_log2 - 3'd1) : 3'd2;
                                 
                                 // If we are at the 4th 4x4 block, Chroma coordinates must point to the 8x8 base
-                                chr_x = (tu_top_log2 == 3'd2) ? (tu_top_x & ~6'd4) : tu_top_x;
-                                chr_y = (tu_top_log2 == 3'd2) ? (tu_top_y & ~6'd4) : tu_top_y;
+                                // For 4:2:0, chroma coords are half of luma coords
+                                chr_x = (tu_top_log2 == 3'd2) ? ((tu_top_x & ~6'd4) >> 1) : (tu_top_x >> 1);
+                                chr_y = (tu_top_log2 == 3'd2) ? ((tu_top_y & ~6'd4) >> 1) : (tu_top_y >> 1);
 
                                 tu_stack[tu_sp]     <= {chr_x, chr_y, chr_log2, tu_top_depth, 2'd1}; // Cb
                                 tu_stack[tu_sp-1]   <= {chr_x, chr_y, chr_log2, tu_top_depth, 2'd2}; // Cr

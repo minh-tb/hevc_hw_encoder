@@ -2,33 +2,70 @@
 // parameter_pkg.vh
 // HEVC Hardware Encoder/Decoder — Global Parameter Package
 //
-// SOURCE: encoder_randomaccess_main10.cfg
-// All values are directly mapped from that config file.
+// Formalized Three-Tier Configuration Hierarchy:
+// +-------------------------------------------------------------------------+
+// | Configuration Tier        | Mutability           | Implementation       |
+// +-------------------------------------------------------------------------+
+// | Tier 1: System Parameters | Fully Reconfigurable | Verilog Parameters   |
+// | Tier 2: Silicon Invariants| Fixed Physical Core  | Hardwired Gates      |
+// | Tier 3: Pre-computed ROMs | Discrete Enumeration | Case-Selected Arrays |
+// +-------------------------------------------------------------------------+
+//
 // Include this in every RTL module:  `include "parameter_pkg.vh"
 //=============================================================================
 
 `ifndef PARAMETER_PKG_VH
 `define PARAMETER_PKG_VH
 
-//-----------------------------------------------------------------------------
-// 1. BIT DEPTH
-//    Config: Profile=main10, InternalBitDepth=10
-//-----------------------------------------------------------------------------
-`define BIT_DEPTH           10          // Internal codec bit depth
-`define BIT_DEPTH_CHROMA    10          // Same for chroma in main10
-`define PIXEL_WIDTH         10          // Bus width for one luma/chroma sample
-`define COEFF_WIDTH         16          // Transform coefficient bus width (signed)
-`define COEFF_WIDTH_EXT     20          // Extended width inside butterfly stages
+//=============================================================================
+// TIER 1: USER-CONFIGURABLE SYSTEM PARAMETERS
+// Modify these to retarget pipeline operating conditions.
+//=============================================================================
 
 //-----------------------------------------------------------------------------
-// 2. CTU / CU STRUCTURE
-//    Config: MaxCUWidth=64, MaxCUHeight=64, MaxPartitionDepth=4
+// 1. BIT DEPTH & SAMPLE WIDTH
+//-----------------------------------------------------------------------------
+`define PIXEL_WIDTH         10          // Bus width for one sample (8 or 10)
+`define BIT_DEPTH           10          // Internal codec luma bit depth (8 or 10)
+`define BIT_DEPTH_CHROMA    10          // Internal codec chroma bit depth (8 or 10)
+`define MID_GRAY_SAMPLE     (1 << (`PIXEL_WIDTH - 1)) // 512 for 10-bit, 128 for 8-bit
+
+//-----------------------------------------------------------------------------
+// 2. DEFAULT FRAME DIMENSIONS & TOP-LEVEL DEFAULTS
+//-----------------------------------------------------------------------------
+`ifndef DEFAULT_FRAME_WIDTH
+`define DEFAULT_FRAME_WIDTH      128    // Default frame width (64, 128, 256, 1920, 3840 in ROM)
+`endif
+`ifndef DEFAULT_FRAME_HEIGHT
+`define DEFAULT_FRAME_HEIGHT     128    // Default frame height
+`endif
+`define DEFAULT_GOP_STRUCTURE    1      // 0: IPP, 1: Low-Delay B (IPBB), 2: Hierarchical B
+`define TARGET_BITRATE_DEFAULT   16'd5000 // Target bitrate in kbps
+`define TARGET_FPS_DEFAULT       8'd30    // Target frame rate
+
+//-----------------------------------------------------------------------------
+// 3. SIMULATION & VERIFICATION STALL WATCHDOG LIMITS
+//-----------------------------------------------------------------------------
+`define STALL_WATCHDOG_LIMIT     32'd25000  // Consecutive stall cycles before watchdog trip
+`define CTU_WATCHDOG_LIMIT       32'd150000 // Max cycles per CTU before timeout
+`define HEARTBEAT_INTERVAL       32'd25000  // Heartbeat output interval in cycles
+
+//=============================================================================
+// TIER 2: HEVC STANDARD & SILICON ARCHITECTURE INVARIANTS (DO NOT MODIFY)
+// Physical datapath geometries. Altering these requires rebuilding dedicated
+// hardware pipeline stages, line buffers, and arithmetic cores.
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+// 3. CTU / CU STRUCTURE
+//    Config: MaxCUWidth=64, MaxCUHeight=64, MaxPartitionDepth=3
+//            (HW-limited: min CU = 8x8; depth 0..3 → 64,32,16,8)
 //-----------------------------------------------------------------------------
 `define CTU_SIZE            64          // Largest coding unit size in pixels
 `define CTU_SIZE_LOG2       6           // log2(64)
-`define MIN_CU_SIZE         8           // 64 >> (depth 4-1) — smallest CU
+`define MIN_CU_SIZE         8           // 64 >> 3 = 8 — smallest CU (limited to 8x8 for FPGA HW simplicity)
 `define MIN_CU_SIZE_LOG2    3
-`define MAX_PART_DEPTH      4           // Quadtree max split depth
+`define MAX_PART_DEPTH      3           // Quadtree max split depth: 0..3 → 64,32,16,8
 `define NUM_CU_DEPTHS       4           // Depth 0=64, 1=32, 2=16, 3=8
 
 // CU sizes at each depth
@@ -51,6 +88,8 @@
 
 // Number of valid TU sizes: 4, 8, 16, 32
 `define NUM_TU_SIZES        4
+`define COEFF_WIDTH         16          // Transform coefficient bus width (signed)
+`define COEFF_WIDTH_EXT     22          // Extended width inside butterfly stages (22 bits safe for 32x32 DCT)
 
 //-----------------------------------------------------------------------------
 // 4. GOP / CODING STRUCTURE
@@ -82,7 +121,7 @@
 //            RDOQ=0, RDOQTS=0, IntraQPOffset=-3
 //            LambdaFromQpEnable=1
 //-----------------------------------------------------------------------------
-`define QP_DEFAULT          32          // Default quantization parameter
+`define QP_DEFAULT          29          // Hardcoded to 29 to match HM I-slice QP (32 - 3 offset)
 `define QP_WIDTH            6           // QP range 0–51 needs 6 bits
 `define QP_MAX              51
 `define QP_MIN              0
@@ -90,7 +129,8 @@
 `define MAX_DELTA_QP        0           // No per-CU delta QP → simplifies HW
 `define MAX_CU_DQP_DEPTH    0
 `define RDOQ_ENABLE         0
-`define RDOQTS_ENABLE       0// Flat quantization matrix (ScalingList=0 → all MF entries same per QP)
+`define RDOQTS_ENABLE       0
+// Flat quantization matrix (ScalingList=0 → all MF entries same per QP)
 // MF(QP) = flat_scale[QP%6], right-shift by (29 + QP/6)
 // flat_scale for QP%6 = 0..5:
 `define FLAT_SCALE_0        26214       // QP%6==0
@@ -102,21 +142,25 @@
 
 //-----------------------------------------------------------------------------
 // 6. MOTION ESTIMATION
-//    Config: FastSearch=1 (TZ), SearchRange=64, ASR=1,
+//    Config: FastSearch=1 (TZ), SearchRange=32, ASR=1,
 //            MinSearchWindow=64, BipredSearchRange=2,
 //            HadamardME=0, FEN=1, FDM=1
 //-----------------------------------------------------------------------------
-`define ME_SEARCH_RANGE     64          // Integer pel search range
-`define ME_SEARCH_LOG2      7           // ceil(log2(64+1))
-`define ME_MV_WIDTH         8           // MV component bits (signed, covers ±64)
+`define ME_SEARCH_RANGE     32          // Integer pel search range
+`define ME_SEARCH_LOG2      6           // ceil(log2(64+1)) = 7 → use 6 for ±32 signed
+`define ME_MV_WIDTH         8           // TZ search engine internal MV width (±32 → 6+sign=7; use 8)
 `define ME_BIPRED_RANGE     2           // Bi-pred refinement range
-`define ME_MIN_WIN          64          // ASR minimum window
+`define ME_MIN_WIN          64          // ASR minimum window (MinSearchWindow=64 from config)
 `define ME_USE_HADAMARD     0           // SATD cost for fractional ME
 `define ME_FEN              1           // Fast encoder decision
 `define ME_FDM              1           // Fast merge RD
 `define MV_FRAC_BITS        2           // Quarter-pel: 2 fractional bits
-`define MV_INT_BITS         10          // Integer part bits
+`define MV_INT_BITS         6           // Integer part bits: ±32 needs 6 bits signed
+                                        // NOTE: AMVP/merge candidates from neighbours may
+                                        // have larger MVs; use MV_TOTAL_BITS=12 for the bus
 `define MV_TOTAL_BITS       12          // Total MV component bits (int+frac, signed)
+                                        // = MV_INT_BITS(6) + MV_FRAC_BITS(2) + 4 headroom
+                                        // Matches mvx/mvy width in hevc_interfaces.vh
 
 // TZ search parameters
 `define TZ_IMAX             8           // Max step iterations
@@ -153,7 +197,8 @@
 `define SAO_NUM_EO_TYPES    4           // Edge offset directions
 `define SAO_NUM_EO_CATS     5           // EO categories: -2,-1,0,+1,+2
 `define SAO_NUM_BO_BANDS    32          // Band offset bands
-`define SAO_OFFSET_WIDTH    5           // Offset value bits (signed)
+`define SAO_OFFSET_WIDTH    5           // Total bits per offset (1 sign + 4 magnitude)
+`define SAO_OFFSET_MAX      15          // Max magnitude (HEVC spec: offset_abs 4-bit → 0..15)
 
 //-----------------------------------------------------------------------------
 // 10. CODING TOOLS
@@ -169,6 +214,7 @@
 //    (keep these as 0 — used as guards in RTL to tie off logic)
 //-----------------------------------------------------------------------------
 `define RATE_CONTROL        0           // RateControl=0 → fixed QP only
+`define RATE_CONTROL_ENABLE `RATE_CONTROL
 `define PCM_ENABLE          0           // PCMEnabledFlag=0
 `define WAVEFRONT_ENABLE    0           // WaveFrontSynchro=0
 `define SCALING_LIST        0           // ScalingList=0 → flat matrix
@@ -194,9 +240,9 @@
 // 14. REFERENCE PICTURE BUFFER (DPB)
 //    From GOP structure: max 5 refs needed (see Frame4/5 lines in config)
 //-----------------------------------------------------------------------------
-`define MAX_REF_PICS        8           // DPB slots
+`define MAX_REF_PICS        8           // DPB slots (covers GOP16 needing up to 5 active refs)
 `define MAX_REF_ACTIVE      5           // Max #ref_pics in lists (from config GOP table)
-`define DPB_SLOTS           8
+`define DPB_SLOTS           `MAX_REF_PICS // Alias — always keep equal to MAX_REF_PICS
 
 //-----------------------------------------------------------------------------
 // 15. PIPELINE / TIMING
@@ -208,13 +254,30 @@
 //-----------------------------------------------------------------------------
 // 16. MEMORY LAYOUT HELPERS
 //-----------------------------------------------------------------------------
-// One 10-bit luma sample = 10 bits → pack 3 per 32-bit word (2 bits padding)
-`define SAMPLES_PER_WORD    3
+// One 10-bit luma sample = 10 bits → pack 2 per 32-bit word (12 bits padding)
+// NOTE: 2 samples/word chosen for AXI power-of-2 alignment; avoids modulo-3 counter logic
+`define SAMPLES_PER_WORD    2
 `define WORD_WIDTH          32
+
+// Frame / CTU address widths — must stay in sync with hevc_interfaces.vh
+`define FRAME_DIM_WIDTH     12          // Bits for frame_width/height in pixels (covers 4K: 3840/2160 < 4095)
+`define CTU_ADDR_WIDTH      13          // Linear CTU address bits (4K needs 11-bit; 13 gives 8K headroom)
+`define CTU_COORD_WIDTH     6           // CTU x/y column/row index (max 4096/64=64 → 6-bit exact)
 
 // CTU luma sample count
 `define CTU_LUMA_SAMPLES    4096        // 64*64
 `define CTU_CB_SAMPLES      1024        // 32*32 (4:2:0)
 `define CTU_CR_SAMPLES      1024
+
+//=============================================================================
+// TIER 3: PRE-COMPUTED PARAMETER SET SELECTORS
+// Supported pre-compiled bitstream headers in param_set_writer.v
+//=============================================================================
+`define SPS_RES_64X64       3'd0
+`define SPS_RES_128X128     3'd1
+`define SPS_RES_256X256     3'd2
+`define SPS_RES_1080P       3'd3    // 1920x1080 Full HD
+`define SPS_RES_1088P       3'd4    // 1920x1088 (CTU-aligned Full HD)
+`define SPS_RES_4K          3'd5    // 3840x2160 4K UHD
 
 `endif // PARAMETER_PKG_VH

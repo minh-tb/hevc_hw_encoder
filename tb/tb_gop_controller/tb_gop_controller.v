@@ -28,6 +28,21 @@ module tb_gop_controller();
     wire [2:0]  ref_l0_count;
     wire [2:0]  ref_l1_count;
 
+    wire [14:0] ref_l0_flat;
+    wire [14:0] ref_l1_flat;
+
+    assign ref_l0[0] = ref_l0_flat[2:0];
+    assign ref_l0[1] = ref_l0_flat[5:3];
+    assign ref_l0[2] = ref_l0_flat[8:6];
+    assign ref_l0[3] = ref_l0_flat[11:9];
+    assign ref_l0[4] = ref_l0_flat[14:12];
+
+    assign ref_l1[0] = ref_l1_flat[2:0];
+    assign ref_l1[1] = ref_l1_flat[5:3];
+    assign ref_l1[2] = ref_l1_flat[8:6];
+    assign ref_l1[3] = ref_l1_flat[11:9];
+    assign ref_l1[4] = ref_l1_flat[14:12];
+
     gop_controller uut (
         .clk(clk),
         .rst_n(rst_n),
@@ -46,10 +61,8 @@ module tb_gop_controller();
         .alloc_slot(alloc_slot),
         .free_valid(free_valid),
         .free_slot(free_slot),
-        // Use individual assignments since SystemVerilog ports into Verilog TB can be tricky, 
-        // but since this is just a quick unit test we can rely on standard arrays in Questa.
-        .ref_l0(ref_l0),
-        .ref_l1(ref_l1),
+        .ref_l0(ref_l0_flat),
+        .ref_l1(ref_l1_flat),
         .ref_l0_count(ref_l0_count),
         .ref_l1_count(ref_l1_count)
     );
