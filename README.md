@@ -51,15 +51,3 @@ The hardware encoder is verified against bit-accurate golden test vectors genera
    # Open QuestaSim / ModelSim and execute:
    vsim -do run_sim.do
    ```
-
----
-
-## Synthesis & Implementation
-
-- **Target FPGA:** Intel / Altera Cyclone IV / Cyclone V / Arria / Stratix.
-- **Synthesis:**
-  - Open Quartus Prime and load `hevc_encoder_top.qpf` or `tonghop/doan1.qpf`.
-  - Alternatively, run the batch synthesis TCL flow:
-    ```bash
-    quartus_sh -t synth/synth_hevc.tcl
-    ```
