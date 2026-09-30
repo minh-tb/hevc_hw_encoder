@@ -63,14 +63,14 @@ module lambda_calc (
             6'd41: begin lambda_mode = 24'd176854; lambda_motion = 16'd6729; lambda_chroma = 24'd55706; end
             6'd42: begin lambda_mode = 24'd222822; lambda_motion = 16'd7553; lambda_chroma = 24'd70185; end
             6'd43: begin lambda_mode = 24'd280739; lambda_motion = 16'd8478; lambda_chroma = 24'd70185; end
-            6'd44: begin lambda_mode = 24'd353709; lambda_motion = 16'd9516; lambda_chroma = 24'd70185; end
-            6'd45: begin lambda_mode = 24'd445645; lambda_motion = 16'd10681; lambda_chroma = 24'd88427; end
-            6'd46: begin lambda_mode = 24'd561477; lambda_motion = 16'd11989; lambda_chroma = 24'd88427; end
-            6'd47: begin lambda_mode = 24'd707417; lambda_motion = 16'd13457; lambda_chroma = 24'd88427; end
-            6'd48: begin lambda_mode = 24'd891290; lambda_motion = 16'd15105; lambda_chroma = 24'd111411; end
-            6'd49: begin lambda_mode = 24'd1122955; lambda_motion = 16'd16955; lambda_chroma = 24'd111411; end
-            6'd50: begin lambda_mode = 24'd1414834; lambda_motion = 16'd19031; lambda_chroma = 24'd111411; end
-            6'd51: begin lambda_mode = 24'd1782579; lambda_motion = 16'd21362; lambda_chroma = 24'd111411; end
+            6'd44: begin lambda_mode = 24'd353709; lambda_motion = 16'd9516; lambda_chroma = 24'd88427; end   // QpC=38
+            6'd45: begin lambda_mode = 24'd445645; lambda_motion = 16'd10681; lambda_chroma = 24'd111411; end // QpC=39
+            6'd46: begin lambda_mode = 24'd561477; lambda_motion = 16'd11989; lambda_chroma = 24'd140369; end // QpC=40
+            6'd47: begin lambda_mode = 24'd707417; lambda_motion = 16'd13457; lambda_chroma = 24'd176854; end // QpC=41
+            6'd48: begin lambda_mode = 24'd891290; lambda_motion = 16'd15105; lambda_chroma = 24'd222822; end // QpC=42
+            6'd49: begin lambda_mode = 24'd1122955; lambda_motion = 16'd16955; lambda_chroma = 24'd280739; end // QpC=43
+            6'd50: begin lambda_mode = 24'd1414834; lambda_motion = 16'd19031; lambda_chroma = 24'd353709; end // QpC=44
+            6'd51: begin lambda_mode = 24'd1782579; lambda_motion = 16'd21362; lambda_chroma = 24'd445645; end // QpC=45
             default: begin lambda_mode = 24'd22107; lambda_motion = 16'd2379; lambda_chroma = 24'd17546; end
         endcase
     end

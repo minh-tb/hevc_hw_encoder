@@ -74,12 +74,12 @@ module inv_quant (
 );
 
     //-------------------------------------------------------------------------
-    // HEVC Table 8-9 Chroma QP Mapping
+    // HEVC Table 8-10 Chroma QP Mapping (ITU-T H.265 Section 8.4.3)
     //-------------------------------------------------------------------------
     function automatic [5:0] chroma_qp_map;
         input [5:0] qp_y;
         begin
-            if (qp_y < 30) chroma_qp_map = qp_y;
+            if      (qp_y < 30) chroma_qp_map = qp_y;
             else if (qp_y == 30) chroma_qp_map = 29;
             else if (qp_y == 31) chroma_qp_map = 30;
             else if (qp_y == 32) chroma_qp_map = 31;
@@ -94,11 +94,8 @@ module inv_quant (
             else if (qp_y == 41) chroma_qp_map = 36;
             else if (qp_y == 42) chroma_qp_map = 37;
             else if (qp_y == 43) chroma_qp_map = 37;
-            else if (qp_y == 44) chroma_qp_map = 37;
-            else if (qp_y == 45) chroma_qp_map = 38;
-            else if (qp_y == 46) chroma_qp_map = 38;
-            else if (qp_y == 47) chroma_qp_map = 38;
-            else chroma_qp_map = 39;
+            // HEVC Table 8-10: for qPi > 43, QpC = qPi - 6
+            else chroma_qp_map = qp_y - 6'd6;
         end
     endfunction
 
@@ -146,7 +143,7 @@ module inv_quant (
     //-------------------------------------------------------------------------
     // Shift direction and amount
     // Mapped from HM TComTrQuant::xDeQuant:
-    // shift = IQUANT_SHIFT - cQP.per + iTransformShift
+    // shift = IQUANT_SHIFT - cQP.per - iTransformShift
     // iTransformShift = MAX_TR_DYNAMIC_RANGE - BIT_DEPTH - tu_size_log2
     //-------------------------------------------------------------------------
     localparam IQUANT_SHIFT  = 6;

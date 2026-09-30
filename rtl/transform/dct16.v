@@ -122,7 +122,7 @@ module dct16 (
     reg                            stage1_valid;
     reg                            fwd_inv_n_s1;
 
-    wire stall = stage1_valid && out_valid && !out_ready;
+    wire stall = stage1_valid && !out_ready;
     assign in_ready = !stall;
 
     //=========================================================================

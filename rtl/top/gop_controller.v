@@ -384,7 +384,11 @@ module gop_controller #(
                     alloc_poc <= base_poc + 10'd1;
                     frame_poc <= base_poc + 10'd1;
                     is_intra  <= 1'b0;
-                    gop_idx   <= gop_idx + 5'd1;
+                    if (gop_idx == (`GOP_SIZE - 1)) begin
+                        gop_idx <= 5'd0;
+                    end else begin
+                        gop_idx <= gop_idx + 5'd1;
+                    end
                 end
 
                 S_DONE: begin

@@ -142,5 +142,5 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/transform/dct8.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/transform/dct_top.v
 set_global_assignment -name SDC_FILE synth/hevc_encoder_top.sdc
 set_global_assignment -name VERILOG_CONSTANT_LOOP_LIMIT 50000
-set_global_assignment -name TOP_LEVEL_ENTITY hevc_encoder_top
 set_global_assignment -name VERILOG_MACRO "SYNTHESIS=1"
+set_global_assignment -name TOP_LEVEL_ENTITY hevc_encoder_top

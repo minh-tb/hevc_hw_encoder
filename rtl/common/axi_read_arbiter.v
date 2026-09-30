@@ -41,8 +41,11 @@ module axi_read_arbiter (
     input  wire         m_rlast
 );
 
-    reg sel;          // 0 for p0, 1 for p1
+    reg sel;          // 0 for p0, 1 for p1 (latched during AR handshake for R-channel)
     reg active_read;  // 1 while waiting for R-data after AR handshake
+
+    wire arb_sel = !p0_arvalid && p1_arvalid; // 0 for p0, 1 for p1
+    wire ar_handshake = m_arvalid && m_arready;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -52,31 +55,23 @@ module axi_read_arbiter (
             if (active_read) begin
                 if (m_rvalid && m_rready && m_rlast) begin
                     active_read <= 1'b0;
-                    if (p0_arvalid) sel <= 1'b0;
-                    else if (p1_arvalid) sel <= 1'b1;
                 end
-            end else begin
-                // Select active channel
-                if (p0_arvalid) begin
-                    sel <= 1'b0;
-                    if (m_arready) active_read <= 1'b1;
-                end else if (p1_arvalid) begin
-                    sel <= 1'b1;
-                    if (m_arready) active_read <= 1'b1;
-                end
+            end else if (ar_handshake) begin
+                sel         <= arb_sel;
+                active_read <= 1'b1;
             end
         end
     end
 
     // AR Channel: passed directly when no read is in-flight
-    assign m_arvalid  = !active_read ? (sel ? p1_arvalid : p0_arvalid) : 1'b0;
-    assign m_araddr   = sel ? p1_araddr : p0_araddr;
-    assign m_arlen    = sel ? p1_arlen : p0_arlen;
-    assign m_arsize   = sel ? p1_arsize : p0_arsize;
-    assign m_arburst  = sel ? p1_arburst : p0_arburst;
+    assign m_arvalid  = !active_read && (p0_arvalid || p1_arvalid);
+    assign m_araddr   = arb_sel ? p1_araddr : p0_araddr;
+    assign m_arlen    = arb_sel ? p1_arlen : p0_arlen;
+    assign m_arsize   = arb_sel ? p1_arsize : p0_arsize;
+    assign m_arburst  = arb_sel ? p1_arburst : p0_arburst;
 
-    assign p0_arready = (!sel && !active_read) ? m_arready : 1'b0;
-    assign p1_arready = ( sel && !active_read) ? m_arready : 1'b0;
+    assign p0_arready = (!active_read && !arb_sel) ? m_arready : 1'b0;
+    assign p1_arready = (!active_read &&  arb_sel) ? m_arready : 1'b0;
 
     // R Channel: routed to selected port
     assign p0_rvalid  = (!sel && active_read) ? m_rvalid : 1'b0;

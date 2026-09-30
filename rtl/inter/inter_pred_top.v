@@ -362,13 +362,13 @@ module inter_pred_top #(
                         if (inter_pred_idc == 2'd2) begin // Pred_BI: Blend L0 + L1
                             for (pi = 0; pi < 16; pi = pi + 1) begin
                                 mc_pred_y_flat[pi*PIXEL_WIDTH +: PIXEL_WIDTH] <= 
-                                    (l0_pred_y[pi*PIXEL_WIDTH +: PIXEL_WIDTH] + sub_pred_y[pi*PIXEL_WIDTH +: PIXEL_WIDTH] + 1'b1) >> 1;
+                                    ({1'b0, l0_pred_y[pi*PIXEL_WIDTH +: PIXEL_WIDTH]} + {1'b0, sub_pred_y[pi*PIXEL_WIDTH +: PIXEL_WIDTH]} + 11'd1) >> 1;
                             end
                             for (pi = 0; pi < 4; pi = pi + 1) begin
                                 mc_pred_cb_flat[pi*PIXEL_WIDTH +: PIXEL_WIDTH] <= 
-                                    (l0_pred_cb[pi*PIXEL_WIDTH +: PIXEL_WIDTH] + sub_pred_cb[pi*PIXEL_WIDTH +: PIXEL_WIDTH] + 1'b1) >> 1;
+                                    ({1'b0, l0_pred_cb[pi*PIXEL_WIDTH +: PIXEL_WIDTH]} + {1'b0, sub_pred_cb[pi*PIXEL_WIDTH +: PIXEL_WIDTH]} + 11'd1) >> 1;
                                 mc_pred_cr_flat[pi*PIXEL_WIDTH +: PIXEL_WIDTH] <= 
-                                    (l0_pred_cr[pi*PIXEL_WIDTH +: PIXEL_WIDTH] + sub_pred_cr[pi*PIXEL_WIDTH +: PIXEL_WIDTH] + 1'b1) >> 1;
+                                    ({1'b0, l0_pred_cr[pi*PIXEL_WIDTH +: PIXEL_WIDTH]} + {1'b0, sub_pred_cr[pi*PIXEL_WIDTH +: PIXEL_WIDTH]} + 11'd1) >> 1;
                             end
                         end else begin // Uni-pred L1
                             mc_pred_y_flat  <= sub_pred_y;

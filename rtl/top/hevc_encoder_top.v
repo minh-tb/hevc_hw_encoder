@@ -600,7 +600,7 @@ module hevc_encoder_top #(
             latched_cu_depth      <= cu_depth[1:0];
             latched_cu_split_ctx  <= cu_split_ctx;
             latched_cu_is_intra   <= md_best_is_intra;
-            latched_cu_intra_mode <= 6'd0; // Forced Planar Mode 0 for bit-exact signaling alignment
+            latched_cu_intra_mode <= md_best_intra_mode;
             latched_cu_skip       <= md_best_skip_flag;
             latched_cu_merge      <= md_best_merge_flag;
             latched_cu_merge_idx  <= md_best_merge_idx;
@@ -921,6 +921,7 @@ module hevc_encoder_top #(
         orig_pixel_q  <= (reg_tu_comp == 2'd0) ? orig_y_data_q :
                          (reg_tu_comp == 2'd1) ? orig_u_data_q :
                                                  orig_v_data_q;
+    end
 `else
     always @(posedge clk) begin
         if (reg_tu_comp == 2'd0)
@@ -929,14 +930,25 @@ module hevc_encoder_top #(
             orig_pixel_q <= orig_u_ram[{orig_res_rd_y[4:0], orig_res_rd_x[4:0]}];
         else
             orig_pixel_q <= orig_v_ram[{orig_res_rd_y[4:0], orig_res_rd_x[4:0]}];
+    end
 `endif
-            
-        pred_valid_q <= pred_valid;
-        pred_pixel_q <= pred_pixel;
-        active_pred_x_q <= active_pred_x;
-        active_pred_y_q <= active_pred_y;
-        active_pred_last_q <= active_pred_last;
-        md_best_is_intra_q <= latched_cu_is_intra;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            pred_valid_q       <= 1'b0;
+            pred_pixel_q       <= 10'd0;
+            active_pred_x_q    <= 6'd0;
+            active_pred_y_q    <= 6'd0;
+            active_pred_last_q <= 1'b0;
+            md_best_is_intra_q <= 1'b1;
+        end else begin
+            pred_valid_q       <= pred_valid;
+            pred_pixel_q       <= pred_pixel;
+            active_pred_x_q    <= active_pred_x;
+            active_pred_y_q    <= active_pred_y;
+            active_pred_last_q <= active_pred_last;
+            md_best_is_intra_q <= latched_cu_is_intra;
+        end
     end
     // Accept input pixels when CTU input buffer is ready for a new 64x64 block and previous CTU is fully done
     assign in_ready   = (frame_start_pending || ctu_frame_active) && (ctu_partitioner_ready && !ctu_pixels_ready && ctu_buffer_free);
@@ -1649,6 +1661,9 @@ module hevc_encoder_top #(
     wire [11:0] filter_out_y;
 
 `ifdef SYNTHESIS
+    // Memory replication pattern: dpb_*_ram_l0 and dpb_*_ram_l1 each store the full
+    // 2-slot DPB (32768 samples = 2 slots of 128x128). Replicated so FPGA M10K/BRAM
+    // can provide two independent read ports (one for ref_l0, one for ref_l1) alongside the write port.
     (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_luma_ram_l0 [0:32767];
     (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_luma_ram_l1 [0:32767];
     (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_cb_ram_l0   [0:8191];
@@ -1912,7 +1927,7 @@ module hevc_encoder_top #(
         .qp               (ctu_qp),
         .tu_comp          (reg_tu_comp),
         .tu_size_log2     (dct_out_tu_size_log2),
-        .is_intra         (ctu_slice_type == SLICE_I),
+        .is_intra         (latched_cu_is_intra),
         .in_valid         (p2s_active),
         .in_ready         (),  // streaming pipeline, always accepts
         .in_coeff         (p2s_coeff), 
@@ -2698,7 +2713,7 @@ module hevc_encoder_top #(
             cu_intra_mode_left_r <= 6'd1;
             for (intra_mode_init_i = 0; intra_mode_init_i < 64; intra_mode_init_i = intra_mode_init_i + 1)
                 cu_intra_mode_line_buf[intra_mode_init_i] <= 6'd1;
-        end else if (cabac_cu_done && !latched_cu_is_split) begin
+        end else if ((cabac_pred_done || (cabac_cu_done && current_cu_skip)) && !latched_cu_is_split) begin
             cu_intra_mode_left_r <= latched_cu_intra_mode;
             cu_intra_mode_line_buf[ctu_x] <= latched_cu_intra_mode;
         end
@@ -2807,6 +2822,14 @@ module hevc_encoder_top #(
         .nal_byte_count   (),
         .total_nal_count  ()
     );
+
+    // synthesis translate_off
+    always @(posedge clk) begin
+        if (rst_n && rbsp_valid && cabac_out_valid) begin
+            $fatal(1, "[HEVC_TOP] RBSP collision: slice header rbsp_valid and CABAC cabac_out_valid asserted simultaneously!");
+        end
+    end
+    // synthesis translate_on
 
     // Keep track of when IDCT / reconstruction is busy
     always @(posedge clk or negedge rst_n) begin

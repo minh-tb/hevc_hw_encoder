@@ -108,19 +108,6 @@ module decoder_inloop_filters (
     //=========================================================================
     // Shadow Maps for Deblock
     //=========================================================================
-`ifdef SYNTHESIS
-    wire [255:0]  cu_map_pred_mode  = 256'd0;
-    wire [255:0]  cu_map_cbf_luma   = 256'd0;
-    wire [255:0]  cu_map_cbf_chroma = 256'd0;
-    wire [767:0]  cu_map_ref_l0     = 768'd0;
-    wire [767:0]  cu_map_ref_l1     = 768'd0;
-    wire [255:0]  cu_map_bi_pred    = 256'd0;
-    wire [4095:0] cu_map_mvx_l0     = 4096'd0;
-    wire [4095:0] cu_map_mvy_l0     = 4096'd0;
-    wire [4095:0] cu_map_mvx_l1     = 4096'd0;
-    wire [4095:0] cu_map_mvy_l1     = 4096'd0;
-    wire [1535:0] cu_map_qp         = 1536'd0;
-`else
     reg [255:0]  cu_map_pred_mode;
     reg [255:0]  cu_map_cbf_luma;
     reg [255:0]  cu_map_cbf_chroma;
@@ -138,7 +125,6 @@ module decoder_inloop_filters (
     reg [4:0] map_cx, map_cy;
     reg [3:0] luma_equiv_log2;
 
-    // synthesis translate_off
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             cu_map_pred_mode  <= 256'd0;
@@ -187,8 +173,6 @@ module decoder_inloop_filters (
             end
         end
     end
-    // synthesis translate_on
-`endif
 
     //=========================================================================
     // Fill Logic (Original Pixels for SAO stats)

@@ -163,6 +163,9 @@ module fifo_sync #(
                 end
                 assign dout = dout_reg;
             end else begin : gen_fwft_read
+                // Note: Asynchronous read for FWFT mode forces distributed RAM (LUTRAM)
+                // in synthesis tools. For true BRAM with zero-cycle latency, use a registered
+                // skid buffer or set FORCE_BRAM=0 for explicit distributed RAM.
                 assign dout = mem[rd_addr];
             end
 

@@ -175,21 +175,21 @@ module range_coder (
         end
     endfunction
 
-    // Renormalization table — exact copy of HM sm_aucRenormTable[32]
-    // From TLibCommon/TComCABACTables.cpp
-    function automatic [2:0] renorm_table;
-        input [4:0] idx; // (lps >> 3)
-        reg [2:0] r [0:31];
+    // Renormalization shift calculator (Leading Zero Count)
+    // Ensures range_r is restored to [256..510] even for small LPS values (e.g. lps_val=2)
+    function automatic [2:0] renorm_shift_lzc;
+        input [7:0] lps_val;
         begin
-            r[ 0]=3'd6; r[ 1]=3'd5; r[ 2]=3'd4; r[ 3]=3'd4;
-            r[ 4]=3'd3; r[ 5]=3'd3; r[ 6]=3'd3; r[ 7]=3'd3;
-            r[ 8]=3'd2; r[ 9]=3'd2; r[10]=3'd2; r[11]=3'd2;
-            r[12]=3'd2; r[13]=3'd2; r[14]=3'd2; r[15]=3'd2;
-            r[16]=3'd1; r[17]=3'd1; r[18]=3'd1; r[19]=3'd1;
-            r[20]=3'd1; r[21]=3'd1; r[22]=3'd1; r[23]=3'd1;
-            r[24]=3'd1; r[25]=3'd1; r[26]=3'd1; r[27]=3'd1;
-            r[28]=3'd1; r[29]=3'd1; r[30]=3'd1; r[31]=3'd1;
-            renorm_table = r[idx];
+            casez (lps_val)
+                8'b1???????: renorm_shift_lzc = 3'd1;
+                8'b01??????: renorm_shift_lzc = 3'd2;
+                8'b001?????: renorm_shift_lzc = 3'd3;
+                8'b0001????: renorm_shift_lzc = 3'd4;
+                8'b00001???: renorm_shift_lzc = 3'd5;
+                8'b000001??: renorm_shift_lzc = 3'd6;
+                8'b0000001?: renorm_shift_lzc = 3'd7;
+                default:     renorm_shift_lzc = 3'd7;
+            endcase
         end
     endfunction
 
@@ -351,7 +351,7 @@ module range_coder (
                             bin_ready <= 1'b1;
                         end
                     end else begin
-                        renorm_shift_v = renorm_table(lps_val_v[7:3]);
+                        renorm_shift_v = renorm_shift_lzc(lps_val_v);
                         low_r     <= (low_r + {23'd0, new_range_v}) << renorm_shift_v;
                         range_r   <= {1'b0, lps_val_v} << renorm_shift_v;
                         bits_left <= bits_left - {4'd0, renorm_shift_v};

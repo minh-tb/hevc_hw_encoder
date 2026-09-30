@@ -242,7 +242,7 @@ module cabac_enc_top #(
         if (cu_left_intra_mode == cu_above_intra_mode) begin
             if (cu_left_intra_mode > 6'd1) begin
                 cand0 = cu_left_intra_mode;
-                cand1 = 6'd2 + ((cu_left_intra_mode - 6'd2 + 6'd29) % 6'd32);
+                cand1 = 6'd2 + ((cu_left_intra_mode - 6'd2 + 6'd31) % 6'd32);
                 cand2 = 6'd2 + ((cu_left_intra_mode - 6'd2 + 6'd1) % 6'd32);
             end else begin
                 cand0 = 6'd0;  // Planar
@@ -267,11 +267,14 @@ module cabac_enc_top #(
 
     // Sort MPMs for remaining mode derivation
     reg [5:0] s0, s1, s2;
+    reg [5:0] swap_tmp;
     always @(*) begin
-        s0 = cand0; s1 = cand1; s2 = cand2;
-        if (s0 > s1) begin s0 = cand1; s1 = cand0; end
-        if (s0 > s2) begin s2 = s0; s0 = cand2; end
-        if (s1 > s2) begin s1 = s2; s2 = cand1; end
+        s0 = cand0;
+        s1 = cand1;
+        s2 = cand2;
+        if (s0 > s1) begin swap_tmp = s0; s0 = s1; s1 = swap_tmp; end
+        if (s0 > s2) begin swap_tmp = s0; s0 = s2; s2 = swap_tmp; end
+        if (s1 > s2) begin swap_tmp = s1; s1 = s2; s2 = swap_tmp; end
     end
 
     wire [4:0] intra_rem_mode = (cu_intra_mode > s2) ? (cu_intra_mode[4:0] - 5'd3) :

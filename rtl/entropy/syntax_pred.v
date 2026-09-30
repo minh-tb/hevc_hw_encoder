@@ -273,8 +273,8 @@ module syntax_pred #(
             end
             S_INTRA_PREV: begin // prev_intra_luma_pred_flag
                 bin_valid  = 1'b1;
-                bin_value  = 1'b1; // say 1
-                bin_ctx_id = 8'd13; // INTRA_PRED_MODE ctx (flat idx 13)
+                bin_value  = prev_intra_r;
+                bin_ctx_id = 8'd13; // PREV_INTRA_LUMA_PRED_FLAG ctx (flat idx 13 matching init_tables.vh)
             end
             S_INTRA_MPM: begin
                 bin_valid = 1'b1;
@@ -290,7 +290,7 @@ module syntax_pred #(
                 bin_valid = 1'b1;
                 if (eg_symbol == 0) begin
                     bin_value = (chroma_mode_r != 4);
-                    bin_ctx_id = 8'd14; // intra_chroma_pred_mode ctx
+                    bin_ctx_id = 8'd14; // intra_chroma_pred_mode ctx (flat idx 14 matching init_tables.vh)
                 end else begin
                     bin_value = chroma_mode_r[2 - eg_symbol];
                     bin_is_ep = 1'b1;

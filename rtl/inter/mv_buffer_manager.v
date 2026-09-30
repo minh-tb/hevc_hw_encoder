@@ -6,7 +6,7 @@
 `include "parameter_pkg.vh"
 
 module mv_buffer_manager #(
-    parameter MV_W = 10,
+    parameter MV_W = `MV_TOTAL_BITS,
     parameter AXI_DW = 256
 )(
     input  wire        clk,
@@ -66,11 +66,11 @@ module mv_buffer_manager #(
     // 16 entries * 64 bits = 1024 bits.
     reg [63:0] ctu_mv_cache [0:15];
     
-    wire signed [MV_W-1:0] mvx = inter_mv_x[11:2]; // Shift to integer pel
-    wire signed [MV_W-1:0] mvy = inter_mv_y[11:2];
+    wire signed [MV_W-1:0] mvx = inter_mv_x; // Full quarter-pel precision
+    wire signed [MV_W-1:0] mvy = inter_mv_y;
     
     wire [63:0] pack_mv = { 
-        15'd0, // padding
+        7'd0,  // padding (64 - 1 - 4 - 12 - 12 - 4 - 12 - 12 = 7)
         1'b1,  // is_inter = !is_intra
         {1'b0, ref_idx_l1},
         mvy,

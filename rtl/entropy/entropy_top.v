@@ -279,6 +279,7 @@ module entropy_top #(
                 
                 S_WAIT_CABAC_IDLE_FOR_FLUSH: begin
                     if (!cabac_enc_busy) begin
+                        cabac_flush_req_r <= 1'b1; // Single-cycle pulse to initiate flush
                         state <= S_FLUSH_WAIT;
                         // synthesis translate_off
                         $display("Time=%0t: [ENTROPY_TOP] CABAC idle! Entering S_FLUSH_WAIT.", $time);
@@ -287,9 +288,7 @@ module entropy_top #(
                 end
 
                 S_FLUSH_WAIT: begin
-                    cabac_flush_req_r <= 1'b1; // Hold flush request high until done
                     if (cabac_flush_done) begin
-                        cabac_flush_req_r   <= 1'b0;
                         sc_ctu_frame_done_r <= 1'b1; // Trigger slice_controller to end the NAL
                         state               <= S_IDLE;
                     end

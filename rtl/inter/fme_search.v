@@ -72,19 +72,19 @@ module fme_search #(
     // =========================================================================
     // Let's generate the absolute target:
     wire signed [MV_TOTAL_BITS-1:0] target_mv_x = cur_best_mv_x + (is_qpel ? (
-        (pt_cnt==0 || pt_cnt==1 || pt_cnt==2) ? 12'sd1 :
-        (pt_cnt==3 || pt_cnt==5 || pt_cnt==7) ? -12'sd1 : 12'sd0
+        (pt_cnt==0 || pt_cnt==4 || pt_cnt==7) ?  12'sd1 :
+        (pt_cnt==2 || pt_cnt==5 || pt_cnt==6) ? -12'sd1 : 12'sd0
     ) : (
-        (pt_cnt==0 || pt_cnt==1 || pt_cnt==2) ? 12'sd2 :
-        (pt_cnt==3 || pt_cnt==5 || pt_cnt==7) ? -12'sd2 : 12'sd0
+        (pt_cnt==0 || pt_cnt==4 || pt_cnt==7) ?  12'sd2 :
+        (pt_cnt==2 || pt_cnt==5 || pt_cnt==6) ? -12'sd2 : 12'sd0
     ));
     
     wire signed [MV_TOTAL_BITS-1:0] target_mv_y = cur_best_mv_y + (is_qpel ? (
-        (pt_cnt==1 || pt_cnt==2 || pt_cnt==5) ? 12'sd1 :
-        (pt_cnt==4 || pt_cnt==6 || pt_cnt==7) ? -12'sd1 : 12'sd0
+        (pt_cnt==1 || pt_cnt==4 || pt_cnt==5) ?  12'sd1 :
+        (pt_cnt==3 || pt_cnt==6 || pt_cnt==7) ? -12'sd1 : 12'sd0
     ) : (
-        (pt_cnt==1 || pt_cnt==2 || pt_cnt==5) ? 12'sd2 :
-        (pt_cnt==4 || pt_cnt==6 || pt_cnt==7) ? -12'sd2 : 12'sd0
+        (pt_cnt==1 || pt_cnt==4 || pt_cnt==5) ?  12'sd2 :
+        (pt_cnt==3 || pt_cnt==6 || pt_cnt==7) ? -12'sd2 : 12'sd0
     ));
     
     // fractional part

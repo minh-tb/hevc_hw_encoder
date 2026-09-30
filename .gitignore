@@ -51,6 +51,7 @@ greybox_tmp/
 *.sof
 *.done
 *.qws
+synth/synth_log.txt
 
 # Raw video, stream dumps & generated artifacts
 *.yuv
@@ -59,6 +60,8 @@ greybox_tmp/
 *.bmp
 Trace*.txt
 test.png
+test_dec.png
+test_hw.png
 
 # System & Python caches
 .system_generated/

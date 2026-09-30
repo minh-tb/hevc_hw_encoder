@@ -282,7 +282,7 @@ module slice_controller #(
 
                 S_HDR_SEND: begin
                     int_rbsp_valid <= 1'b1;
-                    int_rbsp_byte  <= (rbsp_ready && hdr_bits_left > 8) ? hdr_shift_reg[55:48] : hdr_shift_reg[63:56];
+                    int_rbsp_byte  <= hdr_shift_reg[63:56];
                     
                     out_nal_type    <= latched_nal_type;
                     out_temporal_id <= latched_temporal_id;
@@ -321,7 +321,7 @@ module slice_controller #(
 
     assign rbsp_valid = (state == S_HDR_SEND) ? int_rbsp_valid :
                         (state == S_VPS_SEND || state == S_SPS_SEND || state == S_PPS_SEND) ? psw_rbsp_valid : 1'b0;
-    assign rbsp_byte  = (state == S_HDR_SEND) ? int_rbsp_byte :
+    assign rbsp_byte  = (state == S_HDR_SEND) ? hdr_shift_reg[63:56] :
                         (state == S_VPS_SEND || state == S_SPS_SEND || state == S_PPS_SEND) ? psw_rbsp_byte : 8'd0;
     assign rbsp_last  = (state == S_HDR_SEND) ? int_rbsp_last :
                         (state == S_VPS_SEND || state == S_SPS_SEND || state == S_PPS_SEND) ? psw_rbsp_last : 1'b0;

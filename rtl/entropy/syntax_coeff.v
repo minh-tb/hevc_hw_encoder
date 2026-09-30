@@ -588,7 +588,7 @@ module syntax_coeff #(
         reg [5:0]  suffix_len;
         reg [5:0]  total_len;
         reg [31:0] out_bits;
-        reg [15:0] prefix_val;
+        reg [31:0] prefix_val;
         reg [15:0] suffix_val;
         integer i;
         begin
@@ -598,9 +598,9 @@ module syntax_coeff #(
                 prefix_len = length + 6'd1;
                 suffix_len = {3'd0, rParam};
                 total_len = prefix_len + suffix_len;
-                prefix_val = (16'd1 << prefix_len) - 16'd2;
+                prefix_val = (32'd1 << prefix_len) - 32'd2;
                 suffix_val = codeNumber & ((16'd1 << rParam) - 16'd1);
-                out_bits = ({{16{1'b0}}, prefix_val} << suffix_len) | {{16{1'b0}}, suffix_val};
+                out_bits = (prefix_val << suffix_len) | {{16{1'b0}}, suffix_val};
             end else begin
                 length = {3'd0, rParam};
                 codeNumber = codeNumber - (16'd3 << rParam);
@@ -613,9 +613,9 @@ module syntax_coeff #(
                 prefix_len = 6'd3 + length + 6'd1 - {3'd0, rParam};
                 suffix_len = length;
                 total_len  = prefix_len + suffix_len;
-                prefix_val = (16'd1 << prefix_len) - 16'd2;
+                prefix_val = (32'd1 << prefix_len) - 32'd2;
                 suffix_val = codeNumber;
-                out_bits   = ({{16{1'b0}}, prefix_val} << suffix_len) | {{16{1'b0}}, suffix_val};
+                out_bits   = (prefix_val << suffix_len) | {{16{1'b0}}, suffix_val};
             end
             calc_rice_eg = {total_len, out_bits};
         end

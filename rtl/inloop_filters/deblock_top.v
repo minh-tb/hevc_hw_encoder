@@ -150,17 +150,15 @@ module deblock_top (
     assign q_col = edge_col_cu;
     assign q_row = edge_row_cu;
 
-    // In HEVC Clause 8.7.2, deblocking is applied on an 8x8 grid exclusively at TU and PU boundaries.
-    // In our encoder (64x64 CU, 32x32 TUs, 16x16 chroma TUs):
-    // - Luma: valid internal TU boundary is at x = 32 (edge_col == 8) for vertical,
-    //         and y = 32 (edge_row == 8) for horizontal.
-    // - Chroma: valid internal TU boundary is at x = 16 (edge_col == 4) for vertical,
-    //           and y = 16 (edge_row == 4) for horizontal.
-    // - CTU outer boundaries (edge_col == 0 or edge_row == 0) are skipped to protect against
-    //   6-bit SRAM address underflow/wrap-around in the local CTU SRAM buffer.
+    // In HEVC Clause 8.7.2, deblocking is applied on an 8x8 sample grid across all internal TU/PU boundaries.
+    // In our single-CTU local memory architecture:
+    // - Luma 64x64: internal 8x8 boundaries are even columns/rows != 0 (edge_col/edge_row = 2, 4, 6, 8, 10, 12, 14).
+    // - Chroma 32x32: internal 8x8 boundaries are even columns/rows != 0 (edge_col/edge_row = 2, 4, 6).
+    // - CTU outer boundaries (edge_col == 0 or edge_row == 0) are skipped to maintain single-CTU BRAM locality
+    //   and prevent address underflow.
     wire is_valid_edge;
-    assign is_valid_edge = is_luma ? (is_vert ? (edge_col == 4'd8) : (edge_row == 4'd8))
-                                   : (is_vert ? (edge_col == 4'd4) : (edge_row == 4'd4));
+    assign is_valid_edge = is_vert ? (edge_col != 4'd0 && edge_col[0] == 1'b0)
+                                   : (edge_row != 4'd0 && edge_row[0] == 1'b0);
 
     wire is_ctu_boundary, skip_edge;
     assign is_ctu_boundary = is_vert ? (edge_col == 4'd0) : (edge_row == 4'd0);

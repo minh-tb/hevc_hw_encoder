@@ -119,7 +119,7 @@ module dct4 (
     // Stall logic
     // Simple: stall input if stage1 is full and output not accepted
     //-------------------------------------------------------------------------
-    wire stall = stage1_valid && out_valid && !out_ready;
+    wire stall = stage1_valid && !out_ready;
     assign in_ready = !stall;
 
     //=========================================================================

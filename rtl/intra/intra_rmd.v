@@ -85,8 +85,8 @@ module intra_rmd (
         end
     end
     
-    // Divide by 2N -> shift right by (pu_size_log2 + 1)
-    wire [15:0] dc_val = dc_sum >> (pu_size_log2 + 1);
+    // Divide by 2N with rounding -> (dc_sum + N) >> (pu_size_log2 + 1)
+    wire [15:0] dc_val = (dc_sum + {8'd0, N}) >> (pu_size_log2 + 1);
     wire [`PIXEL_WIDTH-1:0] pred_dc = dc_val[`PIXEL_WIDTH-1:0];
 
     // Horizontal Prediction
