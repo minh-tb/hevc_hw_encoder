@@ -707,6 +707,7 @@ module hevc_encoder_top #(
                 map_update_qp_r        <= ctu_qp;
                 map_update_mvx_r       <= {{4{md_best_inter_mv_x[11]}}, md_best_inter_mv_x};
                 map_update_mvy_r       <= {{4{md_best_inter_mv_y[11]}}, md_best_inter_mv_y};
+                map_update_cbf_r       <= 1'b0;
             end
         end
     end
@@ -988,16 +989,20 @@ module hevc_encoder_top #(
     reg               dct_start;
     reg               dct_start_pre;
     
+`ifndef SYNTHESIS
     integer r_i, r_j;
+`endif
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             dct_start_pre <= 1'b0;
             dct_start <= 1'b0;
+`ifndef SYNTHESIS
             for (r_i = 0; r_i < 32; r_i = r_i + 1) begin
                 for (r_j = 0; r_j < 32; r_j = r_j + 1) begin
                     residual_buffer[r_i][r_j] <= 16'd0;
                 end
             end
+`endif
         end else begin
             if (res_sub_valid) begin
                 residual_buffer[res_sub_y[4:0]][res_sub_x[4:0]] <= $signed(res_sub_data);
@@ -1980,17 +1985,21 @@ module hevc_encoder_top #(
         .addr_y       (s2p_y)
     );
 
+`ifndef SYNTHESIS
     integer s_i, s_j;
+`endif
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             idct_start_pre <= 1'b0;
             idct_start <= 1'b0;
             idct_start_pending <= 1'b0;
+`ifndef SYNTHESIS
             for (s_i = 0; s_i < 32; s_i = s_i + 1) begin
                 for (s_j = 0; s_j < 32; s_j = s_j + 1) begin
                     s2p_buffer[s_i][s_j] <= 16'd0;
                 end
             end
+`endif
         end else begin
             if (inv_quant_out_valid) begin
                 s2p_buffer[s2p_y][s2p_x] <= inv_quant_out_coeff;

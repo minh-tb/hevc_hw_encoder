@@ -121,9 +121,13 @@ module decoder_inloop_filters (
     reg [1535:0] cu_map_qp;
 
     integer map_i, map_j;
-    reg [4:0] map_w, map_h;
-    reg [4:0] map_cx, map_cy;
-    reg [3:0] luma_equiv_log2;
+    wire [3:0] map_luma_log2 = (map_update_comp == 2'd0) ? map_update_size_log2 : (map_update_size_log2 + 3'd1);
+    wire [3:0] map_blk_mask  = (map_luma_log2 >= 4'd6) ? 4'b0000 :
+                               (map_luma_log2 == 4'd5) ? 4'b1000 :
+                               (map_luma_log2 == 4'd4) ? 4'b1100 :
+                               (map_luma_log2 == 4'd3) ? 4'b1110 : 4'b1111;
+    wire [3:0] map_cx = map_update_x[5:2];
+    wire [3:0] map_cy = map_update_y[5:2];
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -145,16 +149,10 @@ module decoder_inloop_filters (
             end
 
             if (map_update_valid) begin
-                luma_equiv_log2 = (map_update_comp == 2'd0) ? map_update_size_log2 : map_update_size_log2 + 3'd1;
-                map_w = 1 << (luma_equiv_log2 > 1 ? luma_equiv_log2 - 2 : 0);
-                map_h = map_w;
-                map_cx = map_update_x[5:2];
-                map_cy = map_update_y[5:2];
-
                 for (map_i = 0; map_i < 16; map_i = map_i + 1) begin
                     for (map_j = 0; map_j < 16; map_j = map_j + 1) begin
-                        if (map_i >= map_cy && map_i < map_cy + map_h &&
-                            map_j >= map_cx && map_j < map_cx + map_w) begin
+                        if ((((map_i[3:0] ^ map_cy) & map_blk_mask) == 4'b0000) &&
+                            (((map_j[3:0] ^ map_cx) & map_blk_mask) == 4'b0000)) begin
                             cu_map_pred_mode[(map_i*16)+map_j] <= map_update_pred_mode;
                             cu_map_qp[((map_i*16)+map_j)*6 +: 6] <= map_update_qp;
                             if (map_update_comp == 2'd0) begin
@@ -164,6 +162,8 @@ module decoder_inloop_filters (
                                 cu_map_ref_l0[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l0;
                                 cu_map_ref_l1[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l1;
                                 cu_map_bi_pred[(map_i*16)+map_j] <= map_update_bi_pred;
+                                cu_map_mvx_l1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
+                                cu_map_mvy_l1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
                             end else begin
                                 cu_map_cbf_chroma[(map_i*16)+map_j] <= map_update_cbf;
                             end

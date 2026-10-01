@@ -269,6 +269,7 @@ module cabac_enc_top #(
     reg [5:0] s0, s1, s2;
     reg [5:0] swap_tmp;
     always @(*) begin
+        swap_tmp = 6'd0;
         s0 = cand0;
         s1 = cand1;
         s2 = cand2;

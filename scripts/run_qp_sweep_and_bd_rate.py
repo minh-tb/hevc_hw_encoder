@@ -18,6 +18,18 @@ HM_DEC = os.path.join(WORKSPACE, r"HM\bin\mgwmake\gcc-mingw-14.2\x86_64\release\
 HM_CFG = os.path.join(WORKSPACE, r"HM\cfg\encoder_lowdelay_main10.cfg")
 ORIG_YUV = os.path.join(WORKSPACE, "orig_foreman_128x128_10b.yuv")
 TB_PATH = os.path.join(WORKSPACE, r"tb\tb_full_encoder\tb_b_frame_encoder.v")
+MODELSIM_DIR = r"C:\altera\13.0sp1\modelsim_ase\win32aloem"
+VLOG = os.path.join(MODELSIM_DIR, "vlog.exe")
+VSIM = os.path.join(MODELSIM_DIR, "vsim.exe")
+VLIB = os.path.join(MODELSIM_DIR, "vlib.exe")
+
+RTL_LIB_FLAGS = (
+    "+libext+.v "
+    "-y rtl/top -y rtl/entropy -y rtl/common -y rtl/partition "
+    "-y rtl/transform -y rtl/intra -y rtl/recon -y rtl/inter "
+    "-y rtl/rate_control -y rtl/inloop_filters -y rtl/quant "
+    "-y rtl/input_output +incdir+rtl/common"
+)
 
 QP_LIST = [22, 27, 32, 37]
 WIDTH = 128
@@ -45,8 +57,13 @@ def run_hw_encoder(qp):
     print(f" [HW] Running HW Encoder Simulation: QP = {qp}")
     print(f"=======================================================")
 
-    # 1. Compile testbench with specific QP define
-    vlog_cmd = f"vlog -sv +define+SWEEP_QP_{qp} {TB_PATH}"
+    # 0. Ensure work library exists
+    work_dir = os.path.join(WORKSPACE, "work")
+    if not os.path.exists(work_dir):
+        subprocess.run([VLIB, "work"], cwd=WORKSPACE, capture_output=True, text=True)
+
+    # 1. Compile ALL RTL + testbench with specific QP define
+    vlog_cmd = f'"{VLOG}" -sv +define+SWEEP_QP_{qp} {RTL_LIB_FLAGS} {TB_PATH} rtl/common/parameter_pkg.vh'
     print(f"  > {vlog_cmd}")
     res = subprocess.run(vlog_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True)
     if res.returncode != 0:
@@ -54,9 +71,9 @@ def run_hw_encoder(qp):
         return None
 
     # 2. Run simulation
-    vsim_cmd = 'vsim -c -do "run -all; quit -f" work.tb_b_frame_encoder'
+    vsim_cmd = f'"{VSIM}" -c -do "run -all; quit -f" work.tb_b_frame_encoder'
     print(f"  > {vsim_cmd}")
-    res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True)
+    res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True, timeout=600)
     if not os.path.exists(bin_file):
         print(f"  [ERROR] Bitstream file not generated: {bin_file}")
         return None

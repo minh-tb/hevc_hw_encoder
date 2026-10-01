@@ -1,6 +1,8 @@
 # IDE and AI Tooling (CRITICAL: DO NOT TRACK)
 .gemini/
 .vscode/
+_ide/
+.Xil/
 
 # External Reference Software
 HM/

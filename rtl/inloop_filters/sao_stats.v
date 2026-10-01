@@ -39,6 +39,8 @@ module sao_stats (
             rec_rd_valid <= 0; org_rd_valid <= 0;
             sao_type <= 0; eo_class <= 0; eo_offset <= 0; band_pos <= 0; bo_offset <= 0;
         end else begin
+            rec_rd_valid <= 0;
+            org_rd_valid <= 0;
             if (start && !done) begin
                 done <= 1;
                 sao_type <= 0;

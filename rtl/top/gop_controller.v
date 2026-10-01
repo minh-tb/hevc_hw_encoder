@@ -270,7 +270,6 @@ module gop_controller #(
     reg is_intra;
 
     // FSM Output & Datapath
-    integer idx;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             frame_start      <= 1'b0;
@@ -283,10 +282,14 @@ module gop_controller #(
             gop_idx          <= 5'd0;
             frames_encoded   <= 16'd0;
             
-            for (idx = 0; idx < 8; idx = idx + 1) begin
-                slot_map_valid[idx] <= 1'b0;
-                slot_map_poc[idx]   <= 10'd0;
-            end
+            slot_map_valid[0] <= 1'b0; slot_map_poc[0] <= 10'd0;
+            slot_map_valid[1] <= 1'b0; slot_map_poc[1] <= 10'd0;
+            slot_map_valid[2] <= 1'b0; slot_map_poc[2] <= 10'd0;
+            slot_map_valid[3] <= 1'b0; slot_map_poc[3] <= 10'd0;
+            slot_map_valid[4] <= 1'b0; slot_map_poc[4] <= 10'd0;
+            slot_map_valid[5] <= 1'b0; slot_map_poc[5] <= 10'd0;
+            slot_map_valid[6] <= 1'b0; slot_map_poc[6] <= 10'd0;
+            slot_map_valid[7] <= 1'b0; slot_map_poc[7] <= 10'd0;
         end else begin
             // Default pulse clears
             frame_start <= 1'b0;
