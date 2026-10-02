@@ -152,13 +152,13 @@ module deblock_top (
 
     // In HEVC Clause 8.7.2, deblocking is applied on an 8x8 sample grid across all internal TU/PU boundaries.
     // In our single-CTU local memory architecture:
-    // - Luma 64x64: internal 8x8 boundaries are even columns/rows != 0 (edge_col/edge_row = 2, 4, 6, 8, 10, 12, 14).
-    // - Chroma 32x32: internal 8x8 boundaries are even columns/rows != 0 (edge_col/edge_row = 2, 4, 6).
-    // - CTU outer boundaries (edge_col == 0 or edge_row == 0) are skipped to maintain single-CTU BRAM locality
-    //   and prevent address underflow.
+    // - Luma 64x64 with 32x32 TUs: internal TU boundary is at x=32 (edge_col=8) or y=32 (edge_row=8).
+    // - Chroma 32x32 with 16x16 TUs: internal TU boundary is at x=16 (edge_col=4) or y=16 (edge_row=4).
+    // Internal 8x8 block lines within 32x32 TUs that are NOT TU boundaries must NOT be filtered.
+    wire [3:0] tu_edge_target = is_luma ? 4'd8 : 4'd4;
     wire is_valid_edge;
-    assign is_valid_edge = is_vert ? (edge_col != 4'd0 && edge_col[0] == 1'b0)
-                                   : (edge_row != 4'd0 && edge_row[0] == 1'b0);
+    assign is_valid_edge = is_vert ? (edge_col == tu_edge_target)
+                                   : (edge_row == tu_edge_target);
 
     wire is_ctu_boundary, skip_edge;
     assign is_ctu_boundary = is_vert ? (edge_col == 4'd0) : (edge_row == 4'd0);

@@ -548,7 +548,11 @@ module decoder_inloop_filters (
                     if (in_valid) begin
                         if (ctu_recon_done) begin
                             pixel_count  <= 13'd0;
+`ifdef DISABLE_LOOP_FILTERS
+                            filter_state <= S_DUMP;
+`else
                             filter_state <= S_DB;
+`endif
                             dump_count   <= 13'd0;
                             // synthesis translate_off
                             $display("Time=%0t: [INLOOP_FILTERS] CTU (%0d,%0d) Reconstructed. Starting Deblocking Filter...", $time, cur_ctu_x, cur_ctu_y);
@@ -560,9 +564,10 @@ module decoder_inloop_filters (
                 end
                 S_DB: if (db_ctu_done) begin
                     // synthesis translate_off
-                    $display("Time=%0t: [INLOOP_FILTERS] Deblock complete. Starting SAO Stats...", $time);
+                    $display("Time=%0t: [INLOOP_FILTERS] Deblock complete. Bypassing SAO (slice_sao=0)...", $time);
                     // synthesis translate_on
-                    filter_state <= S_STATS;
+                    filter_state <= S_DUMP;
+                    dump_count   <= 13'd0;
                 end
                 S_STATS: if (stats_ctu_done) begin
                     // synthesis translate_off

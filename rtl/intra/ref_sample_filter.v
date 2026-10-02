@@ -184,9 +184,8 @@ module ref_sample_filter (
 
     wire signed [12:0] strong_left_diff = $signed({2'b0, bot_left}) + $signed({2'b0, corner}) - $signed({1'b0, left_mid, 1'b0});
     wire [11:0] abs_strong_left = (strong_left_diff < 0) ? -strong_left_diff[11:0] : strong_left_diff[11:0];
-
-    // SPS sets strong_intra_smoothing_enabled_flag = 0, so strong smoothing is always disabled in standard HM decode
-    wire use_strong = 1'b0;
+    // Strong intra smoothing: enabled when linearity thresholds are met
+    wire use_strong = is_strong_cand && (abs_strong_top < STRONG_THRESH) && (abs_strong_left < STRONG_THRESH);
 
     //-------------------------------------------------------------------------
     // Input buffer fill FSM

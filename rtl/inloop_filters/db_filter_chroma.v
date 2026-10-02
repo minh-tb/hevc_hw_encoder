@@ -114,27 +114,25 @@ module db_filter_chroma (
             7'd0,7'd1,7'd2,7'd3,7'd4,7'd5,7'd6,7'd7,
             7'd8,7'd9,7'd10,7'd11,7'd12,7'd13,7'd14,7'd15,
             7'd16,7'd17: tc_table = 7'd0;
-            7'd18,7'd19,7'd20,7'd21,7'd22,7'd23: tc_table = 7'd1;
-            7'd24,7'd25,7'd26,7'd27: tc_table = 7'd2;
-            7'd28,7'd29,7'd30,7'd31: tc_table = 7'd3;
-            7'd32,7'd33,7'd34: tc_table = 7'd4;
-            7'd35,7'd36: tc_table = 7'd5;
-            7'd37,7'd38: tc_table = 7'd6;
-            7'd39: tc_table = 7'd7;
-            7'd40: tc_table = 7'd8;
-            7'd41: tc_table = 7'd9;
-            7'd42: tc_table = 7'd10;
-            7'd43: tc_table = 7'd11;
-            7'd44: tc_table = 7'd13;
-            7'd45: tc_table = 7'd14;
-            7'd46: tc_table = 7'd16;
-            7'd47: tc_table = 7'd18;
-            7'd48: tc_table = 7'd20;
-            7'd49: tc_table = 7'd22;
-            7'd50: tc_table = 7'd24;
-            7'd51: tc_table = 7'd26;
-            7'd52: tc_table = 7'd28;
-            7'd53: tc_table = 7'd30;
+            7'd18,7'd19,7'd20,7'd21,7'd22,7'd23,
+            7'd24,7'd25,7'd26: tc_table = 7'd1;
+            7'd27,7'd28,7'd29,7'd30: tc_table = 7'd2;
+            7'd31,7'd32,7'd33,7'd34: tc_table = 7'd3;
+            7'd35,7'd36,7'd37: tc_table = 7'd4;
+            7'd38,7'd39: tc_table = 7'd5;
+            7'd40,7'd41: tc_table = 7'd6;
+            7'd42: tc_table = 7'd7;
+            7'd43: tc_table = 7'd8;
+            7'd44: tc_table = 7'd9;
+            7'd45: tc_table = 7'd10;
+            7'd46: tc_table = 7'd11;
+            7'd47: tc_table = 7'd13;
+            7'd48: tc_table = 7'd14;
+            7'd49: tc_table = 7'd16;
+            7'd50: tc_table = 7'd18;
+            7'd51: tc_table = 7'd20;
+            7'd52: tc_table = 7'd22;
+            7'd53: tc_table = 7'd24;
             default: tc_table = 7'd0;
         endcase
     endfunction

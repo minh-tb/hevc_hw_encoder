@@ -1,4 +1,4 @@
-﻿"""
+"""
 profile_pipeline_throughput.py
 Parses ModelSim simulation log (sim_profile.log) to extract:
 - Cycle counts for each CTU pipeline stage: T_MD, T_TQ, T_DB, T_CABAC, Total
@@ -13,8 +13,11 @@ import sys
 
 def parse_profiler_log(log_path="sim_profile.log"):
     if not os.path.exists(log_path):
-        print(f"Error: {log_path} not found.")
-        return
+        if os.path.exists("transcript"):
+            log_path = "transcript"
+        else:
+            print(f"Error: {log_path} and transcript not found.")
+            return
 
     pattern = re.compile(
         r"\[PROFILER\] Frame\s+(\d+)\s+CTU\s+(\d+):\s+Total=(\d+)\s+cycles\s+\|\s+"
@@ -104,8 +107,13 @@ def parse_profiler_log(log_path="sim_profile.log"):
 
     print("--- 1. Pipeline Bottleneck & Gating Verification ---")
     print(f"  Critical Stage Bottleneck: {bottleneck_stage[0]} with {bottleneck_stage[1]:.0f} cycles/CTU average.")
-    print(f"  Deblock Filter Verification: Observed average T_DB = {avg_db:.0f} cycles (Gated target: ~5,511 cycles).")
-    print("  --> [PASS] Deblocking filter cycle gating verified intact (~5,511 - 6,665 cycles/CTU for Inter, ~11,913 for Intra)!")
+    print(f"  Deblock Filter Verification: Observed average T_DB = {avg_db:.0f} cycles.")
+    if avg_db == 0:
+        print("  --> [INFO] Loop filters bypassed via DISABLE_LOOP_FILTERS (T_DB = 0 cycles).")
+    elif avg_db <= 12500:
+        print(f"  --> [PASS] Deblocking filter cycle gating verified intact ({avg_db:.0f} cycles/CTU <= 12,500 target)!")
+    else:
+        print(f"  --> [FAIL] Deblocking filter cycle gating exceeded target ({avg_db:.0f} cycles/CTU > 12,500)!")
     print(f"  Pipeline Stall Bubbles: Average stall = {avg_stall_pct:.2f}% of total processing time.")
 
     # Real-Time Throughput Projections

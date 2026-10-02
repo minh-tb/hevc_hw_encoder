@@ -236,23 +236,29 @@ lut[60]=4'd7; lut[61]=4'd7; lut[62]=4'd7; lut[63]=4'd7;
                 sub_y = vert_4_row(sub_idx);
             end
         end else if (tu_size_log2 == 3'd3) begin
-            // 8x8 TU
+            // 8x8 TU (2x2 CGs)
+            case (cg_idx[1:0])
+                2'd0: begin cg_x = 3'd0; cg_y = 3'd0; end
+                2'd1: begin
+                    if (scan_mode == 2'd1) begin cg_x = 3'd1; cg_y = 3'd0; end
+                    else                   begin cg_x = 3'd0; cg_y = 3'd1; end
+                end
+                2'd2: begin
+                    if (scan_mode == 2'd1) begin cg_x = 3'd0; cg_y = 3'd1; end
+                    else                   begin cg_x = 3'd1; cg_y = 3'd0; end
+                end
+                2'd3: begin cg_x = 3'd1; cg_y = 3'd1; end
+            endcase
+
             if (scan_mode == 2'd1) begin
-                // Horiz scan for 8x8 CGs and sub
-                cg_x = horiz_4_col(cg_idx[3:0]);
-                cg_y = horiz_4_row(cg_idx[3:0]);
                 sub_x = horiz_4_col(sub_idx);
                 sub_y = horiz_4_row(sub_idx);
             end else if (scan_mode == 2'd2) begin
-                // Vert scan
-                cg_x = vert_4_col(cg_idx[3:0]);
-                cg_y = vert_4_row(cg_idx[3:0]);
                 sub_x = vert_4_col(sub_idx);
                 sub_y = vert_4_row(sub_idx);
             end else begin
-                // Diag scan
-                cg_x = diag_4_col(cg_idx[3:0]);
-                cg_y = diag_4_row(cg_idx[3:0]);
+                sub_x = diag_4_col(sub_idx);
+                sub_y = diag_4_row(sub_idx);
             end
         end else if (tu_size_log2 == 3'd4) begin
             // 16x16 TU (Diag only)

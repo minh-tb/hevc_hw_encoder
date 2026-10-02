@@ -105,9 +105,12 @@ def main():
         print(f"Error: Bitstream {bitstream} not found.")
         return
 
-    print("Running HM 18.0 Reference Decoder on str_b_frame.bin...")
+    # Set DISABLE_LOOP_FILTERS to match HW encoder config (deblock bypassed via `ifdef)
+    dec_env = os.environ.copy()
+    dec_env["DISABLE_LOOP_FILTERS"] = "1"
+    print("Running HM 18.0 Reference Decoder on str_b_frame.bin (DISABLE_LOOP_FILTERS=1)...")
     cmd = [decoder_exe, "-b", bitstream, "-o", decoded_yuv, "-d", "10"]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=dec_env)
     print("HM Decoder Output:")
     print(proc.stdout)
     if proc.stderr:

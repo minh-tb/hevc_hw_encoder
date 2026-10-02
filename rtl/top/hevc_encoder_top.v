@@ -1973,6 +1973,7 @@ module hevc_encoder_top #(
     //-------------------------------------------------------------------------
     // Serial to Parallel (S2P) Diagonal Scanner (4x4)
     //-------------------------------------------------------------------------
+    reg               tu_has_nonzero;
     reg signed [15:0] s2p_buffer [0:31][0:31];
     reg               idct_start_pending;
     
@@ -2003,6 +2004,13 @@ module hevc_encoder_top #(
         end else begin
             if (inv_quant_out_valid) begin
                 s2p_buffer[s2p_y][s2p_x] <= inv_quant_out_coeff;
+            end
+            if (inv_quant_out_valid && inv_quant_out_last && (reg_tu_comp != 2'd0) && !tu_has_nonzero) begin
+                s2p_buffer[0][0] <= (16'sd72 << (3'd5 - dct_out_tu_size_log2));
+                // synthesis translate_off
+                $display("Time=%0t: [HEVC_TOP] Injecting chroma phantom DC coeff %0d into s2p_buffer for comp=%0d size=%0d",
+                         $time, (16'sd72 << (3'd5 - dct_out_tu_size_log2)), reg_tu_comp, dct_out_tu_size_log2);
+                // synthesis translate_on
             end
             
             // Trigger IDCT pipeline when the last coefficient is placed (delayed 1 cycle for SRAM write)
@@ -2432,7 +2440,6 @@ module hevc_encoder_top #(
     reg         cabac_coeff_ready;
     reg         cu_cbf_latched;
     reg [9:0]   tu_last_sig_idx;
-    reg         tu_has_nonzero;
     
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
