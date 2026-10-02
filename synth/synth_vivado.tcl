@@ -105,10 +105,8 @@ set rtl_files [list \
     "rtl/top/hevc_encoder_top.v" \
     "rtl/top/prediction_unit.v" \
     "rtl/top/slice_controller.v" \
-    "rtl/transform/dct16.v" \
-    "rtl/transform/dct32.v" \
-    "rtl/transform/dct4.v" \
-    "rtl/transform/dct8.v" \
+    "rtl/transform/transform_1d_core.v" \
+    "rtl/transform/transpose_ram_32x32.v" \
     "rtl/transform/dct_top.v" \
 ]
 read_verilog -sv $rtl_files

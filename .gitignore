@@ -73,3 +73,6 @@ test_hw.png
 artifact_link/
 __pycache__/
 *.pyc
+*.vvp
+synth/vivado_output/
+synth/vivado_output_dct/

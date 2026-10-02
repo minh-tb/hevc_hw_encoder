@@ -16,7 +16,7 @@ import shutil
 WIDTH = 128
 HEIGHT = 128
 NUM_FRAMES = 5
-ARTIFACT_DIR = r"C:\Users\Admin\.gemini\antigravity\brain\a603fb98-e81b-4a8b-8dd5-49cc9f9dbd72"
+ARTIFACT_DIR = r"C:\Users\Admin\.gemini\antigravity\brain\e27560eb-42b9-45b7-8dc4-83cab9c298bf"
 
 def yuv420_to_rgb_bmp(y_plane, u_plane, v_plane, width, height, bmp_path):
     row_bytes = width * 3
