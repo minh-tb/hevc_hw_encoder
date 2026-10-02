@@ -53,6 +53,9 @@ greybox_tmp/
 *.sof
 *.done
 *.qws
+*.jou
+*.backup.jou
+cabac_enc_top.*
 synth/synth_log.txt
 
 # Raw video, stream dumps & generated artifacts
