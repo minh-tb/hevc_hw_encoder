@@ -1,0 +1,23 @@
+===================================================================
+Patch:        hm18_tDecCu_inter_debug
+Target File:  HM/source/Lib/TLibDecoder/TDecCu.cpp
+Function:     Void TDecCu::xReconInter(TComDataCU* pcCU, UInt uiDepth)
+Type:         Debug & Verification Patch (Not for production)
+Description:
+  Adds [HM_INTER_DBG] diagnostic printf in xReconInter() to log merge
+  mode, MV, and ref index for inter CUs prior to motion compensation.
+===================================================================
+
+--- a/HM/source/Lib/TLibDecoder/TDecCu.cpp
++++ b/HM/source/Lib/TLibDecoder/TDecCu.cpp
+@@ -435,6 +435,13 @@ Void TDecCu::xReconInter( TComDataCU* pcCU, UInt uiDepth )
+ Void TDecCu::xReconInter( TComDataCU* pcCU, UInt uiDepth )
+ {
++  TComMv mv0 = pcCU->getCUMvField(REF_PIC_LIST_0)->getMv(0);
++  Int ref0 = pcCU->getCUMvField(REF_PIC_LIST_0)->getRefIdx(0);
++  printf("[HM_INTER_DBG] POC=%d CTU=%d part=0 merge=%d idx=%d MV0=(%d,%d) ref0=%d\n",
++         pcCU->getSlice()->getPOC(), pcCU->getCtuRsAddr(),
++         pcCU->getMergeFlag(0), pcCU->getMergeIndex(0),
++         mv0.getHor(), mv0.getVer(), ref0);
++
+   // inter prediction

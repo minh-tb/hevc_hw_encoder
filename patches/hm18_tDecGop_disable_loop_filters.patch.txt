@@ -1,0 +1,62 @@
+===================================================================
+Patch:        hm18_tDecGop_disable_loop_filters
+Target File:  HM/source/Lib/TLibDecoder/TDecGop.cpp
+Function:     Void TDecGop::filterPicture(TComPic* pcPic)
+Type:         Debug & Verification Patch (Not for production)
+Description:
+  1. Dumps pre-deblocking reconstructed pictures to 'rec_before_filter.yuv'
+     (16-bit little-endian samples, YUV 4:2:0) for bit-exact hardware
+     conformance verification before in-loop filtering.
+  2. Bypasses deblocking filter and SAO when the DISABLE_LOOP_FILTERS
+     environment variable is set (e.g., DISABLE_LOOP_FILTERS=1).
+===================================================================
+
+--- a/HM/source/Lib/TLibDecoder/TDecGop.cpp
++++ b/HM/source/Lib/TLibDecoder/TDecGop.cpp
+@@ -141,6 +141,35 @@ Void TDecGop::filterPicture(TComPic* pcPic)
+   clock_t iBeforeTime = clock();
+
++  // Dump pre-filter reconstructed picture for hardware bit-exact conformance verification
++  {
++    static FILE* f_pre = NULL;
++    if (pcPic->getPOC() == 0) {
++      if (f_pre) fclose(f_pre);
++      f_pre = fopen("rec_before_filter.yuv", "wb");
++    } else if (f_pre == NULL) {
++      f_pre = fopen("rec_before_filter.yuv", "ab");
++    }
++    if (f_pre) {
++      TComPicYuv* picYuv = pcPic->getPicYuvRec();
++      for (Int comp = 0; comp < 3; comp++) {
++        ComponentID c = (ComponentID)comp;
++        const Pel* p = picYuv->getAddr(c);
++        Int stride = picYuv->getStride(c);
++        Int w = picYuv->getWidth(c);
++        Int h = picYuv->getHeight(c);
++        for (Int y = 0; y < h; y++) {
++          for (Int x = 0; x < w; x++) {
++            unsigned short val = (unsigned short)(p[y * stride + x]);
++            fwrite(&val, 2, 1, f_pre);
++          }
++        }
++      }
++      fflush(f_pre);
++    }
++  }
++
++  if (getenv("DISABLE_LOOP_FILTERS") == NULL)
++  {
+   // deblocking filter
+   Bool bLFCrossTileBoundary = pcSlice->getPPS()->getLoopFilterAcrossTilesEnabledFlag();
+   m_pcLoopFilter->setCfg(bLFCrossTileBoundary);
+   m_pcLoopFilter->loopFilterPic( pcPic );
+
+   if( pcSlice->getSPS()->getUseSAO() )
+   {
+     m_pcSAO->reconstructBlkSAOParams(pcPic, pcPic->getPicSym()->getSAOBlkParam());
+     m_pcSAO->SAOProcess(pcPic);
+     m_pcSAO->PCMLFDisableProcess(pcPic);
+   }
++  }
+
+   pcPic->compressMotion();
