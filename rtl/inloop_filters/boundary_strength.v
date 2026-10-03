@@ -135,8 +135,9 @@ module boundary_strength (
 
     // -----------------------------------------------------------------------
     // Step 2: Residual present → BS=1
+    // HEVC Clause 8.7.2.3: non-zero transform coefficients (luma or chroma)
     // -----------------------------------------------------------------------
-    wire has_residual = p_cbf_luma || q_cbf_luma;
+    wire has_residual = p_cbf_luma || q_cbf_luma || p_cbf_chroma || q_cbf_chroma;
 
     // -----------------------------------------------------------------------
     // Step 3: Reference picture difference → BS=1

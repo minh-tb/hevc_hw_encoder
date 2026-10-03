@@ -96,6 +96,7 @@ module deblock_top (
         S_BS_REQ      = 4'd1,   // drive boundary_strength inputs
         S_BS_WAIT     = 4'd2,   // wait for BS result
         S_PIX_LOAD    = 4'd3,   // load 8 samples (luma) or 4 (chroma)
+        S_FILT_PUSH   = 4'd9,   // push luma line to db_filter_luma
         S_FILT_WAIT   = 4'd4,   // wait for filter output
         S_PIX_WRITE   = 4'd5,   // write filtered samples back
         S_NEXT_EDGE   = 4'd6,   // advance to next edge
@@ -107,7 +108,7 @@ module deblock_top (
     reg [3:0]    edge_col;        // 0..15 (4×4 edge column within CTU)
     reg [3:0]    edge_row;        // 0..15
     reg [2:0]    sample_grp;      // which 4-sample group along the edge (0..3 luma, 0..1 chroma)
-    reg [2:0]    load_cnt;        // sample load counter
+    reg [2:0]    resp_cnt;        // sample read response counter
     reg [2:0]    write_cnt;       // which sample we're writing back (0..5 luma, 0..1 chroma)
 
     // Latch current CTU info
@@ -218,10 +219,13 @@ module deblock_top (
     reg [1:0]  latched_bs;
     reg [5:0]  latched_edge_qp;
 
-    reg luma_in_valid, luma_out_ready;
+    reg luma_in_valid;
+    wire luma_out_ready;
     wire luma_in_ready, luma_out_valid;
     wire [`PIXEL_WIDTH-1:0] luma_p0f, luma_p1f, luma_p2f, luma_q0f, luma_q1f, luma_q2f;
     wire luma_mod_p, luma_mod_q;
+
+    assign luma_out_ready = (state == S_PIX_WRITE) && is_luma && pix_wr_ready && (write_cnt == 3'd5);
 
     db_filter_luma u_luma (
         .clk(clk), .rst_n(rst_n),
@@ -260,21 +264,21 @@ module deblock_top (
             edge_col     <= 4'd0;
             edge_row     <= 4'd0;
             sample_grp   <= 3'd0;
-            load_cnt     <= 3'd0;
+            resp_cnt     <= 3'd0;
             write_cnt    <= 3'd0;
             ctu_done     <= 1'b0;
             bs_in_valid  <= 1'b0;
             bs_out_ready <= 1'b0;
             luma_in_valid<= 1'b0;
-            luma_out_ready<= 1'b0;
             chr_in_valid <= 1'b0;
             chr_out_ready<= 1'b0;
             pix_rd_valid <= 1'b0;
         end else begin
-            ctu_done     <= 1'b0;
-            bs_in_valid  <= 1'b0;
-            luma_in_valid<= 1'b0;
-            chr_in_valid <= 1'b0;
+            ctu_done       <= 1'b0;
+            bs_in_valid    <= 1'b0;
+            luma_in_valid  <= 1'b0;
+            chr_in_valid   <= 1'b0;
+            chr_out_ready  <= 1'b0;
 
             case (state)
                 S_IDLE: begin
@@ -293,7 +297,8 @@ module deblock_top (
                 end
                 S_BS_REQ: begin
                     if (skip_edge) begin
-                        state <= S_NEXT_EDGE;
+                        sample_grp <= 3'd3;
+                        state      <= S_NEXT_EDGE;
                     end else begin
                         bs_in_valid  <= 1'b1;
                         bs_out_ready <= 1'b1;
@@ -306,50 +311,96 @@ module deblock_top (
                         latched_bs      <= bs_result;
                         latched_edge_qp <= bs_edge_qp;
                         bs_out_ready    <= 1'b1;
-                        if (bs_result == 2'd0)
-                            state <= S_NEXT_EDGE;
-                        else begin
-                            load_cnt <= 3'd0;
-                            state    <= S_PIX_LOAD;
+                        if (bs_result == 2'd0) begin
+                            sample_grp <= 3'd3;
+                            state      <= S_NEXT_EDGE;
+                        end else begin
+                            resp_cnt     <= 3'd0;
+                            sample_grp   <= is_luma ? 3'd0 : sample_grp;
+                            pix_rd_valid <= 1'b1;
+                            pix_rd_comp  <= cur_comp;
+                            state        <= S_PIX_LOAD;
                         end
                     end
                 end
                 S_PIX_LOAD: begin
                     bs_out_ready <= 1'b0;
-                    if (pix_resp_valid && pix_resp_ready) begin
-                        if (load_cnt < (is_luma ? 3'd4 : 3'd2)) px_p[load_cnt[1:0]] <= pix_resp_data;
-                        else                                    px_q[load_cnt[1:0] - (is_luma ? 2'd0 : 2'd2)] <= pix_resp_data;
-                        load_cnt <= load_cnt + 3'd1;
+                    if (pix_rd_valid && pix_rd_ready) begin
+                        pix_rd_valid <= 1'b0;
+                    end
 
-                        if (load_cnt < (is_luma ? 3'd7 : 3'd3)) begin
+                    if (pix_resp_valid && pix_resp_ready) begin
+                        if (resp_cnt < (is_luma ? 3'd4 : 3'd2)) px_p[resp_cnt[1:0]] <= pix_resp_data;
+                        else                                    px_q[resp_cnt[1:0] - (is_luma ? 2'd0 : 2'd2)] <= pix_resp_data;
+
+                        if (resp_cnt < (is_luma ? 3'd7 : 3'd3)) begin
+                            resp_cnt     <= resp_cnt + 3'd1;
                             pix_rd_valid <= 1'b1;
+                            pix_rd_comp  <= cur_comp;
                         end else begin
+                            resp_cnt     <= 3'd0;
                             pix_rd_valid <= 1'b0;
-                            if (is_luma) luma_in_valid <= 1'b1;
-                            else         chr_in_valid  <= 1'b1;
-                            state <= S_FILT_WAIT;
+                            if (is_luma) begin
+                                luma_in_valid <= 1'b1;
+                                state         <= S_FILT_PUSH;
+                            end else begin
+                                chr_in_valid  <= 1'b1;
+                                state         <= S_FILT_WAIT;
+                            end
                         end
-                    end else if (load_cnt == 3'd0 && state == S_PIX_LOAD) begin
-                        pix_rd_valid <= 1'b1;
-                        pix_rd_comp  <= cur_comp;
+                    end
+                end
+                S_FILT_PUSH: begin
+                    if (is_luma) begin
+                        if (luma_in_ready) begin
+                            luma_in_valid <= 1'b0;
+                            if (sample_grp < 3'd3) begin
+                                sample_grp   <= sample_grp + 3'd1;
+                                resp_cnt     <= 3'd0;
+                                pix_rd_valid <= 1'b1;
+                                pix_rd_comp  <= cur_comp;
+                                state        <= S_PIX_LOAD;
+                            end else begin
+                                sample_grp   <= 3'd0;
+                                state        <= S_FILT_WAIT;
+                            end
+                        end else begin
+                            luma_in_valid <= 1'b1;
+                        end
                     end
                 end
                 S_FILT_WAIT: begin
-                    luma_out_ready <= 1'b1;
-                    chr_out_ready  <= 1'b1;
-                    if ((is_luma && luma_out_valid) || (is_chroma && chr_out_valid)) begin
-                        luma_out_ready <= 1'b0;
-                        chr_out_ready  <= 1'b0;
-                        write_cnt      <= 3'd0;
-                        state          <= S_PIX_WRITE;
+                    if (is_luma) begin
+                        if (luma_out_valid) begin
+                            write_cnt <= 3'd0;
+                            state     <= S_PIX_WRITE;
+                        end
+                    end else begin
+                        chr_out_ready <= 1'b1;
+                        if (chr_out_valid) begin
+                            chr_out_ready <= 1'b0;
+                            write_cnt     <= 3'd0;
+                            state         <= S_PIX_WRITE;
+                        end
                     end
                 end
                 S_PIX_WRITE: begin
-                    if (write_cnt == (is_luma ? 3'd5 : 3'd1)) begin
-                        write_cnt <= 3'd0;
-                        state     <= S_NEXT_EDGE;
-                    end else begin
-                        write_cnt <= write_cnt + 3'd1;
+                    if (pix_wr_ready) begin
+                        if (write_cnt == (is_luma ? 3'd5 : 3'd1)) begin
+                            write_cnt <= 3'd0;
+                            if (is_luma) begin
+                                if (sample_grp < 3'd3) begin
+                                    sample_grp <= sample_grp + 3'd1;
+                                end else begin
+                                    sample_grp <= 3'd3;
+                                    state      <= S_NEXT_EDGE;
+                                end
+                            end else begin
+                                state <= S_NEXT_EDGE;
+                            end
+                        end else begin
+                            write_cnt <= write_cnt + 3'd1;
+                        end
                     end
                 end
                 S_NEXT_EDGE: begin
@@ -403,7 +454,7 @@ module deblock_top (
     wire [2:0] sg;
     wire [2:0] wr_q_idx;
 
-    assign px_idx    = load_cnt[2:0];
+    assign px_idx    = resp_cnt;
     assign loading_q = is_luma ? (px_idx >= 3'd4) : (px_idx >= 3'd2);
     assign q_idx     = is_luma ? (px_idx - 3'd4) : (px_idx - 3'd2);
     assign wr_q_idx  = is_luma ? (write_cnt - 3'd3) : (write_cnt - 3'd1);

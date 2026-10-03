@@ -683,10 +683,17 @@ module hevc_encoder_top #(
     wire [49:0] merge_mv_x_flat = 50'd0;
     wire [49:0] merge_mv_y_flat = 50'd0;
 
+    // Forward declarations for TU sequencer registers used in map update
+    reg [5:0]   reg_tu_x;
+    reg [5:0]   reg_tu_y;
+    reg [1:0]   reg_tu_comp;
+
     // ---- CU map update generation for deblocking filter ----
     reg         map_update_valid_r;
+    reg         map_update_cbf_only_r;
     reg [5:0]   map_update_x_r, map_update_y_r;
     reg [6:0]   map_update_size_r;
+    reg [1:0]   map_update_comp_r;
     reg         map_update_pred_mode_r;
     reg         map_update_cbf_r;
     reg [5:0]   map_update_qp_r;
@@ -694,20 +701,43 @@ module hevc_encoder_top #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            map_update_valid_r <= 1'b0;
-            map_update_cbf_r   <= 1'b0;
+            map_update_valid_r     <= 1'b0;
+            map_update_cbf_only_r  <= 1'b0;
+            map_update_comp_r      <= 2'd0;
+            map_update_cbf_r       <= 1'b0;
+            map_update_x_r         <= 6'd0;
+            map_update_y_r         <= 6'd0;
+            map_update_size_r      <= 7'd0;
+            map_update_pred_mode_r <= 1'b0;
+            map_update_qp_r        <= 6'd0;
+            map_update_mvx_r       <= 16'd0;
+            map_update_mvy_r       <= 16'd0;
         end else begin
             map_update_valid_r <= 1'b0;
             if (md_mode_valid) begin
                 map_update_valid_r     <= 1'b1;
+                map_update_cbf_only_r  <= 1'b0;
                 map_update_x_r         <= cu_x;
                 map_update_y_r         <= cu_y;
                 map_update_size_r      <= cu_size;
+                map_update_comp_r      <= 2'd0;
                 map_update_pred_mode_r <= md_best_is_intra;
                 map_update_qp_r        <= ctu_qp;
                 map_update_mvx_r       <= {{4{md_best_inter_mv_x[11]}}, md_best_inter_mv_x};
                 map_update_mvy_r       <= {{4{md_best_inter_mv_y[11]}}, md_best_inter_mv_y};
                 map_update_cbf_r       <= 1'b0;
+            end else if (quant_out_valid && quant_out_last) begin
+                map_update_valid_r     <= 1'b1;
+                map_update_cbf_only_r  <= 1'b1;
+                map_update_x_r         <= reg_tu_x;
+                map_update_y_r         <= reg_tu_y;
+                map_update_size_r      <= {4'd0, 3'd1} << dct_out_tu_size_log2;
+                map_update_comp_r      <= reg_tu_comp;
+                map_update_pred_mode_r <= latched_cu_is_intra;
+                map_update_qp_r        <= ctu_qp;
+                map_update_mvx_r       <= {{4{latched_cu_mv_x[11]}}, latched_cu_mv_x};
+                map_update_mvy_r       <= {{4{latched_cu_mv_y[11]}}, latched_cu_mv_y};
+                map_update_cbf_r       <= quant_out_cbf;
             end
         end
     end
@@ -716,6 +746,8 @@ module hevc_encoder_top #(
     wire        rmd_done;
     wire [5:0]  rmd_best_mode;
     wire [31:0] rmd_best_cost;
+    wire        eval_intra_start;
+    wire        eval_inter_start;
 
     mode_decision u_mode_decision (
         .clk              (clk),
@@ -892,10 +924,7 @@ module hevc_encoder_top #(
     reg [7:0]   intra_ref_idx; // 0 to 4N (max 128)
     reg         tu_can_start;
     reg         mc_data_ready;
-    reg [5:0]   reg_tu_x;
-    reg [5:0]   reg_tu_y;
     reg [2:0]   reg_tu_size_log2;
-    reg [1:0]   reg_tu_comp;
     reg         reg_tu_is_last_in_cu;
     reg [5:0]   reg_pu_x;
     reg [5:0]   reg_pu_y;
@@ -2280,10 +2309,11 @@ module hevc_encoder_top #(
         .orig_in_u        (orig_rd_u),
         .orig_in_v        (orig_rd_v),
         .map_update_valid (map_update_valid_r),
+        .map_update_cbf_only(map_update_cbf_only_r),
         .map_update_x     (map_update_x_r),
         .map_update_y     (map_update_y_r),
         .map_update_size_log2(map_update_size_log2_w),
-        .map_update_comp  (2'd0),
+        .map_update_comp  (map_update_comp_r),
         .map_update_cbf   (map_update_cbf_r),
         .map_update_pred_mode(map_update_pred_mode_r),
         .map_update_qp    (map_update_qp_r),

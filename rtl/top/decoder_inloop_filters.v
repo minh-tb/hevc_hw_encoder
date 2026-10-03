@@ -38,6 +38,7 @@ module decoder_inloop_filters (
 
     // CU map update (for deblock boundary strength)
     input  wire         map_update_valid,
+    input  wire         map_update_cbf_only,
     input  wire [5:0]   map_update_x,
     input  wire [5:0]   map_update_y,
     input  wire [2:0]   map_update_size_log2,
@@ -126,8 +127,10 @@ module decoder_inloop_filters (
                                (map_luma_log2 == 4'd5) ? 4'b1000 :
                                (map_luma_log2 == 4'd4) ? 4'b1100 :
                                (map_luma_log2 == 4'd3) ? 4'b1110 : 4'b1111;
-    wire [3:0] map_cx = map_update_x[5:2];
-    wire [3:0] map_cy = map_update_y[5:2];
+    wire [5:0] map_up_x_luma = (map_update_comp == 2'd0) ? map_update_x : {map_update_x[4:0], 1'b0};
+    wire [5:0] map_up_y_luma = (map_update_comp == 2'd0) ? map_update_y : {map_update_y[4:0], 1'b0};
+    wire [3:0] map_cx = map_up_x_luma[5:2];
+    wire [3:0] map_cy = map_up_y_luma[5:2];
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -143,7 +146,8 @@ module decoder_inloop_filters (
             cu_map_mvy_l1     <= 4096'd0;
             cu_map_qp         <= 1536'd0;
         end else begin
-            if (in_valid && pixel_count == 13'd0) begin
+            // Clear CBFs when previous CTU finishes dumping to frame store
+            if (filter_state == S_DUMP && out_ready && dump_count == 13'd6143) begin
                 cu_map_cbf_luma   <= 256'd0;
                 cu_map_cbf_chroma <= 256'd0;
             end
@@ -153,10 +157,17 @@ module decoder_inloop_filters (
                     for (map_j = 0; map_j < 16; map_j = map_j + 1) begin
                         if ((((map_i[3:0] ^ map_cy) & map_blk_mask) == 4'b0000) &&
                             (((map_j[3:0] ^ map_cx) & map_blk_mask) == 4'b0000)) begin
-                            cu_map_pred_mode[(map_i*16)+map_j] <= map_update_pred_mode;
-                            cu_map_qp[((map_i*16)+map_j)*6 +: 6] <= map_update_qp;
-                            if (map_update_comp == 2'd0) begin
-                                cu_map_cbf_luma[(map_i*16)+map_j] <= map_update_cbf;
+                            if (map_update_cbf_only) begin
+                                if (map_update_comp == 2'd0) begin
+                                    cu_map_cbf_luma[(map_i*16)+map_j] <= map_update_cbf;
+                                end else begin
+                                    cu_map_cbf_chroma[(map_i*16)+map_j] <= cu_map_cbf_chroma[(map_i*16)+map_j] | map_update_cbf;
+                                end
+                            end else begin
+                                cu_map_pred_mode[(map_i*16)+map_j] <= map_update_pred_mode;
+                                cu_map_qp[((map_i*16)+map_j)*6 +: 6] <= map_update_qp;
+                                cu_map_cbf_luma[(map_i*16)+map_j]   <= map_update_cbf;
+                                cu_map_cbf_chroma[(map_i*16)+map_j] <= 1'b0;
                                 cu_map_mvx_l0[((map_i*16)+map_j)*16 +: 16] <= map_update_mvx;
                                 cu_map_mvy_l0[((map_i*16)+map_j)*16 +: 16] <= map_update_mvy;
                                 cu_map_ref_l0[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l0;
@@ -164,8 +175,6 @@ module decoder_inloop_filters (
                                 cu_map_bi_pred[(map_i*16)+map_j] <= map_update_bi_pred;
                                 cu_map_mvx_l1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
                                 cu_map_mvy_l1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
-                            end else begin
-                                cu_map_cbf_chroma[(map_i*16)+map_j] <= map_update_cbf;
                             end
                         end
                     end
@@ -548,11 +557,7 @@ module decoder_inloop_filters (
                     if (in_valid) begin
                         if (ctu_recon_done) begin
                             pixel_count  <= 13'd0;
-`ifdef DISABLE_LOOP_FILTERS
-                            filter_state <= S_DUMP;
-`else
                             filter_state <= S_DB;
-`endif
                             dump_count   <= 13'd0;
                             // synthesis translate_off
                             $display("Time=%0t: [INLOOP_FILTERS] CTU (%0d,%0d) Reconstructed. Starting Deblocking Filter...", $time, cur_ctu_x, cur_ctu_y);

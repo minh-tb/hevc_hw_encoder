@@ -202,10 +202,9 @@ module mode_decision (
     //=========================================================================
     wire [31:0] skip_threshold = (lambda_mode_q8 >> 8) + 32'd8;
 
-    // Per-pixel thresholds scaling with lambda_motion (sqrt(lambda) in Q8.8, matching SAD metric)
-    wire [31:0] split_threshold = (cur_pu_depth == 2'd0) ? (32'd20 + {24'b0, lambda_motion_q8[15:8]}) :
-                                  (cur_pu_depth == 2'd1) ? (32'd25 + {24'b0, lambda_motion_q8[15:8]}) :
-                                  (cur_pu_depth == 2'd2) ? (32'd30 + {24'b0, lambda_motion_q8[15:8]}) :
+    wire [31:0] split_threshold = (cur_pu_depth == 2'd0) ? (32'd250000 + (lambda_mode_q8 >> 4)) :
+                                  (cur_pu_depth == 2'd1) ? (32'd60000  + (lambda_mode_q8 >> 5)) :
+                                  (cur_pu_depth == 2'd2) ? (32'd15000  + (lambda_mode_q8 >> 6)) :
                                                            32'hFFFFFFFF;
 
     //=========================================================================
@@ -440,11 +439,7 @@ module mode_decision (
                     end else if (best_skip_flag) begin
                         // Skip mode: no need to split further
                         split_flag <= 1'b0;
-                    // Normalize cost by number of pixels (>> 12, 10, 8 for depths 0, 1, 2)
-                    end else if (best_rd_cost < 32'hFFFF0000 && 
-                                ((cur_pu_depth == 2'd0) ? (best_rd_cost >> 12) :
-                                 (cur_pu_depth == 2'd1) ? (best_rd_cost >> 10) :
-                                                          (best_rd_cost >> 8)) > split_threshold) begin
+                    end else if (best_rd_cost < 32'hFFFF0000 && best_rd_cost > split_threshold) begin
                         // Cost is too high, split quadtree deeper
                         split_flag <= 1'b1;
                     end else begin
