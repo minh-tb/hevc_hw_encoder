@@ -32,7 +32,7 @@ def run_decoder(bitstream="str_b_frame.bin", output_yuv="dec_gate.yuv", enable_l
         print(f"Decoder executable not found at {decoder_exe}")
         sys.exit(1)
 
-def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, height=128, num_frames=5, enable_loop_filters=False, phase1=True):
+def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, height=128, num_frames=5, enable_loop_filters=False, phase1=False):
     if not os.path.exists(hw_yuv) or not os.path.exists(dec_yuv):
         print(f"YUV files missing. Check {hw_yuv} and {dec_yuv}")
         sys.exit(1)
@@ -130,10 +130,13 @@ def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, heigh
             print("\nFAIL: Phase 1 internal TU edge mismatch")
             sys.exit(1)
     elif global_max_diff > 0:
-        print("\nFAIL: YUV mismatch")
+        print(f"\nFAIL: YUV mismatch (global_max_diff = {global_max_diff})")
         sys.exit(1)
     else:
-        print("\nPASS: YUV exact match")
+        if enable_loop_filters:
+            print(f"\nPASS: Phase 2 full {num_frames}-frame 100.00% bit-exact match against HM 18.0 (global_max_diff = 0)!")
+        else:
+            print("\nPASS: YUV exact match")
 
 def parse_transcript(transcript_file="transcript"):
     if not os.path.exists(transcript_file):
@@ -243,13 +246,14 @@ def main():
     parser.add_argument("--hw-yuv", default="hw_recon.yuv", help="Hardware reconstructed YUV")
     parser.add_argument("--dec-yuv", default="dec_gate.yuv", help="Decoder reconstructed YUV")
     parser.add_argument("--transcript", default="transcript", help="Simulation transcript")
+    parser.add_argument("--phase1", action="store_true", help="Run Phase 1 validation (internal TU edges only)")
     parser.add_argument("--num-frames", type=int, default=5, help="Number of frames")
     args = parser.parse_args()
     
     print_metadata(args.bitstream, enable_loop_filters=args.enable_loop_filters)
     
     run_decoder(bitstream=args.bitstream, output_yuv=args.dec_yuv, enable_loop_filters=args.enable_loop_filters)
-    compare_yuvs(hw_yuv=args.hw_yuv, dec_yuv=args.dec_yuv, num_frames=args.num_frames, enable_loop_filters=args.enable_loop_filters)
+    compare_yuvs(hw_yuv=args.hw_yuv, dec_yuv=args.dec_yuv, num_frames=args.num_frames, enable_loop_filters=args.enable_loop_filters, phase1=args.phase1)
     parse_transcript(args.transcript)
 
 if __name__ == "__main__":

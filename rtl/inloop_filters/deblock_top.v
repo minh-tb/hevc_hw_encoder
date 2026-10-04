@@ -73,6 +73,44 @@ module deblock_top (
     output reg    [`PIXEL_WIDTH-1:0] pix_wr_data,
 
     //=========================================================================
+    // Cross-CTU Boundary Interfaces
+    //=========================================================================
+    // Neighbor CU info shadow maps (16 blocks along edge)
+    // Left CTU's rightmost column (col 15, rows 0..15)
+    input  wire [15:0]    nbr_col_pred_mode,
+    input  wire [15:0]    nbr_col_cbf_luma,
+    input  wire [15:0]    nbr_col_cbf_chroma,
+    input  wire [47:0]    nbr_col_ref_l0,
+    input  wire [47:0]    nbr_col_ref_l1,
+    input  wire [15:0]    nbr_col_bi_pred,
+    input  wire [255:0]   nbr_col_mvx_l0,
+    input  wire [255:0]   nbr_col_mvy_l0,
+    input  wire [255:0]   nbr_col_mvx_l1,
+    input  wire [255:0]   nbr_col_mvy_l1,
+    input  wire [95:0]    nbr_col_qp,
+
+    // Above CTU's bottom row (row 15, cols 0..15)
+    input  wire [15:0]    nbr_row_pred_mode,
+    input  wire [15:0]    nbr_row_cbf_luma,
+    input  wire [15:0]    nbr_row_cbf_chroma,
+    input  wire [47:0]    nbr_row_ref_l0,
+    input  wire [47:0]    nbr_row_ref_l1,
+    input  wire [15:0]    nbr_row_bi_pred,
+    input  wire [255:0]   nbr_row_mvx_l0,
+    input  wire [255:0]   nbr_row_mvy_l0,
+    input  wire [255:0]   nbr_row_mvx_l1,
+    input  wire [255:0]   nbr_row_mvy_l1,
+    input  wire [95:0]    nbr_row_qp,
+
+    // Neighbor access indicators
+    output wire           pix_rd_neighbor,   // 1=read from neighbor buffer (col_buf or line_buf)
+    output wire           pix_rd_is_vert,    // 1=vertical edge (col_buf), 0=horizontal edge (line_buf)
+    output wire           pix_rd_corner,     // 1=delayed corner block access
+    output wire           pix_wr_neighbor,   // 1=write to neighbor buffer and frame store
+    output wire           pix_wr_is_vert,
+    output wire           pix_wr_corner,
+
+    //=========================================================================
     // Done signal
     //=========================================================================
     output reg            ctu_done          // pulse when CTU deblocking complete
@@ -105,8 +143,9 @@ module deblock_top (
 
     reg [3:0]    state;
     reg [2:0]    pass;            // current processing pass (0..5)
-    reg [3:0]    edge_col;        // 0..15 (4×4 edge column within CTU)
-    reg [3:0]    edge_row;        // 0..15
+    reg          edge_stage;      // 0: CTU boundary edge, 1: internal TU edge
+    reg          is_corner_stage; // 1: filtering delayed left neighbor CTU corner column
+    reg [3:0]    edge_pos;        // 0..15 (Luma) or 0..7 (Chroma)
     reg [2:0]    sample_grp;      // which 4-sample group along the edge (0..3 luma, 0..1 chroma)
     reg [2:0]    resp_cnt;        // sample read response counter
     reg [2:0]    write_cnt;       // which sample we're writing back (0..5 luma, 0..1 chroma)
@@ -131,12 +170,28 @@ module deblock_top (
     assign cur_comp  = is_luma ? 2'd0 :
                        (pass == PASS_CB_VERT || pass == PASS_CB_HORIZ) ? 2'd1 : 2'd2;
 
-    wire [3:0] max_col, max_row;
-    assign max_col = is_luma ? 4'd15 : 4'd7;
-    assign max_row = is_luma ? 4'd15 : 4'd7;
+    wire [3:0] tu_edge_target = is_luma ? 4'd8 : 4'd4;
+    wire [3:0] max_pos        = is_luma ? 4'd15 : 4'd7;
 
-    wire [2:0] max_grp;
-    assign max_grp = 3'd3;
+    wire has_left_neighbor    = (cur_ctu_x > 10'd0);
+    wire has_right_neighbor   = (cur_ctu_x < (cur_frame_w >> 6) - 10'd1);
+    wire [3:0] max_col_pos    = has_right_neighbor ? (max_pos - 4'd1) : max_pos;
+
+    // Derived edge coordinates:
+    // When is_vert: edge_col is fixed for the edge (0 or tu_edge_target), edge_row sweeps along the edge (0..max_pos)
+    // When !is_vert:
+    //   If is_corner_stage: edge_col is max_pos (column 15/7 of left CTU), edge_row is fixed
+    //   Else: edge_col is edge_pos (0..max_col_pos), edge_row is fixed
+    wire [3:0] edge_col = is_vert ? ((edge_stage == 1'b0) ? 4'd0 : tu_edge_target) :
+                          (is_corner_stage ? max_pos : edge_pos);
+    wire [3:0] edge_row = is_vert ? edge_pos : ((edge_stage == 1'b0) ? 4'd0 : tu_edge_target);
+
+    wire is_ctu_boundary = (edge_stage == 1'b0);
+
+    // Transition helper for next pass
+    wire [2:0] next_pass = pass + 3'd1;
+    wire next_is_vert = (next_pass == PASS_LUMA_VERT || next_pass == PASS_CB_VERT || next_pass == PASS_CR_VERT);
+    wire next_has_ctu_boundary = next_is_vert ? (cur_ctu_x > 10'd0) : (cur_ctu_y > 10'd0);
 
     // CU Map coordinates (Scale chroma 8x8 grid to 16x16 luma grid)
     wire [3:0] edge_col_cu;
@@ -146,24 +201,91 @@ module deblock_top (
 
     // P-side and Q-side 4×4 block indices
     wire [3:0] p_col, p_row, q_col, q_row;
-    assign p_col = is_vert  ? (edge_col_cu > 4'd0 ? edge_col_cu - 4'd1 : 4'd0) : edge_col_cu;
-    assign p_row = !is_vert ? (edge_row_cu > 4'd0 ? edge_row_cu - 4'd1 : 4'd0) : edge_row_cu;
+    assign p_col = is_vert  ? (edge_col_cu > 4'd0 ? edge_col_cu - 4'd1 : 4'd15) : edge_col_cu;
+    assign p_row = !is_vert ? (edge_row_cu > 4'd0 ? edge_row_cu - 4'd1 : 4'd15) : edge_row_cu;
     assign q_col = edge_col_cu;
     assign q_row = edge_row_cu;
 
-    // In HEVC Clause 8.7.2, deblocking is applied on an 8x8 sample grid across all internal TU/PU boundaries.
-    // In our single-CTU local memory architecture:
-    // - Luma 64x64 with 32x32 TUs: internal TU boundary is at x=32 (edge_col=8) or y=32 (edge_row=8).
-    // - Chroma 32x32 with 16x16 TUs: internal TU boundary is at x=16 (edge_col=4) or y=16 (edge_row=4).
-    // Internal 8x8 block lines within 32x32 TUs that are NOT TU boundaries must NOT be filtered.
-    wire [3:0] tu_edge_target = is_luma ? 4'd8 : 4'd4;
-    wire is_valid_edge;
-    assign is_valid_edge = is_vert ? (edge_col == tu_edge_target)
-                                   : (edge_row == tu_edge_target);
+    // Multiplex P-side and Q-side metadata:
+    // When is_corner_stage: P-side comes from nbr_row (edge_stage 0) or nbr_col (edge_stage 1), Q-side from nbr_col
+    // When is_ctu_boundary: P-side comes from left neighbor column cache (is_vert) or top neighbor row cache (!is_vert)
+    wire        p_is_intra_sel = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_pred_mode[15] : nbr_col_pred_mode[p_row]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_pred_mode[p_row] : nbr_row_pred_mode[p_col]) :
+                                  cu_map_pred_mode[(p_row*16)+p_col]);
 
-    wire is_ctu_boundary, skip_edge;
-    assign is_ctu_boundary = is_vert ? (edge_col == 4'd0) : (edge_row == 4'd0);
-    assign skip_edge       = !is_valid_edge;
+    wire [5:0]  p_qp_sel       = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_qp[15*6 +: 6] : nbr_col_qp[p_row*6 +: 6]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_qp[p_row*6 +: 6] : nbr_row_qp[p_col*6 +: 6]) :
+                                  cu_map_qp[((p_row*16)+p_col)*6 +: 6]);
+
+    wire        p_cbf_l_sel    = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_cbf_luma[15] : nbr_col_cbf_luma[p_row]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_cbf_luma[p_row] : nbr_row_cbf_luma[p_col]) :
+                                  cu_map_cbf_luma[(p_row*16)+p_col]);
+
+    wire        p_cbf_c_sel    = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_cbf_chroma[15] : nbr_col_cbf_chroma[p_row]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_cbf_chroma[p_row] : nbr_row_cbf_chroma[p_col]) :
+                                  cu_map_cbf_chroma[(p_row*16)+p_col]);
+
+    wire [2:0]  p_ref_l0_sel   = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_ref_l0[15*3 +: 3] : nbr_col_ref_l0[p_row*3 +: 3]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_ref_l0[p_row*3 +: 3] : nbr_row_ref_l0[p_col*3 +: 3]) :
+                                  cu_map_ref_l0[((p_row*16)+p_col)*3 +: 3]);
+
+    wire [2:0]  p_ref_l1_sel   = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_ref_l1[15*3 +: 3] : nbr_col_ref_l1[p_row*3 +: 3]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_ref_l1[p_row*3 +: 3] : nbr_row_ref_l1[p_col*3 +: 3]) :
+                                  cu_map_ref_l1[((p_row*16)+p_col)*3 +: 3]);
+
+    wire        p_bi_pred_sel  = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_bi_pred[15] : nbr_col_bi_pred[p_row]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_bi_pred[p_row] : nbr_row_bi_pred[p_col]) :
+                                  cu_map_bi_pred[(p_row*16)+p_col]);
+
+    wire signed [15:0] p_mvx_l0_sel = is_corner_stage ?
+                                      ((edge_stage == 1'b0) ? nbr_row_mvx_l0[15*16 +: 16] : nbr_col_mvx_l0[p_row*16 +: 16]) :
+                                      (is_ctu_boundary ?
+                                       (is_vert ? nbr_col_mvx_l0[p_row*16 +: 16] : nbr_row_mvx_l0[p_col*16 +: 16]) :
+                                       cu_map_mvx_l0[((p_row*16)+p_col)*16 +: 16]);
+
+    wire signed [15:0] p_mvy_l0_sel = is_corner_stage ?
+                                      ((edge_stage == 1'b0) ? nbr_row_mvy_l0[15*16 +: 16] : nbr_col_mvy_l0[p_row*16 +: 16]) :
+                                      (is_ctu_boundary ?
+                                       (is_vert ? nbr_col_mvy_l0[p_row*16 +: 16] : nbr_row_mvy_l0[p_col*16 +: 16]) :
+                                       cu_map_mvy_l0[((p_row*16)+p_col)*16 +: 16]);
+
+    wire signed [15:0] p_mvx_l1_sel = is_corner_stage ?
+                                      ((edge_stage == 1'b0) ? nbr_row_mvx_l1[15*16 +: 16] : nbr_col_mvx_l1[p_row*16 +: 16]) :
+                                      (is_ctu_boundary ?
+                                       (is_vert ? nbr_col_mvx_l1[p_row*16 +: 16] : nbr_row_mvx_l1[p_col*16 +: 16]) :
+                                       cu_map_mvx_l1[((p_row*16)+p_col)*16 +: 16]);
+
+    wire signed [15:0] p_mvy_l1_sel = is_corner_stage ?
+                                      ((edge_stage == 1'b0) ? nbr_row_mvy_l1[15*16 +: 16] : nbr_col_mvy_l1[p_row*16 +: 16]) :
+                                      (is_ctu_boundary ?
+                                       (is_vert ? nbr_col_mvy_l1[p_row*16 +: 16] : nbr_row_mvy_l1[p_col*16 +: 16]) :
+                                       cu_map_mvy_l1[((p_row*16)+p_col)*16 +: 16]);
+
+    wire        q_is_intra_sel = is_corner_stage ? nbr_col_pred_mode[q_row] : cu_map_pred_mode[(q_row*16)+q_col];
+    wire [5:0]  q_qp_sel       = is_corner_stage ? nbr_col_qp[q_row*6 +: 6] : cu_map_qp[((q_row*16)+q_col)*6 +: 6];
+    wire        q_cbf_l_sel    = is_corner_stage ? nbr_col_cbf_luma[q_row] : cu_map_cbf_luma[(q_row*16)+q_col];
+    wire        q_cbf_c_sel    = is_corner_stage ? nbr_col_cbf_chroma[q_row] : cu_map_cbf_chroma[(q_row*16)+q_col];
+    wire [2:0]  q_ref_l0_sel   = is_corner_stage ? nbr_col_ref_l0[q_row*3 +: 3] : cu_map_ref_l0[((q_row*16)+q_col)*3 +: 3];
+    wire [2:0]  q_ref_l1_sel   = is_corner_stage ? nbr_col_ref_l1[q_row*3 +: 3] : cu_map_ref_l1[((q_row*16)+q_col)*3 +: 3];
+    wire        q_bi_pred_sel  = is_corner_stage ? nbr_col_bi_pred[q_row] : cu_map_bi_pred[(q_row*16)+q_col];
+    wire signed [15:0] q_mvx_l0_sel = is_corner_stage ? nbr_col_mvx_l0[q_row*16 +: 16] : cu_map_mvx_l0[((q_row*16)+q_col)*16 +: 16];
+    wire signed [15:0] q_mvy_l0_sel = is_corner_stage ? nbr_col_mvy_l0[q_row*16 +: 16] : cu_map_mvy_l0[((q_row*16)+q_col)*16 +: 16];
+    wire signed [15:0] q_mvx_l1_sel = is_corner_stage ? nbr_col_mvx_l1[q_row*16 +: 16] : cu_map_mvx_l1[((q_row*16)+q_col)*16 +: 16];
+    wire signed [15:0] q_mvy_l1_sel = is_corner_stage ? nbr_col_mvy_l1[q_row*16 +: 16] : cu_map_mvy_l1[((q_row*16)+q_col)*16 +: 16];
 
     //-------------------------------------------------------------------------
     // boundary_strength instance
@@ -181,29 +303,29 @@ module deblock_top (
         .is_vertical     (is_vert),
         .is_ctu_boundary (is_ctu_boundary),
         
-        .p_is_intra      (cu_map_pred_mode[(p_row*16)+p_col]),
-        .p_qp            (cu_map_qp[((p_row*16)+p_col)*6 +: 6]),
-        .p_cbf_luma      (cu_map_cbf_luma[(p_row*16)+p_col]),
-        .p_cbf_chroma    (cu_map_cbf_chroma[(p_row*16)+p_col]),
-        .p_ref_idx_l0    (cu_map_ref_l0[((p_row*16)+p_col)*3 +: 3]),
-        .p_ref_idx_l1    (cu_map_ref_l1[((p_row*16)+p_col)*3 +: 3]),
-        .p_bi_pred       (cu_map_bi_pred[(p_row*16)+p_col]),
-        .p_mvx_l0        (cu_map_mvx_l0[((p_row*16)+p_col)*16 +: 16]),
-        .p_mvy_l0        (cu_map_mvy_l0[((p_row*16)+p_col)*16 +: 16]),
-        .p_mvx_l1        (cu_map_mvx_l1[((p_row*16)+p_col)*16 +: 16]),
-        .p_mvy_l1        (cu_map_mvy_l1[((p_row*16)+p_col)*16 +: 16]),
+        .p_is_intra      (p_is_intra_sel),
+        .p_qp            (p_qp_sel),
+        .p_cbf_luma      (p_cbf_l_sel),
+        .p_cbf_chroma    (p_cbf_c_sel),
+        .p_ref_idx_l0    (p_ref_l0_sel),
+        .p_ref_idx_l1    (p_ref_l1_sel),
+        .p_bi_pred       (p_bi_pred_sel),
+        .p_mvx_l0        (p_mvx_l0_sel),
+        .p_mvy_l0        (p_mvy_l0_sel),
+        .p_mvx_l1        (p_mvx_l1_sel),
+        .p_mvy_l1        (p_mvy_l1_sel),
         
-        .q_is_intra      (cu_map_pred_mode[(q_row*16)+q_col]),
-        .q_qp            (cu_map_qp[((q_row*16)+q_col)*6 +: 6]),
-        .q_cbf_luma      (cu_map_cbf_luma[(q_row*16)+q_col]),
-        .q_cbf_chroma    (cu_map_cbf_chroma[(q_row*16)+q_col]),
-        .q_ref_idx_l0    (cu_map_ref_l0[((q_row*16)+q_col)*3 +: 3]),
-        .q_ref_idx_l1    (cu_map_ref_l1[((q_row*16)+q_col)*3 +: 3]),
-        .q_bi_pred       (cu_map_bi_pred[(q_row*16)+q_col]),
-        .q_mvx_l0        (cu_map_mvx_l0[((q_row*16)+q_col)*16 +: 16]),
-        .q_mvy_l0        (cu_map_mvy_l0[((q_row*16)+q_col)*16 +: 16]),
-        .q_mvx_l1        (cu_map_mvx_l1[((q_row*16)+q_col)*16 +: 16]),
-        .q_mvy_l1        (cu_map_mvy_l1[((q_row*16)+q_col)*16 +: 16]),
+        .q_is_intra      (q_is_intra_sel),
+        .q_qp            (q_qp_sel),
+        .q_cbf_luma      (q_cbf_l_sel),
+        .q_cbf_chroma    (q_cbf_c_sel),
+        .q_ref_idx_l0    (q_ref_l0_sel),
+        .q_ref_idx_l1    (q_ref_l1_sel),
+        .q_bi_pred       (q_bi_pred_sel),
+        .q_mvx_l0        (q_mvx_l0_sel),
+        .q_mvy_l0        (q_mvy_l0_sel),
+        .q_mvx_l1        (q_mvx_l1_sel),
+        .q_mvy_l1        (q_mvy_l1_sel),
         
         .edge_qp         (bs_edge_qp),
         .out_valid       (bs_out_valid),
@@ -261,8 +383,9 @@ module deblock_top (
         if (!rst_n) begin
             state        <= S_IDLE;
             pass         <= PASS_LUMA_VERT;
-            edge_col     <= 4'd0;
-            edge_row     <= 4'd0;
+            edge_stage   <= 1'b1;
+            is_corner_stage <= 1'b0;
+            edge_pos     <= 4'd0;
             sample_grp   <= 3'd0;
             resp_cnt     <= 3'd0;
             write_cnt    <= 3'd0;
@@ -289,22 +412,18 @@ module deblock_top (
                         cur_frame_w  <= frame_width_px;
                         cur_frame_h  <= frame_height_px;
                         pass         <= PASS_LUMA_VERT;
-                        edge_col     <= 4'd0;
-                        edge_row     <= 4'd0;
+                        edge_stage   <= (ctu_x > 10'd0) ? 1'b0 : 1'b1;
+                        is_corner_stage <= 1'b0;
+                        edge_pos     <= 4'd0;
                         sample_grp   <= 3'd0;
                         state        <= S_BS_REQ;
                     end
                 end
                 S_BS_REQ: begin
-                    if (skip_edge) begin
-                        sample_grp <= 3'd3;
-                        state      <= S_NEXT_EDGE;
-                    end else begin
-                        bs_in_valid  <= 1'b1;
-                        bs_out_ready <= 1'b1;
-                        if (bs_in_valid && bs_in_ready)
-                            state <= S_BS_WAIT;
-                    end
+                    bs_in_valid  <= 1'b1;
+                    bs_out_ready <= 1'b1;
+                    if (bs_in_valid && bs_in_ready)
+                        state <= S_BS_WAIT;
                 end
                 S_BS_WAIT: begin
                     if (bs_out_valid) begin
@@ -312,7 +431,7 @@ module deblock_top (
                         latched_edge_qp <= bs_edge_qp;
                         bs_out_ready    <= 1'b1;
                         if (bs_result == 2'd0) begin
-                            sample_grp <= 3'd3;
+                            sample_grp <= is_chroma ? 3'd3 : 3'd0;
                             state      <= S_NEXT_EDGE;
                         end else begin
                             resp_cnt     <= 3'd0;
@@ -404,35 +523,40 @@ module deblock_top (
                     end
                 end
                 S_NEXT_EDGE: begin
-                    if (sample_grp < max_grp) begin
+                    if (is_chroma && (sample_grp < 3'd3)) begin
                         sample_grp <= sample_grp + 3'd1;
                         state      <= S_BS_REQ;
                     end else begin
                         sample_grp <= 3'd0;
-                        if (edge_col < max_col) begin
-                            edge_col <= edge_col + 4'd1;
+                        if (!is_vert && is_corner_stage) begin
+                            is_corner_stage <= 1'b0;
+                            edge_pos        <= 4'd0;
+                            state           <= S_BS_REQ;
+                        end else if (edge_pos < (is_vert ? max_pos : max_col_pos)) begin
+                            edge_pos <= edge_pos + 4'd1;
                             state    <= S_BS_REQ;
                         end else begin
-                            edge_col <= 4'd0;
-                            if (edge_row < max_row) begin
-                                edge_row <= edge_row + 4'd1;
-                                state    <= S_BS_REQ;
+                            edge_pos <= 4'd0;
+                            if (edge_stage == 1'b0) begin
+                                edge_stage      <= 1'b1;
+                                is_corner_stage <= (!is_vert && has_left_neighbor);
+                                state           <= S_BS_REQ;
                             end else begin
-                                edge_row <= 4'd0;
-                                state    <= S_NEXT_PASS;
+                                state <= S_NEXT_PASS;
                             end
                         end
                     end
                 end
                 S_NEXT_PASS: begin
                     if (pass == PASS_CR_HORIZ) begin
-                        state    <= S_DONE;
+                        state <= S_DONE;
                     end else begin
-                        pass     <= pass + 3'd1;
-                        edge_col <= 4'd0;
-                        edge_row <= 4'd0;
-                        sample_grp <= 3'd0;
-                        state    <= S_BS_REQ;
+                        pass            <= pass + 3'd1;
+                        edge_stage      <= next_has_ctu_boundary ? 1'b0 : 1'b1;
+                        is_corner_stage <= (!next_is_vert && (cur_ctu_x > 10'd0));
+                        edge_pos        <= 4'd0;
+                        sample_grp      <= 3'd0;
+                        state           <= S_BS_REQ;
                     end
                 end
                 S_DONE: begin
@@ -515,6 +639,14 @@ module deblock_top (
             else                                      pix_wr_y = {er, 2'b00} + {3'b0, wr_q_idx};
         end
     end
+
+    // Neighbor buffer and frame store control indicators
+    assign pix_rd_is_vert  = is_vert;
+    assign pix_wr_is_vert  = is_vert;
+    assign pix_rd_corner   = is_corner_stage;
+    assign pix_wr_corner   = is_corner_stage;
+    assign pix_rd_neighbor = is_corner_stage ? 1'b1 : (is_ctu_boundary && !loading_q);
+    assign pix_wr_neighbor = is_corner_stage ? 1'b1 : (is_ctu_boundary && (write_cnt <= (is_luma ? 3'd2 : 3'd0)));
 
     //-------------------------------------------------------------------------
     // Simulation checks
