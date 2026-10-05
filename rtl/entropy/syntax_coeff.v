@@ -136,8 +136,14 @@ module syntax_coeff #(
             case (log2_size)
                 3'd2: get_x_from_scan = {3'd0, sx};
                 3'd3: begin
+`ifdef REMEDIATION
+                    // Normative ITU-T H.265 Clause 7.4.9.11 / Table 7-40:
+                    // 2x2 CG grid scan: bit 1 of scan[5:4] is CG column x
+                    get_x_from_scan = {2'd0, scan[5], sx};
+`else
                     cx = diag_4_col(scan[5:4]);
                     get_x_from_scan = {4'd0, cx[0], sx};
+`endif
                 end
                 3'd4: begin
                     cx = diag_4_col(scan[7:4]);
@@ -161,8 +167,14 @@ module syntax_coeff #(
             case (log2_size)
                 3'd2: get_y_from_scan = {3'd0, sy};
                 3'd3: begin
+`ifdef REMEDIATION
+                    // Normative ITU-T H.265 Clause 7.4.9.11 / Table 7-40:
+                    // 2x2 CG grid scan: bit 0 of scan[5:4] is CG row y
+                    get_y_from_scan = {2'd0, scan[4], sy};
+`else
                     cy = diag_4_row(scan[5:4]);
                     get_y_from_scan = {4'd0, cy[0], sy};
+`endif
                 end
                 3'd4: begin
                     cy = diag_4_row(scan[7:4]);
@@ -363,6 +375,18 @@ module syntax_coeff #(
         reg ctx_inc;
         begin
             max_cg = (log2_size == 3'd3) ? 3'd1 : (log2_size == 3'd4) ? 3'd3 : 3'd7;
+`ifdef REMEDIATION
+            if (log2_size == 3'd3) begin
+                cg_x = {2'd0, cg[1]};
+                cg_y = {2'd0, cg[0]};
+            end else if (log2_size == 3'd4) begin
+                cg_x = diag_4_col(cg[3:0]);
+                cg_y = diag_4_row(cg[3:0]);
+            end else begin
+                cg_x = diag_8_col(cg[5:0]);
+                cg_y = diag_8_row(cg[5:0]);
+            end
+`else
             if (log2_size == 3'd3 || log2_size == 3'd4) begin
                 cg_x = diag_4_col(cg[3:0]);
                 cg_y = diag_4_row(cg[3:0]);
@@ -370,6 +394,7 @@ module syntax_coeff #(
                 cg_x = diag_8_col(cg[5:0]);
                 cg_y = diag_8_row(cg[5:0]);
             end
+`endif
             r_flag = (cg_x < max_cg) ? flags[get_cg_raster(log2_size, cg_x + 3'd1, cg_y)] : 1'b0;
             b_flag = (cg_y < max_cg) ? flags[get_cg_raster(log2_size, cg_x, cg_y + 3'd1)] : 1'b0;
             ctx_inc = (r_flag | b_flag);
@@ -404,6 +429,18 @@ module syntax_coeff #(
             max_cg = (log2_size == 3'd3) ? 3'd1 : (log2_size == 3'd4) ? 3'd3 : 3'd7;
             if (log2_size == 3'd2) begin
                 cg_x = 3'd0; cg_y = 3'd0;
+`ifdef REMEDIATION
+            end else if (log2_size == 3'd3) begin
+                cg_x = {2'd0, cg[1]};
+                cg_y = {2'd0, cg[0]};
+            end else if (log2_size == 3'd4) begin
+                cg_x = diag_4_col(cg[3:0]);
+                cg_y = diag_4_row(cg[3:0]);
+            end else begin
+                cg_x = diag_8_col(cg[5:0]);
+                cg_y = diag_8_row(cg[5:0]);
+            end
+`else
             end else if (log2_size == 3'd3 || log2_size == 3'd4) begin
                 cg_x = diag_4_col(cg[3:0]);
                 cg_y = diag_4_row(cg[3:0]);
@@ -411,6 +448,7 @@ module syntax_coeff #(
                 cg_x = diag_8_col(cg[5:0]);
                 cg_y = diag_8_row(cg[5:0]);
             end
+`endif
 
             pos_x = {3'd0, cg_x, 2'd0} + {4'd0, c};
             pos_y = {3'd0, cg_y, 2'd0} + {4'd0, r};

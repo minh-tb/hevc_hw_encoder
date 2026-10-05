@@ -175,6 +175,7 @@ module range_coder (
         end
     endfunction
 
+`ifdef REMEDIATION
     // Renormalization shift calculator (Leading Zero Count)
     // Ensures range_r is restored to [256..510] even for small LPS values (e.g. lps_val=2)
     function automatic [2:0] renorm_shift_lzc;
@@ -192,6 +193,26 @@ module range_coder (
             endcase
         end
     endfunction
+`else
+    // Renormalization table — exact copy of HM sm_aucRenormTable[32]
+    // From TLibCommon/TComCABACTables.cpp (truncated to 32 entries)
+    // Buggy: for lps_val < 4 (e.g. lps_val=2), index is 0 giving shift=6, leaving range=128 < 256
+    function automatic [2:0] renorm_table;
+        input [4:0] idx; // (lps >> 3)
+        reg [2:0] r [0:31];
+        begin
+            r[ 0]=3'd6; r[ 1]=3'd5; r[ 2]=3'd4; r[ 3]=3'd4;
+            r[ 4]=3'd3; r[ 5]=3'd3; r[ 6]=3'd3; r[ 7]=3'd3;
+            r[ 8]=3'd2; r[ 9]=3'd2; r[10]=3'd2; r[11]=3'd2;
+            r[12]=3'd2; r[13]=3'd2; r[14]=3'd2; r[15]=3'd2;
+            r[16]=3'd1; r[17]=3'd1; r[18]=3'd1; r[19]=3'd1;
+            r[20]=3'd1; r[21]=3'd1; r[22]=3'd1; r[23]=3'd1;
+            r[24]=3'd1; r[25]=3'd1; r[26]=3'd1; r[27]=3'd1;
+            r[28]=3'd1; r[29]=3'd1; r[30]=3'd1; r[31]=3'd1;
+            renorm_table = r[idx];
+        end
+    endfunction
+`endif
 
     // =========================================================================
     // Internal state
@@ -213,9 +234,14 @@ module range_coder (
     // M-coder registers (matching HM TEncBinCABAC exact width/logic)
     reg [8:0]        range_r;          // m_uiRange
     reg [31:0]       low_r;            // m_uiLow
+`ifdef REMEDIATION
     reg signed [6:0] bits_left;        // m_bitsLeft (starts at 23)
-    reg [7:0]        buf_byte;         // m_bufferedByte
     reg [15:0]       num_ff;           // m_numBufferedBytes
+`else
+    reg [5:0]        bits_left;        // Buggy: unsigned 6-bit (underflows when negative)
+    reg [7:0]        num_ff;           // Buggy: 8-bit counter (overflows at 256)
+`endif
+    reg [7:0]        buf_byte;         // m_bufferedByte
     reg [7:0]        ff_byte;          // carry propagation byte (0x00 or 0xFF)
     reg [7:0]        flush_extra_byte; // 3rd flush byte buffer
     reg [4:0]        flush_L;          // Latched L across flush states
@@ -351,7 +377,11 @@ module range_coder (
                             bin_ready <= 1'b1;
                         end
                     end else begin
+`ifdef REMEDIATION
                         renorm_shift_v = renorm_shift_lzc(lps_val_v);
+`else
+                        renorm_shift_v = renorm_table(lps_val_v[7:3]);
+`endif
                         low_r     <= (low_r + {23'd0, new_range_v}) << renorm_shift_v;
                         range_r   <= {1'b0, lps_val_v} << renorm_shift_v;
                         bits_left <= bits_left - {4'd0, renorm_shift_v};

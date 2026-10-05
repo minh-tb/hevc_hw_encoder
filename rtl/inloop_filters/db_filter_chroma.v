@@ -100,7 +100,11 @@ module db_filter_chroma (
             6'd46: chroma_qp_table = 6'd40; 6'd47: chroma_qp_table = 6'd41;
             6'd48: chroma_qp_table = 6'd42; 6'd49: chroma_qp_table = 6'd43;
             6'd50: chroma_qp_table = 6'd44; 6'd51: chroma_qp_table = 6'd45;
+`ifdef REMEDIATION
+            default: chroma_qp_table = (qpy > 6'd51) ? 6'd45 : 6'd0;
+`else
             default: chroma_qp_table = 6'd0;
+`endif
         endcase
     endfunction
 
@@ -133,7 +137,11 @@ module db_filter_chroma (
             7'd51: tc_table = 7'd20;
             7'd52: tc_table = 7'd22;
             7'd53: tc_table = 7'd24;
+`ifdef REMEDIATION
+            default: tc_table = (idx >= 7'd53) ? 7'd24 : 7'd0;
+`else
             default: tc_table = 7'd0;
+`endif
         endcase
     endfunction
 
@@ -174,7 +182,12 @@ module db_filter_chroma (
     // Chroma QP: apply chroma QP table to luma edge_qp
     wire [5:0] qpc    = chroma_qp_table(edge_qp);
     // Tc index: QpC + 2*(BS-1). Chroma only filters at BS=2 → +2
+`ifdef REMEDIATION
+    wire [6:0] raw_tc_idx = {1'b0, qpc} + 7'd2;
+    wire [6:0] tc_idx     = (raw_tc_idx > 7'd53) ? 7'd53 : raw_tc_idx;
+`else
     wire [6:0] tc_idx = {1'b0, qpc} + 7'd2;
+`endif
     wire [9:0] tc_val = {3'b0, tc_table(tc_idx)} << (`BIT_DEPTH - 8);
 
     always @(posedge clk) begin
