@@ -39,6 +39,9 @@ module dct_top (
     // Control — from tu_info_if
     input  wire         fwd_inv_n,          // 1=forward, 0=inverse
     input  wire [2:0]   tu_size_log2,       // 2=4x4, 3=8x8, 4=16x16, 5=32x32
+`ifdef REMEDIATION
+    input  wire         is_dst7,
+`endif
 
     // Input — max 32x32, smaller TUs packed in top-left
     // Matches TU_INFO_BUS: data arrives row-major
@@ -73,6 +76,9 @@ module dct_top (
     // Latched control registers
     reg        latched_fwd_inv_n;
     reg [2:0]  latched_tu_size_log2;
+`ifdef REMEDIATION
+    reg        latched_is_dst7;
+`endif
     wire [5:0] tu_size = (6'd1 << latched_tu_size_log2); // 4, 8, 16, or 32
 
     // Input holding buffer: 32x32 signed 16-bit
@@ -120,7 +126,11 @@ module dct_top (
         .rst_n          (rst_n),
         .fwd_inv_n      (core_fwd_inv_n),
         .tu_size_log2   (core_tu_size_log2),
+`ifdef REMEDIATION
+        .is_dst7        (latched_is_dst7),
+`else
         .is_dst7        (1'b0),
+`endif
         .is_second_pass (core_is_second_pass),
         .in_valid       (core_in_valid),
         .in_ready       (core_in_ready),
@@ -176,6 +186,9 @@ module dct_top (
             state                <= S_IDLE;
             latched_fwd_inv_n    <= 1'b1;
             latched_tu_size_log2 <= 3'd2;
+`ifdef REMEDIATION
+            latched_is_dst7      <= 1'b0;
+`endif
             feed_cnt             <= 6'd0;
             wr_cnt               <= 6'd0;
             out_cnt              <= 6'd0;
@@ -208,6 +221,9 @@ module dct_top (
                     if (in_valid && in_ready) begin
                         latched_fwd_inv_n    <= fwd_inv_n;
                         latched_tu_size_log2 <= tu_size_log2;
+`ifdef REMEDIATION
+                        latched_is_dst7      <= (is_dst7 === 1'b1);
+`endif
                         feed_cnt             <= 6'd0;
                         wr_cnt               <= 6'd0;
                         out_cnt              <= 6'd0;

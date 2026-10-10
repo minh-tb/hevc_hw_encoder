@@ -226,8 +226,15 @@ module hevc_encoder_top #(
     wire [9:0]  intra_pred_x;
     wire [9:0]  intra_pred_y;
 
+`ifdef REMEDIATION
+    wire [19:0] amvp_mv_x_flat;
+    wire [19:0] amvp_mv_y_flat;
+`else
     wire [19:0] amvp_mv_x_flat = 20'd0;
     wire [19:0] amvp_mv_y_flat = 20'd0;
+`endif
+    wire signed [9:0] mvp_x_qp = amvp_mv_x_flat[9:0];
+    wire signed [9:0] mvp_y_qp = amvp_mv_y_flat[9:0];
 
     // Forward declarations
     wire [5:0]  intra_out_x;
@@ -523,9 +530,9 @@ module hevc_encoder_top #(
         if (trigger_cu)
             $display("Time=%0t: [TRIGGER_CU] leaf=%b node_split=%b cu_depth=%0d split_flag=%b cabac_ready=%b master_cu_ready=%b",
                      $time, leaf_cu_start, node_split_start, cu_depth, split_flag, cabac_cu_ready, master_cu_ready);
-        if (split_ready && !trigger_cu)
-            $display("Time=%0t: [SPLIT_READY_BLOCKED] leaf=%b node_split=%b cu_depth=%0d split_flag=%b cabac_ready=%b cabac_state=%0d",
-                     $time, leaf_cu_start, node_split_start, cu_depth, split_flag, cabac_cu_ready, cabac_state);
+        // if (split_ready && !trigger_cu)
+        //     $display("Time=%0t: [SPLIT_READY_BLOCKED] leaf=%b node_split=%b cu_depth=%0d split_flag=%b cabac_ready=%b cabac_state=%0d",
+        //              $time, leaf_cu_start, node_split_start, cu_depth, split_flag, cabac_cu_ready, cabac_state);
     end
     // synthesis translate_on
 
@@ -577,6 +584,10 @@ module hevc_encoder_top #(
     reg [11:0]  latched_cu_mv_y;
     reg [5:0]   latched_cu_ctu_x;
     reg [5:0]   latched_cu_ctu_y;
+`ifdef REMEDIATION
+    reg signed [9:0] latched_mvp_x_qp;
+    reg signed [9:0] latched_mvp_y_qp;
+`endif
     
     // Forward declaration of cu_split_ctx (derived below from ctu_depth_map)
     wire [1:0]  cu_split_ctx;
@@ -595,6 +606,10 @@ module hevc_encoder_top #(
             latched_cu_mv_y       <= 12'd0;
             latched_cu_ctu_x      <= 6'd0;
             latched_cu_ctu_y      <= 6'd0;
+`ifdef REMEDIATION
+            latched_mvp_x_qp      <= 10'd0;
+            latched_mvp_y_qp      <= 10'd0;
+`endif
         end else if (trigger_cu) begin
             latched_cu_is_split   <= node_split_start;
             latched_cu_depth      <= cu_depth[1:0];
@@ -608,6 +623,10 @@ module hevc_encoder_top #(
             latched_cu_mv_y       <= md_best_inter_mv_y;
             latched_cu_ctu_x      <= ctu_x;
             latched_cu_ctu_y      <= ctu_y;
+`ifdef REMEDIATION
+            latched_mvp_x_qp      <= mvp_x_qp;
+            latched_mvp_y_qp      <= mvp_y_qp;
+`endif
         end
     end
 
@@ -678,10 +697,214 @@ module hevc_encoder_top #(
     
     wire [31:0] md_best_rd_cost;
     
+`ifdef REMEDIATION
+    // -------------------------------------------------------------------------
+    // Spatial Neighbor Tracking for AMVP / Merge (D-01)
+    // -------------------------------------------------------------------------
+    reg        ctu_nbr_inter [0:7][0:7];
+    reg [9:0]  ctu_nbr_mv_x  [0:7][0:7];
+    reg [9:0]  ctu_nbr_mv_y  [0:7][0:7];
+    reg        ctu_nbr_coded [0:7][0:7];
+
+    reg        left_col_inter [0:7];
+    reg [9:0]  left_col_mv_x  [0:7];
+    reg [9:0]  left_col_mv_y  [0:7];
+    reg        left_col_valid [0:7];
+
+    reg        above_row_inter [0:15];
+    reg [9:0]  above_row_mv_x  [0:15];
+    reg [9:0]  above_row_mv_y  [0:15];
+    reg        above_row_valid [0:15];
+
+    wire [2:0] cur_bx = cu_x[5:3];
+    wire [2:0] cur_by = cu_y[5:3];
+    wire [3:0] cur_bs = (cu_size >= 7'd64) ? 4'd8 :
+                        (cu_size >= 7'd32) ? 4'd4 :
+                        (cu_size >= 7'd16) ? 4'd2 : 4'd1;
+
+    wire signed [4:0] nbr_a1_x = $signed({1'b0, cur_bx}) - 5'sd1;
+    wire signed [4:0] nbr_a1_y = $signed({1'b0, cur_by}) + $signed({1'b0, cur_bs}) - 5'sd1;
+
+    wire signed [4:0] nbr_a0_x = $signed({1'b0, cur_bx}) - 5'sd1;
+    wire signed [4:0] nbr_a0_y = $signed({1'b0, cur_by}) + $signed({1'b0, cur_bs});
+
+    wire signed [4:0] nbr_b1_x = $signed({1'b0, cur_bx}) + $signed({1'b0, cur_bs}) - 5'sd1;
+    wire signed [4:0] nbr_b1_y = $signed({1'b0, cur_by}) - 5'sd1;
+
+    wire signed [4:0] nbr_b0_x = $signed({1'b0, cur_bx}) + $signed({1'b0, cur_bs});
+    wire signed [4:0] nbr_b0_y = $signed({1'b0, cur_by}) - 5'sd1;
+
+    wire signed [4:0] nbr_b2_x = $signed({1'b0, cur_bx}) - 5'sd1;
+    wire signed [4:0] nbr_b2_y = $signed({1'b0, cur_by}) - 5'sd1;
+
+    function automatic [20:0] query_neighbor;
+        input signed [4:0] qx;
+        input signed [4:0] qy;
+        input [5:0] cx_ctu;
+        input [5:0] cy_ctu;
+        reg        is_inter;
+        reg [9:0]  mx;
+        reg [9:0]  my;
+        reg [3:0]  above_idx;
+        begin
+            is_inter = 1'b0;
+            mx = 10'd0;
+            my = 10'd0;
+
+            if (qy < 5'sd0) begin
+                if (cy_ctu > 0) begin
+                    if (qx >= 5'sd0 && qx < 5'sd8) begin
+                        above_idx = {cx_ctu[0], qx[2:0]};
+                        if (above_row_valid[above_idx]) begin
+                            is_inter = above_row_inter[above_idx];
+                            mx       = above_row_mv_x[above_idx];
+                            my       = above_row_mv_y[above_idx];
+                        end
+                    end else if (qx == -5'sd1 && cx_ctu > 0) begin
+                        above_idx = {~cx_ctu[0], 3'd7};
+                        if (above_row_valid[above_idx]) begin
+                            is_inter = above_row_inter[above_idx];
+                            mx       = above_row_mv_x[above_idx];
+                            my       = above_row_mv_y[above_idx];
+                        end
+                    end
+                end
+            end else if (qx < 5'sd0) begin
+                if (cx_ctu > 0) begin
+                    if (qy >= 5'sd0 && qy < 5'sd8) begin
+                        if (left_col_valid[qy[2:0]]) begin
+                            is_inter = left_col_inter[qy[2:0]];
+                            mx       = left_col_mv_x[qy[2:0]];
+                            my       = left_col_mv_y[qy[2:0]];
+                        end
+                    end
+                end
+            end else if (qx >= 5'sd0 && qx < 5'sd8 && qy >= 5'sd0 && qy < 5'sd8) begin
+                if (ctu_nbr_coded[qy[2:0]][qx[2:0]]) begin
+                    is_inter = ctu_nbr_inter[qy[2:0]][qx[2:0]];
+                    mx       = ctu_nbr_mv_x[qy[2:0]][qx[2:0]];
+                    my       = ctu_nbr_mv_y[qy[2:0]][qx[2:0]];
+                end
+            end
+
+            query_neighbor = {is_inter, mx, my};
+        end
+    endfunction
+
+    wire [20:0] info_A1 = query_neighbor(nbr_a1_x, nbr_a1_y, ctu_x, ctu_y);
+    wire [20:0] info_A0 = query_neighbor(nbr_a0_x, nbr_a0_y, ctu_x, ctu_y);
+    wire [20:0] info_B1 = query_neighbor(nbr_b1_x, nbr_b1_y, ctu_x, ctu_y);
+    wire [20:0] info_B0 = query_neighbor(nbr_b0_x, nbr_b0_y, ctu_x, ctu_y);
+    wire [20:0] info_B2 = query_neighbor(nbr_b2_x, nbr_b2_y, ctu_x, ctu_y);
+
+    wire [4:0]  top_nbr_inter    = {info_B2[20], info_B0[20], info_B1[20], info_A0[20], info_A1[20]};
+    wire [49:0] top_nbr_mv_x_bus = {info_B2[19:10], info_B0[19:10], info_B1[19:10], info_A0[19:10], info_A1[19:10]};
+    wire [49:0] top_nbr_mv_y_bus = {info_B2[9:0],   info_B0[9:0],   info_B1[9:0],   info_A0[9:0],   info_A1[9:0]};
+
+    wire [4:0]  merge_valid_bus;
+    wire [49:0] merge_mv_x_flat;
+    wire [49:0] merge_mv_y_flat;
+    wire [19:0] merge_ref_flat;
+    wire        amvp_valid_out;
+
+    mvp_predictor #(
+        .MV_W      (10),
+        .RIF_W     (4),
+        .N_MERGE   (5),
+        .N_NBR     (5)
+    ) u_mvp_predictor (
+        .clk             (clk),
+        .rst_n           (rst_n),
+        .valid_in        (cu_valid),
+        .target_ref_idx  (4'd0),
+        .nbr_inter       (top_nbr_inter),
+        .nbr_mv_x_flat   (top_nbr_mv_x_bus),
+        .nbr_mv_y_flat   (top_nbr_mv_y_bus),
+        .nbr_ref_flat    (20'd0),
+        .valid_out       (amvp_valid_out),
+        .amvp_mv_x_flat  (amvp_mv_x_flat),
+        .amvp_mv_y_flat  (amvp_mv_y_flat),
+        .merge_valid     (merge_valid_bus),
+        .merge_mv_x_flat (merge_mv_x_flat),
+        .merge_mv_y_flat (merge_mv_y_flat),
+        .merge_ref_flat  (merge_ref_flat)
+    );
+
+    integer ui, uj;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            for (ui = 0; ui < 8; ui = ui + 1) begin
+                left_col_valid[ui] <= 1'b0;
+                left_col_inter[ui] <= 1'b0;
+                left_col_mv_x[ui]  <= 10'd0;
+                left_col_mv_y[ui]  <= 10'd0;
+                for (uj = 0; uj < 8; uj = uj + 1) begin
+                    ctu_nbr_coded[ui][uj] <= 1'b0;
+                    ctu_nbr_inter[ui][uj] <= 1'b0;
+                    ctu_nbr_mv_x[ui][uj]  <= 10'd0;
+                    ctu_nbr_mv_y[ui][uj]  <= 10'd0;
+                end
+            end
+            for (ui = 0; ui < 16; ui = ui + 1) begin
+                above_row_valid[ui] <= 1'b0;
+                above_row_inter[ui] <= 1'b0;
+                above_row_mv_x[ui]  <= 10'd0;
+                above_row_mv_y[ui]  <= 10'd0;
+            end
+        end else begin
+            if (ctu_partitioner_accepted) begin
+                for (ui = 0; ui < 8; ui = ui + 1) begin
+                    for (uj = 0; uj < 8; uj = uj + 1) begin
+                        ctu_nbr_coded[ui][uj] <= 1'b0;
+                    end
+                end
+                if (ctu_x == 6'd0) begin
+                    for (ui = 0; ui < 8; ui = ui + 1) begin
+                        left_col_valid[ui] <= 1'b0;
+                    end
+                end
+                if (ctu_y == 6'd0) begin
+                    for (ui = 0; ui < 16; ui = ui + 1) begin
+                        above_row_valid[ui] <= 1'b0;
+                    end
+                end
+            end
+
+            if (trigger_cu && !node_split_start) begin
+                for (ui = 0; ui < 8; ui = ui + 1) begin
+                    for (uj = 0; uj < 8; uj = uj + 1) begin
+                        if (uj >= cur_bx && uj < (cur_bx + cur_bs) &&
+                            ui >= cur_by && ui < (cur_by + cur_bs)) begin
+                            ctu_nbr_coded[ui][uj] <= 1'b1;
+                            ctu_nbr_inter[ui][uj] <= !md_best_is_intra;
+                            ctu_nbr_mv_x[ui][uj]  <= md_best_inter_mv_x[9:0];
+                            ctu_nbr_mv_y[ui][uj]  <= md_best_inter_mv_y[9:0];
+
+                            // Update boundary buffers
+                            if (uj == 3'd7) begin
+                                left_col_valid[ui] <= 1'b1;
+                                left_col_inter[ui] <= !md_best_is_intra;
+                                left_col_mv_x[ui]  <= md_best_inter_mv_x[9:0];
+                                left_col_mv_y[ui]  <= md_best_inter_mv_y[9:0];
+                            end
+                            if (ui == 3'd7) begin
+                                above_row_valid[{ctu_x[0], uj[2:0]}] <= 1'b1;
+                                above_row_inter[{ctu_x[0], uj[2:0]}] <= !md_best_is_intra;
+                                above_row_mv_x[{ctu_x[0], uj[2:0]}]  <= md_best_inter_mv_x[9:0];
+                                above_row_mv_y[{ctu_x[0], uj[2:0]}]  <= md_best_inter_mv_y[9:0];
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+`else
     // Provide single zero-MV merge candidate (candidate 0) for P-slice merge/skip
     wire [4:0]  merge_valid_bus = 5'b00001;  // 1 valid candidate
     wire [49:0] merge_mv_x_flat = 50'd0;
     wire [49:0] merge_mv_y_flat = 50'd0;
+`endif
 
     // Forward declarations for TU sequencer registers used in map update
     reg [5:0]   reg_tu_x;
@@ -1588,9 +1811,6 @@ module hevc_encoder_top #(
     //-------------------------------------------------------------------------
     // Inter Prediction Modules
     //-------------------------------------------------------------------------
-    // MVP from AMVP predictor (candidate 0 = lower 10 bits of flat bus)
-    wire signed [9:0] mvp_x_qp = amvp_mv_x_flat[9:0];
-    wire signed [9:0] mvp_y_qp = amvp_mv_y_flat[9:0];
     // TZ Search expects integer-pel MVP
     wire signed [9:0] mvp_x = mvp_x_qp >>> 2;
     wire signed [9:0] mvp_y = mvp_y_qp >>> 2;
@@ -1900,6 +2120,9 @@ module hevc_encoder_top #(
         .rst_n            (rst_n),
         .fwd_inv_n        (1'b1), // Forward DCT
         .tu_size_log2     (reg_tu_size_log2),
+`ifdef REMEDIATION
+        .is_dst7          ((reg_tu_size_log2 == 3'd2) && latched_cu_is_intra && (reg_tu_comp == 2'd0)),
+`endif
         .in_valid         (dct_in_valid),
         .in_ready         (),  // streaming pipeline, never stalls
         .in_data          (dct_in_data_flat),
@@ -1922,8 +2145,17 @@ module hevc_encoder_top #(
       
       // Derive scan_mode from intra mode per HEVC spec (diagonal=0, horiz=1, vert=2)
       // HEVC Clause 6.5.3: Only 4x4 and 8x8 Intra TUs can use horizontal/vertical scan. 16x16 and 32x32 are always Diagonal (0).
-    wire [1:0] scan_mode = (dct_out_tu_size_log2 <= 3 && latched_cu_is_intra && latched_cu_intra_mode >= 6 && latched_cu_intra_mode <= 14) ? 2'd2 :
-                           (dct_out_tu_size_log2 <= 3 && latched_cu_is_intra && latched_cu_intra_mode >= 22 && latched_cu_intra_mode <= 30) ? 2'd1 : 2'd0; 
+`ifdef REMEDIATION
+    // MDCS applies to Intra TUs: 4x4 and 8x8 for Luma, and 4x4 for Chroma (4:2:0 format)
+    wire tu_mdcs_eligible = latched_cu_is_intra && 
+                            ((reg_tu_comp == 2'd0 && dct_out_tu_size_log2 <= 3'd3) ||
+                             (reg_tu_comp != 2'd0 && dct_out_tu_size_log2 == 3'd2));
+
+    wire [1:0] scan_mode = (tu_mdcs_eligible && latched_cu_intra_mode >= 6 && latched_cu_intra_mode <= 14) ? 2'd2 :
+                           (tu_mdcs_eligible && latched_cu_intra_mode >= 22 && latched_cu_intra_mode <= 30) ? 2'd1 : 2'd0; 
+`else
+    wire [1:0] scan_mode = 2'd0;
+`endif 
       
       address_generator u_addr_gen (
           .tu_size_log2 (dct_out_tu_size_log2),
@@ -2098,6 +2330,9 @@ module hevc_encoder_top #(
         .rst_n            (rst_n),
         .fwd_inv_n        (1'b0), // Inverse DCT
         .tu_size_log2     (dct_out_tu_size_log2),
+`ifdef REMEDIATION
+        .is_dst7          ((dct_out_tu_size_log2 == 3'd2) && latched_cu_is_intra && (reg_tu_comp == 2'd0)),
+`endif
         .in_valid         (idct_start),
         .in_ready         (),  // streaming pipeline, never stalls
         .in_data          (idct_in_data_flat),
@@ -2740,6 +2975,70 @@ module hevc_encoder_top #(
         end
     end
 
+`ifdef REMEDIATION
+    // Neighbor intra mode tracking for CABAC intra MPM derivation
+    // Standard HEVC Clause 8.4.2 / HM getIntraDirPredictor
+    reg [5:0] ctu_intra_mode_map [0:7][0:7];
+    reg [5:0] left_col_intra_mode [0:7];
+    reg [5:0] latched_cu_left_intra_mode;
+    reg [5:0] latched_cu_above_intra_mode;
+
+    // Inside CTU: neighbor at (curr_cu_bx - 1, curr_cu_by)
+    // Left boundary of CTU: across CTU if ctu_x > 0, else unavailable (DC=1)
+    wire [5:0] cu_left_intra_mode_w = (curr_cu_bx > 3'd0) ? ctu_intra_mode_map[curr_cu_bx - 3'd1][curr_cu_by]
+                                    : (ctu_x > 0)          ? left_col_intra_mode[curr_cu_by]
+                                    : 6'd1;
+
+    // In HEVC standard Clause 8.4.2 / HM getIntraDirPredictor:
+    // planarAtCtuBoundary=true explicitly treats above PU as unavailable when crossing CTU row boundaries.
+    // Inside CTU (curr_cu_by > 0): neighbor at (curr_cu_bx, curr_cu_by - 1).
+    // CTU top boundary (curr_cu_by == 0): above neighbor is ALWAYS unavailable (mode defaults to DC=1).
+    wire [5:0] cu_above_intra_mode_w = (curr_cu_by > 3'd0) ? ctu_intra_mode_map[curr_cu_bx][curr_cu_by - 3'd1]
+                                     : 6'd1;
+
+    wire [5:0] cu_left_intra_mode  = (cabac_state == CABAC_IDLE) ? cu_left_intra_mode_w : latched_cu_left_intra_mode;
+    wire [5:0] cu_above_intra_mode = (cabac_state == CABAC_IDLE) ? cu_above_intra_mode_w : latched_cu_above_intra_mode;
+
+    integer m_init_x, m_init_y;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            latched_cu_left_intra_mode  <= 6'd1;
+            latched_cu_above_intra_mode <= 6'd1;
+            for (m_init_x = 0; m_init_x < 8; m_init_x = m_init_x + 1)
+                for (m_init_y = 0; m_init_y < 8; m_init_y = m_init_y + 1)
+                    ctu_intra_mode_map[m_init_x][m_init_y] <= 6'd1;
+            for (m_init_y = 0; m_init_y < 8; m_init_y = m_init_y + 1)
+                left_col_intra_mode[m_init_y] <= 6'd1;
+        end else if (gop_frame_start) begin
+            latched_cu_left_intra_mode  <= 6'd1;
+            latched_cu_above_intra_mode <= 6'd1;
+            for (m_init_x = 0; m_init_x < 8; m_init_x = m_init_x + 1)
+                for (m_init_y = 0; m_init_y < 8; m_init_y = m_init_y + 1)
+                    ctu_intra_mode_map[m_init_x][m_init_y] <= 6'd1;
+            for (m_init_y = 0; m_init_y < 8; m_init_y = m_init_y + 1)
+                left_col_intra_mode[m_init_y] <= 6'd1;
+        end else if (ctu_done_pulse) begin
+            for (m_init_y = 0; m_init_y < 8; m_init_y = m_init_y + 1)
+                left_col_intra_mode[m_init_y] <= ctu_intra_mode_map[7][m_init_y];
+            for (m_init_x = 0; m_init_x < 8; m_init_x = m_init_x + 1)
+                for (m_init_y = 0; m_init_y < 8; m_init_y = m_init_y + 1)
+                    ctu_intra_mode_map[m_init_x][m_init_y] <= 6'd1;
+        end else if (trigger_cu) begin
+            latched_cu_left_intra_mode  <= cu_left_intra_mode_w;
+            latched_cu_above_intra_mode <= cu_above_intra_mode_w;
+            if (leaf_cu_start) begin
+                for (m_init_x = 0; m_init_x < 8; m_init_x = m_init_x + 1) begin
+                    for (m_init_y = 0; m_init_y < 8; m_init_y = m_init_y + 1) begin
+                        if (m_init_x >= curr_cu_bx && m_init_x < curr_cu_bx + curr_cu_bsize &&
+                            m_init_y >= curr_cu_by && m_init_y < curr_cu_by + curr_cu_bsize) begin
+                            ctu_intra_mode_map[m_init_x][m_init_y] <= md_best_is_intra ? md_best_intra_mode : 6'd1;
+                        end
+                    end
+                end
+            end
+        end
+    end
+`else
     reg [5:0] cu_intra_mode_line_buf [0:63];
     reg [5:0] cu_intra_mode_left_r;
     wire      intra_left_avail  = (ctu_x > 0);
@@ -2764,12 +3063,17 @@ module hevc_encoder_top #(
             cu_intra_mode_line_buf[ctu_x] <= latched_cu_intra_mode;
         end
     end
+`endif
 
     // synthesis translate_off
     always @(posedge clk) begin
         if (trigger_cu) begin
             $display("Time=%0t: [SPLIT_CTX] ctu=(%0d,%0d) cu=(%0d,%0d) depth=%0d split=%0d -> condL=%0d condA=%0d ctx=%0d",
                      $time, ctu_x, ctu_y, cu_x, cu_y, cu_depth, node_split_start, split_condL, split_condA, cu_split_ctx);
+            if (leaf_cu_start) begin
+                $display("Time=%0t: [INTRA_CTX] ctu=(%0d,%0d) cu=(%0d,%0d) bx=%0d by=%0d -> left_mode=%0d above_mode=%0d cur_mode=%0d is_intra=%0d",
+                         $time, ctu_x, ctu_y, cu_x, cu_y, curr_cu_bx, curr_cu_by, cu_left_intra_mode, cu_above_intra_mode, md_best_intra_mode, md_best_is_intra);
+            end
         end
         if (top_trm_req)       $display("Time=%0t: [HEVC_TOP] cabac_trm_pulse fired! bin=%b", $time, top_trm_bin_val);
         if (cabac_flush_pulse) $display("Time=%0t: [HEVC_TOP] cabac_flush_pulse fired!", $time);
@@ -2815,12 +3119,21 @@ module hevc_encoder_top #(
         .inter_dir        (ctu_slice_type == SLICE_B ? 2'd2 : 2'd0), // 0=L0, 1=L1, 2=Bi
         .ref_idx_l0       (3'd0),
         .mvp_flag_l0      (1'b0),
+`ifdef REMEDIATION
+        .mvd_l0_x         (latched_cu_mv_x - {{2{latched_mvp_x_qp[9]}}, latched_mvp_x_qp}),
+        .mvd_l0_y         (latched_cu_mv_y - {{2{latched_mvp_y_qp[9]}}, latched_mvp_y_qp}),
+        .ref_idx_l1       (3'd0),
+        .mvp_flag_l1      (1'b0),
+        .mvd_l1_x         (latched_cu_mv_x - {{2{latched_mvp_x_qp[9]}}, latched_mvp_x_qp}),
+        .mvd_l1_y         (latched_cu_mv_y - {{2{latched_mvp_y_qp[9]}}, latched_mvp_y_qp}),
+`else
         .mvd_l0_x         (latched_cu_mv_x - {{2{mvp_x_qp[9]}}, mvp_x_qp}),
         .mvd_l0_y         (latched_cu_mv_y - {{2{mvp_y_qp[9]}}, mvp_y_qp}),
         .ref_idx_l1       (3'd0),
         .mvp_flag_l1      (1'b0),
         .mvd_l1_x         (latched_cu_mv_x - {{2{mvp_x_qp[9]}}, mvp_x_qp}),
         .mvd_l1_y         (latched_cu_mv_y - {{2{mvp_y_qp[9]}}, mvp_y_qp}),
+`endif
 
         // Coeff syntax
         .coeff_req           (wire_coeff_req),
@@ -2830,6 +3143,9 @@ module hevc_encoder_top #(
         .coeff_tu_size_log2  (reg_tu_size_log2),
         .coeff_tu_cbf        (tu_has_nonzero),
         .coeff_last_sig_pos  (tu_last_sig_idx),
+`ifdef REMEDIATION
+        .coeff_scan_mode     (scan_mode),
+`endif
         .coeff_rd_en         (coeff_buf_re),
         .coeff_rd_addr       (coeff_buf_raddr),
         .coeff_rd_data       (coeff_buf_rdata),

@@ -37,6 +37,9 @@ module syntax_coeff #(
     input  wire [2:0]                    tu_size_log2, // 2=4x4, 3=8x8, 4=16x16, 5=32x32
     input  wire                          tu_cbf,       // 1 if TU contains non-zero coeffs
     input  wire [9:0]                    last_sig_pos, // scan index of last non-zero coeff
+`ifdef REMEDIATION
+    input  wire [1:0]                    scan_mode,
+`endif
 
     // ── SRAM Read Port to coeff_buffer ──────────────────────────────────────
     output reg                           coeff_rd_en,
@@ -50,6 +53,12 @@ module syntax_coeff #(
     output reg                           bin_is_ep,
     input  wire                          bin_rdy
 );
+
+`ifdef REMEDIATION
+    wire [1:0] eff_scan_mode = (scan_mode === 2'd1) ? 2'd1 : (scan_mode === 2'd2) ? 2'd2 : 2'd0;
+`else
+    wire [1:0] eff_scan_mode = 2'd0;
+`endif
 
     // =========================================================================
     // Diagonal scan LUTs
@@ -126,6 +135,121 @@ module syntax_coeff #(
         end
     endfunction
 
+    function automatic [1:0] get_sub_col;
+        input [3:0] pos;
+        input [1:0] s_mode;
+        begin
+            case (s_mode)
+                2'd1: get_sub_col = pos[1:0];               // Horiz: col = pos % 4
+                2'd2: get_sub_col = pos[3:2];               // Vert:  col = pos / 4
+                default: get_sub_col = diag_4_col(pos);     // Diag
+            endcase
+        end
+    endfunction
+
+    function automatic [1:0] get_sub_row;
+        input [3:0] pos;
+        input [1:0] s_mode;
+        begin
+            case (s_mode)
+                2'd1: get_sub_row = pos[3:2];               // Horiz: row = pos / 4
+                2'd2: get_sub_row = pos[1:0];               // Vert:  row = pos % 4
+                default: get_sub_row = diag_4_row(pos);     // Diag
+            endcase
+        end
+    endfunction
+
+    function automatic [2:0] get_cg_col;
+        input [2:0] log2_size;
+        input [5:0] cg;
+        input [1:0] s_mode;
+        begin
+            case (log2_size)
+                3'd3: begin
+                    case (s_mode)
+                        2'd1: get_cg_col = {2'd0, cg[0]};   // Horiz 2x2: col = cg % 2
+                        2'd2: get_cg_col = {2'd0, cg[1]};   // Vert  2x2: col = cg / 2
+                        default: get_cg_col = {2'd0, cg[1]}; // Diag 2x2: col = cg[1]
+                    endcase
+                end
+                3'd4: get_cg_col = {1'd0, diag_4_col(cg[3:0])};
+                default: get_cg_col = diag_8_col(cg[5:0]);
+            endcase
+        end
+    endfunction
+
+    function automatic [2:0] get_cg_row;
+        input [2:0] log2_size;
+        input [5:0] cg;
+        input [1:0] s_mode;
+        begin
+            case (log2_size)
+                3'd3: begin
+                    case (s_mode)
+                        2'd1: get_cg_row = {2'd0, cg[1]};   // Horiz 2x2: row = cg / 2
+                        2'd2: get_cg_row = {2'd0, cg[0]};   // Vert  2x2: row = cg % 2
+                        default: get_cg_row = {2'd0, cg[0]}; // Diag 2x2: row = cg[0]
+                    endcase
+                end
+                3'd4: get_cg_row = {1'd0, diag_4_row(cg[3:0])};
+                default: get_cg_row = diag_8_row(cg[5:0]);
+            endcase
+        end
+    endfunction
+
+`ifdef REMEDIATION
+    function automatic [4:0] get_x_from_scan;
+        input [9:0] scan;
+        input [2:0] log2_size;
+        input [1:0] s_mode;
+        reg [2:0] cx;
+        reg [1:0] sx;
+        begin
+            sx = get_sub_col(scan[3:0], s_mode);
+            case (log2_size)
+                3'd2: get_x_from_scan = {3'd0, sx};
+                3'd3: begin
+                    cx = get_cg_col(3'd3, {4'd0, scan[5:4]}, s_mode);
+                    get_x_from_scan = {2'd0, cx[0], sx};
+                end
+                3'd4: begin
+                    cx = diag_4_col(scan[7:4]);
+                    get_x_from_scan = {1'd0, cx[1:0], sx};
+                end
+                default: begin // 32x32
+                    cx = diag_8_col(scan[9:4]);
+                    get_x_from_scan = {cx[2:0], sx};
+                end
+            endcase
+        end
+    endfunction
+
+    function automatic [4:0] get_y_from_scan;
+        input [9:0] scan;
+        input [2:0] log2_size;
+        input [1:0] s_mode;
+        reg [2:0] cy;
+        reg [1:0] sy;
+        begin
+            sy = get_sub_row(scan[3:0], s_mode);
+            case (log2_size)
+                3'd2: get_y_from_scan = {3'd0, sy};
+                3'd3: begin
+                    cy = get_cg_row(3'd3, {4'd0, scan[5:4]}, s_mode);
+                    get_y_from_scan = {2'd0, cy[0], sy};
+                end
+                3'd4: begin
+                    cy = diag_4_row(scan[7:4]);
+                    get_y_from_scan = {1'd0, cy[1:0], sy};
+                end
+                default: begin // 32x32
+                    cy = diag_8_row(scan[9:4]);
+                    get_y_from_scan = {cy[2:0], sy};
+                end
+            endcase
+        end
+    endfunction
+`else
     function automatic [4:0] get_x_from_scan;
         input [9:0] scan;
         input [2:0] log2_size;
@@ -136,14 +260,8 @@ module syntax_coeff #(
             case (log2_size)
                 3'd2: get_x_from_scan = {3'd0, sx};
                 3'd3: begin
-`ifdef REMEDIATION
-                    // Normative ITU-T H.265 Clause 7.4.9.11 / Table 7-40:
-                    // 2x2 CG grid scan: bit 1 of scan[5:4] is CG column x
-                    get_x_from_scan = {2'd0, scan[5], sx};
-`else
                     cx = diag_4_col(scan[5:4]);
                     get_x_from_scan = {4'd0, cx[0], sx};
-`endif
                 end
                 3'd4: begin
                     cx = diag_4_col(scan[7:4]);
@@ -167,14 +285,8 @@ module syntax_coeff #(
             case (log2_size)
                 3'd2: get_y_from_scan = {3'd0, sy};
                 3'd3: begin
-`ifdef REMEDIATION
-                    // Normative ITU-T H.265 Clause 7.4.9.11 / Table 7-40:
-                    // 2x2 CG grid scan: bit 0 of scan[5:4] is CG row y
-                    get_y_from_scan = {2'd0, scan[4], sy};
-`else
                     cy = diag_4_row(scan[5:4]);
                     get_y_from_scan = {4'd0, cy[0], sy};
-`endif
                 end
                 3'd4: begin
                     cy = diag_4_row(scan[7:4]);
@@ -187,6 +299,7 @@ module syntax_coeff #(
             endcase
         end
     endfunction
+`endif
 
     function automatic [3:0] get_prefix;
         input [4:0] pos;
@@ -274,6 +387,13 @@ module syntax_coeff #(
     reg [2:0]  suf_cnt;
     reg [2:0]  suf_len;
     reg [4:0]  suf_val;
+`ifdef REMEDIATION
+    reg [1:0]  scan_mode_r;
+    wire [4:0] raw_last_x = get_x_from_scan(last_sig_pos, tu_size_log2, eff_scan_mode);
+    wire [4:0] raw_last_y = get_y_from_scan(last_sig_pos, tu_size_log2, eff_scan_mode);
+    wire [4:0] eff_last_x = (eff_scan_mode == 2'd2) ? raw_last_y : raw_last_x;
+    wire [4:0] eff_last_y = (eff_scan_mode == 2'd2) ? raw_last_x : raw_last_y;
+`endif
 
     // TU counter (for 64x64 CU containing four 32x32 TUs)
     reg [1:0]  tu_idx;
@@ -370,22 +490,17 @@ module syntax_coeff #(
         input [2:0] log2_size;
         input [5:0] cg;
         input [63:0] flags;
+`ifdef REMEDIATION
+        input [1:0] s_mode;
+`endif
         reg [2:0] cg_x, cg_y, max_cg;
         reg r_flag, b_flag;
         reg ctx_inc;
         begin
             max_cg = (log2_size == 3'd3) ? 3'd1 : (log2_size == 3'd4) ? 3'd3 : 3'd7;
 `ifdef REMEDIATION
-            if (log2_size == 3'd3) begin
-                cg_x = {2'd0, cg[1]};
-                cg_y = {2'd0, cg[0]};
-            end else if (log2_size == 3'd4) begin
-                cg_x = diag_4_col(cg[3:0]);
-                cg_y = diag_4_row(cg[3:0]);
-            end else begin
-                cg_x = diag_8_col(cg[5:0]);
-                cg_y = diag_8_row(cg[5:0]);
-            end
+            cg_x = get_cg_col(log2_size, cg, s_mode);
+            cg_y = get_cg_row(log2_size, cg, s_mode);
 `else
             if (log2_size == 3'd3 || log2_size == 3'd4) begin
                 cg_x = diag_4_col(cg[3:0]);
@@ -408,6 +523,9 @@ module syntax_coeff #(
         input [5:0]  cg;
         input [3:0]  sub_pos;
         input [63:0] flags;
+`ifdef REMEDIATION
+        input [1:0]  s_mode;
+`endif
         reg [1:0] r, c;
         reg [2:0] cg_x, cg_y, max_cg;
         reg [5:0] pos_x, pos_y;
@@ -423,24 +541,24 @@ module syntax_coeff #(
             lut4x4[ 8]=4'd6; lut4x4[ 9]=4'd6; lut4x4[10]=4'd8; lut4x4[11]=4'd8;
             lut4x4[12]=4'd7; lut4x4[13]=4'd7; lut4x4[14]=4'd8; lut4x4[15]=4'd8;
 
+`ifdef REMEDIATION
+            r = get_sub_row(sub_pos, s_mode);
+            c = get_sub_col(sub_pos, s_mode);
+
+            max_cg = (log2_size == 3'd3) ? 3'd1 : (log2_size == 3'd4) ? 3'd3 : 3'd7;
+            if (log2_size == 3'd2) begin
+                cg_x = 3'd0; cg_y = 3'd0;
+            end else begin
+                cg_x = get_cg_col(log2_size, cg, s_mode);
+                cg_y = get_cg_row(log2_size, cg, s_mode);
+            end
+`else
             r = diag_4_row(sub_pos);
             c = diag_4_col(sub_pos);
 
             max_cg = (log2_size == 3'd3) ? 3'd1 : (log2_size == 3'd4) ? 3'd3 : 3'd7;
             if (log2_size == 3'd2) begin
                 cg_x = 3'd0; cg_y = 3'd0;
-`ifdef REMEDIATION
-            end else if (log2_size == 3'd3) begin
-                cg_x = {2'd0, cg[1]};
-                cg_y = {2'd0, cg[0]};
-            end else if (log2_size == 3'd4) begin
-                cg_x = diag_4_col(cg[3:0]);
-                cg_y = diag_4_row(cg[3:0]);
-            end else begin
-                cg_x = diag_8_col(cg[5:0]);
-                cg_y = diag_8_row(cg[5:0]);
-            end
-`else
             end else if (log2_size == 3'd3 || log2_size == 3'd4) begin
                 cg_x = diag_4_col(cg[3:0]);
                 cg_y = diag_4_row(cg[3:0]);
@@ -476,7 +594,11 @@ module syntax_coeff #(
 
                 if (comp == 2'd0) begin
                     if (log2_size == 3'd3)
+`ifdef REMEDIATION
+                        get_sig_ctx = 8'd46 + (s_mode != 2'd0 ? 8'd15 : 8'd9) + (not_first ? 8'd3 : 8'd0) + {6'd0, cnt};
+`else
                         get_sig_ctx = 8'd46 + 8'd9  + (not_first ? 8'd3 : 8'd0) + {6'd0, cnt};
+`endif
                     else
                         get_sig_ctx = 8'd46 + 8'd21 + (not_first ? 8'd3 : 8'd0) + {6'd0, cnt};
                 end else begin
@@ -566,7 +688,11 @@ module syntax_coeff #(
             S_CG_FLAG: begin
                 bin_valid  = 1'b1;
                 bin_value  = (cg_num_sig != 5'd0);
+`ifdef REMEDIATION
+                bin_ctx_id = get_cg_ctx(comp_r, tu_size_log2_r, cur_cg, cg_flags, scan_mode_r);
+`else
                 bin_ctx_id = get_cg_ctx(comp_r, tu_size_log2_r, cur_cg, cg_flags);
+`endif
             end
 
             S_SIG_SCAN: begin
@@ -577,7 +703,11 @@ module syntax_coeff #(
                 end else begin
                     bin_valid  = 1'b1;
                     bin_value  = cg_sig_map[scan_ptr[3:0]];
+`ifdef REMEDIATION
+                    bin_ctx_id = get_sig_ctx(comp_r, tu_size_log2_r, cur_cg, scan_ptr[3:0], cg_flags, scan_mode_r);
+`else
                     bin_ctx_id = get_sig_ctx(comp_r, tu_size_log2_r, cur_cg, scan_ptr[3:0], cg_flags);
+`endif
                 end
             end
 
@@ -713,6 +843,9 @@ module syntax_coeff #(
             rem_val             <= 32'd0;
             rem_len             <= 6'd0;
             rem_cnt             <= 6'd0;
+`ifdef REMEDIATION
+            scan_mode_r         <= 2'd0;
+`endif
             for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
                 cg_coeffs[c_i]    <= {COEFF_W{1'b0}};
                 sig_pos_list[c_i] <= 4'd0;
@@ -736,10 +869,18 @@ module syntax_coeff #(
                         tu_size_log2_r  <= tu_size_log2;
                         cbf_r           <= tu_cbf;
                         last_sig_pos_r  <= last_sig_pos;
+`ifdef REMEDIATION
+                        scan_mode_r     <= eff_scan_mode;
+                        last_sig_x_r    <= eff_last_x;
+                        last_sig_y_r    <= eff_last_y;
+                        last_pfx_x      <= get_prefix(eff_last_x);
+                        last_pfx_y      <= get_prefix(eff_last_y);
+`else
                         last_sig_x_r    <= get_x_from_scan(last_sig_pos, tu_size_log2);
                         last_sig_y_r    <= get_y_from_scan(last_sig_pos, tu_size_log2);
                         last_pfx_x      <= get_prefix(get_x_from_scan(last_sig_pos, tu_size_log2));
                         last_pfx_y      <= get_prefix(get_y_from_scan(last_sig_pos, tu_size_log2));
+`endif
                         last_cg_idx     <= last_sig_pos >> 4;
                         cur_cg          <= last_sig_pos >> 4;
                         cg_flags        <= 64'd0;
@@ -876,9 +1017,15 @@ module syntax_coeff #(
                     cg_coeffs[load_cnt] <= coeff_rd_data;
                     if (load_cnt == 4'd15) begin
                         state <= (cur_cg == last_cg_idx || cur_cg == 6'd0) ? S_SIG_SCAN : S_CG_FLAG;
+`ifdef REMEDIATION
+                        cg_flags[get_cg_raster(tu_size_log2_r,
+                            get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r),
+                            get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r))] <= 1'b1;
+`else
                         cg_flags[get_cg_raster(tu_size_log2_r,
                             (tu_size_log2_r == 3'd5) ? diag_8_col(cur_cg) : diag_4_col(cur_cg[3:0]),
                             (tu_size_log2_r == 3'd5) ? diag_8_row(cur_cg) : diag_4_row(cur_cg[3:0]))] <= 1'b1;
+`endif
                         scan_ptr <= (cur_cg == last_cg_idx) ? {1'b0, last_sig_pos_r[3:0]} : 5'd15;
 
                         // Procedural accumulation with blocking assignments
@@ -922,15 +1069,27 @@ module syntax_coeff #(
                 S_CG_FLAG: begin
                     if (bin_rdy) begin
                         if (cg_num_sig != 5'd0) begin
+`ifdef REMEDIATION
+                            cg_flags[get_cg_raster(tu_size_log2_r,
+                                get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r),
+                                get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r))] <= 1'b1;
+`else
                             cg_flags[get_cg_raster(tu_size_log2_r,
                                 (tu_size_log2_r == 3'd5) ? diag_8_col(cur_cg) : diag_4_col(cur_cg[3:0]),
                                 (tu_size_log2_r == 3'd5) ? diag_8_row(cur_cg) : diag_4_row(cur_cg[3:0]))] <= 1'b1;
+`endif
                             scan_ptr <= 5'd15;
                             state <= S_SIG_SCAN;
                         end else begin
+`ifdef REMEDIATION
+                            cg_flags[get_cg_raster(tu_size_log2_r,
+                                get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r),
+                                get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r))] <= 1'b0;
+`else
                             cg_flags[get_cg_raster(tu_size_log2_r,
                                 (tu_size_log2_r == 3'd5) ? diag_8_col(cur_cg) : diag_4_col(cur_cg[3:0]),
                                 (tu_size_log2_r == 3'd5) ? diag_8_row(cur_cg) : diag_4_row(cur_cg[3:0]))] <= 1'b0;
+`endif
                             if (cur_cg > 6'd0) begin
                                 cur_cg   <= cur_cg - 6'd1;
                                 load_cnt <= 4'd0;

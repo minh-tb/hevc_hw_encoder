@@ -291,7 +291,11 @@ module syntax_cu #(
 
             S_PRED_MODE: begin
                 if (bin_rdy) begin
+`ifdef REMEDIATION
+                    state <= (cu_pred_intra && cu_depth != 2'd3) ? S_DONE : S_PART0;
+`else
                     state <= cu_pred_intra ? S_DONE : S_PART0;
+`endif
                 end
             end
 

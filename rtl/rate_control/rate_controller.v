@@ -99,6 +99,23 @@ module rate_controller (
                 // Compute Delta QP
                 // If actual bits > target bits, increase QP (+1 or +2)
                 // If actual bits < target bits, decrease QP (-1 or -2)
+`ifdef REMEDIATION
+                // Closed-loop VBV feedback integrated with frame error
+                if (vbv_buffer_bits > (vbv_buffer_max / 4) ||
+                    actual_frame_bits > (target_bits_frame + (target_bits_frame >> 2))) begin
+                    if (current_qp_r < 6'd49) current_qp_r <= current_qp_r + 6'd3;
+                end else if (actual_frame_bits > (target_bits_frame + (target_bits_frame >> 4))) begin
+                    if (current_qp_r < 6'd51) current_qp_r <= current_qp_r + 6'd1;
+                end else if (vbv_buffer_bits < -(vbv_buffer_max / 4) ||
+                             actual_frame_bits < (target_bits_frame - (target_bits_frame >> 2))) begin
+                    if (current_qp_r > 6'd14) current_qp_r <= current_qp_r - 6'd3;
+                end else if (actual_frame_bits < (target_bits_frame - (target_bits_frame >> 4))) begin
+                    if (current_qp_r > 6'd11) current_qp_r <= current_qp_r - 6'd1;
+                end
+
+                // Safe 64-bit intermediate calculation prevents 32-bit overflow >= 43 Mbps
+                fullness_calc = 32'sd50 + (($signed({32'sd0, vbv_buffer_bits}) * 64'sd50) / $signed({32'sd0, vbv_buffer_max}));
+`else
                 if (actual_frame_bits > (target_bits_frame + (target_bits_frame >> 2))) begin
                     // Exceeded by > 25%
                     if (current_qp_r < 6'd50) current_qp_r <= current_qp_r + 6'd2;
@@ -115,6 +132,7 @@ module rate_controller (
 
                 // Percentage status with strictly signed arithmetic & saturation clamp [0%, 100%]
                 fullness_calc = 32'sd50 + ((vbv_buffer_bits * 32'sd50) / vbv_buffer_max);
+`endif
                 if (fullness_calc < 32'sd0)
                     vbv_fullness_pct <= 16'd0;
                 else if (fullness_calc > 32'sd100)

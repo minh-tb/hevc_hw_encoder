@@ -77,7 +77,11 @@ module ctx_model_store #(
 
     // ── Slice initialization ──────────────────────────────────────────────
     input  wire                  slice_init,   // pulse: begin context reset
+`ifdef REMEDIATION
+    input  wire [1:0]            slice_type,   // 0=B, 1=P, 2=I (per HEVC Table 7-23)
+`else
     input  wire [1:0]            slice_type,   // 0=I, 1=P, 2=B
+`endif
     input  wire [6:0]            qp_in,        // QP 0..51; tie to 7'd32 for fixed-QP
 
     // ── Combinational read port ──────────────────────────────────────────

@@ -131,9 +131,15 @@ module mode_decision (
     //=========================================================================
     // Advanced Lagrangian Lambda Engine & CABAC Rate Estimator
     //=========================================================================
+`ifdef REMEDIATION
+    wire [27:0] lambda_mode_q8;
+    wire [17:0] lambda_motion_q8;
+    wire [27:0] lambda_chroma_q8;
+`else
     wire [23:0] lambda_mode_q8;
     wire [15:0] lambda_motion_q8;
     wire [23:0] lambda_chroma_q8;
+`endif
 
     lambda_calc u_lambda_calc (
         .qp             (cur_qp),
@@ -323,12 +329,20 @@ module mode_decision (
 
             // Capture costs dynamically when valid
             if (intra_cost_valid) begin
+`ifdef REMEDIATION
+                latched_intra_cost <= (intra_rd_cost >= 32'hFFFF0000) ? 32'hFFFFFFFF : (intra_rd_cost + lambda_intra_rate_cost);
+`else
                 latched_intra_cost <= intra_rd_cost + lambda_intra_rate_cost;
+`endif
                 latched_intra_mode <= intra_best_mode;
                 intra_done         <= 1'b1;
             end
             if (inter_cost_valid) begin
+`ifdef REMEDIATION
+                latched_inter_cost <= (inter_rd_cost >= 32'hFFFF0000) ? 32'hFFFFFFFF : (inter_rd_cost + lambda_amvp_rate_cost);
+`else
                 latched_inter_cost <= inter_rd_cost + lambda_amvp_rate_cost;
+`endif
                 latched_inter_mv_x <= inter_best_mv_x;
                 latched_inter_mv_y <= inter_best_mv_y;
                 inter_done         <= 1'b1;
@@ -439,6 +453,21 @@ module mode_decision (
                     end else if (best_skip_flag) begin
                         // Skip mode: no need to split further
                         split_flag <= 1'b0;
+`ifdef REMEDIATION
+                    end else if (cur_pu_depth == 2'd0) begin
+                        // Depth 0 (64x64) MUST always split because HW transform/intra capped at 32x32
+                        split_flag <= 1'b1;
+                    end else if (best_rd_cost >= 32'hFFFF0000) begin
+                        // Invalid or saturated cost forces split
+                        split_flag <= 1'b1;
+                    end else if (best_rd_cost > split_threshold) begin
+                        // Cost is too high, split quadtree deeper
+                        split_flag <= 1'b1;
+                    end else begin
+                        // Cost is acceptable, early termination (FEN=1)
+                        split_flag <= 1'b0;
+                    end
+`else
                     end else if (best_rd_cost < 32'hFFFF0000 && best_rd_cost > split_threshold) begin
                         // Cost is too high, split quadtree deeper
                         split_flag <= 1'b1;
@@ -446,6 +475,7 @@ module mode_decision (
                         // Cost is acceptable, early termination (FEN=1)
                         split_flag <= 1'b0;
                     end
+`endif
                     // synthesis translate_off
                     $display("Time=%0t: [MODE_DECISION] POC=%0d SLICE=%0d SIZE=%0d INTRA=%0d INTER=%0d MERGE=%0d BEST=%s MRG=%b SKIP=%b SPLIT=%b", 
                               $time, cur_poc, cur_slice_type, cur_pu_size, 

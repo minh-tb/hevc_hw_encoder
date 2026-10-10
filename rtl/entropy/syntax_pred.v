@@ -531,6 +531,116 @@ module syntax_pred #(
                     else ref_ep_cnt <= ref_ep_cnt + 3'd1;
                 end
             end
+`ifdef REMEDIATION
+            // Standard HEVC Section 7.3.8.6 mvd_coding / HM codeMvd:
+            // Interleaved: x_gt0 -> y_gt0 -> x_gt1 -> y_gt1 -> x_eg/sign -> y_eg/sign
+            S_MVD0_X_GT0: begin
+                if (bin_rdy) state <= S_MVD0_Y_GT0;
+            end
+
+            S_MVD0_Y_GT0: begin
+                if (bin_rdy) begin
+                    if (abs_mvd_l0_x != 0) state <= S_MVD0_X_GT1;
+                    else if (abs_mvd_l0_y != 0) state <= S_MVD0_Y_GT1;
+                    else state <= S_MVP0;
+                end
+            end
+
+            S_MVD0_X_GT1: begin
+                if (bin_rdy) begin
+                    if (abs_mvd_l0_y != 0) state <= S_MVD0_Y_GT1;
+                    else if (abs_mvd_l0_x > 1) begin
+                        eg_symbol    <= abs_mvd_l0_x - 12'd2;
+                        eg_count     <= 12'd2;
+                        eg_in_suffix <= 1'b0;
+                        state        <= S_MVD0_X_EG;
+                    end else state <= S_MVD0_X_SIGN;
+                end
+            end
+
+            S_MVD0_Y_GT1: begin
+                if (bin_rdy) begin
+                    if (abs_mvd_l0_x != 0) begin
+                        if (abs_mvd_l0_x > 1) begin
+                            eg_symbol    <= abs_mvd_l0_x - 12'd2;
+                            eg_count     <= 12'd2;
+                            eg_in_suffix <= 1'b0;
+                            state        <= S_MVD0_X_EG;
+                        end else state <= S_MVD0_X_SIGN;
+                    end else begin
+                        if (abs_mvd_l0_y > 1) begin
+                            eg_symbol    <= abs_mvd_l0_y - 12'd2;
+                            eg_count     <= 12'd2;
+                            eg_in_suffix <= 1'b0;
+                            state        <= S_MVD0_Y_EG;
+                        end else state <= S_MVD0_Y_SIGN;
+                    end
+                end
+            end
+
+            S_MVD0_X_EG: begin
+                if (bin_rdy) begin
+                    if (!eg_in_suffix) begin
+                        if (eg_symbol >= eg_count) begin
+                            eg_symbol <= eg_symbol - eg_count;
+                            eg_count  <= eg_count << 1;
+                        end else begin
+                            eg_suffix_bits <= eg_count_log2;
+                            eg_suffix_cnt  <= eg_count_log2;
+                            eg_suffix_val  <= eg_symbol;
+                            eg_in_suffix   <= 1'b1;
+                        end
+                    end else begin
+                        if (eg_suffix_cnt > 5'd0) begin
+                            eg_suffix_cnt <= eg_suffix_cnt - 5'd1;
+                        end 
+                        if (eg_suffix_cnt == 5'd1 || eg_suffix_cnt == 5'd0) begin
+                            state <= S_MVD0_X_SIGN;
+                        end
+                    end
+                end
+            end
+
+            S_MVD0_X_SIGN: begin
+                if (bin_rdy) begin
+                    if (abs_mvd_l0_y != 0) begin
+                        if (abs_mvd_l0_y > 1) begin
+                            eg_symbol    <= abs_mvd_l0_y - 12'd2;
+                            eg_count     <= 12'd2;
+                            eg_in_suffix <= 1'b0;
+                            state        <= S_MVD0_Y_EG;
+                        end else state <= S_MVD0_Y_SIGN;
+                    end else state <= S_MVP0;
+                end
+            end
+
+            S_MVD0_Y_EG: begin
+                if (bin_rdy) begin
+                    if (!eg_in_suffix) begin
+                        if (eg_symbol >= eg_count) begin
+                            eg_symbol <= eg_symbol - eg_count;
+                            eg_count  <= eg_count << 1;
+                        end else begin
+                            eg_suffix_bits <= eg_count_log2;
+                            eg_suffix_cnt  <= eg_count_log2;
+                            eg_suffix_val  <= eg_symbol;
+                            eg_in_suffix   <= 1'b1;
+                        end
+                    end else begin
+                        if (eg_suffix_cnt > 5'd0) begin
+                            eg_suffix_cnt <= eg_suffix_cnt - 5'd1;
+                        end 
+                        if (eg_suffix_cnt == 5'd1 || eg_suffix_cnt == 5'd0) begin
+                            state <= S_MVD0_Y_SIGN;
+                        end
+                    end
+                end
+            end
+
+            S_MVD0_Y_SIGN: begin
+                if (bin_rdy) state <= S_MVP0;
+            end
+`else
             S_MVD0_X_GT0: begin
                 if (bin_rdy) state <= (abs_mvd_l0_x == 0) ? S_MVD0_Y_GT0 : S_MVD0_X_GT1;
             end
@@ -613,6 +723,7 @@ module syntax_pred #(
             S_MVD0_Y_SIGN: begin
                 if (bin_rdy) state <= S_MVP0;
             end
+`endif
 
             S_MVP0: begin
                 if (bin_rdy) state <= (is_b_r && inter_dir_r == 2'd2) ? (MAX_REF > 1 ? S_REF1_BIN0 : S_MVD1_X_GT0) : S_DONE;
@@ -639,6 +750,116 @@ module syntax_pred #(
                 end
             end
 
+`ifdef REMEDIATION
+            // Standard HEVC Section 7.3.8.6 mvd_coding / HM codeMvd:
+            // Interleaved: x_gt0 -> y_gt0 -> x_gt1 -> y_gt1 -> x_eg/sign -> y_eg/sign
+            S_MVD1_X_GT0: begin
+                if (bin_rdy) state <= S_MVD1_Y_GT0;
+            end
+
+            S_MVD1_Y_GT0: begin
+                if (bin_rdy) begin
+                    if (abs_mvd_l1_x != 0) state <= S_MVD1_X_GT1;
+                    else if (abs_mvd_l1_y != 0) state <= S_MVD1_Y_GT1;
+                    else state <= S_MVP1;
+                end
+            end
+
+            S_MVD1_X_GT1: begin
+                if (bin_rdy) begin
+                    if (abs_mvd_l1_y != 0) state <= S_MVD1_Y_GT1;
+                    else if (abs_mvd_l1_x > 1) begin
+                        eg_symbol    <= abs_mvd_l1_x - 12'd2;
+                        eg_count     <= 12'd2;
+                        eg_in_suffix <= 1'b0;
+                        state        <= S_MVD1_X_EG;
+                    end else state <= S_MVD1_X_SIGN;
+                end
+            end
+
+            S_MVD1_Y_GT1: begin
+                if (bin_rdy) begin
+                    if (abs_mvd_l1_x != 0) begin
+                        if (abs_mvd_l1_x > 1) begin
+                            eg_symbol    <= abs_mvd_l1_x - 12'd2;
+                            eg_count     <= 12'd2;
+                            eg_in_suffix <= 1'b0;
+                            state        <= S_MVD1_X_EG;
+                        end else state <= S_MVD1_X_SIGN;
+                    end else begin
+                        if (abs_mvd_l1_y > 1) begin
+                            eg_symbol    <= abs_mvd_l1_y - 12'd2;
+                            eg_count     <= 12'd2;
+                            eg_in_suffix <= 1'b0;
+                            state        <= S_MVD1_Y_EG;
+                        end else state <= S_MVD1_Y_SIGN;
+                    end
+                end
+            end
+
+            S_MVD1_X_EG: begin
+                if (bin_rdy) begin
+                    if (!eg_in_suffix) begin
+                        if (eg_symbol >= eg_count) begin
+                            eg_symbol <= eg_symbol - eg_count;
+                            eg_count  <= eg_count << 1;
+                        end else begin
+                            eg_suffix_bits <= eg_count_log2;
+                            eg_suffix_cnt  <= eg_count_log2;
+                            eg_suffix_val  <= eg_symbol;
+                            eg_in_suffix   <= 1'b1;
+                        end
+                    end else begin
+                        if (eg_suffix_cnt > 5'd0) begin
+                            eg_suffix_cnt <= eg_suffix_cnt - 5'd1;
+                        end 
+                        if (eg_suffix_cnt == 5'd1 || eg_suffix_cnt == 5'd0) begin
+                            state <= S_MVD1_X_SIGN;
+                        end
+                    end
+                end
+            end
+
+            S_MVD1_X_SIGN: begin
+                if (bin_rdy) begin
+                    if (abs_mvd_l1_y != 0) begin
+                        if (abs_mvd_l1_y > 1) begin
+                            eg_symbol    <= abs_mvd_l1_y - 12'd2;
+                            eg_count     <= 12'd2;
+                            eg_in_suffix <= 1'b0;
+                            state        <= S_MVD1_Y_EG;
+                        end else state <= S_MVD1_Y_SIGN;
+                    end else state <= S_MVP1;
+                end
+            end
+
+            S_MVD1_Y_EG: begin
+                if (bin_rdy) begin
+                    if (!eg_in_suffix) begin
+                        if (eg_symbol >= eg_count) begin
+                            eg_symbol <= eg_symbol - eg_count;
+                            eg_count  <= eg_count << 1;
+                        end else begin
+                            eg_suffix_bits <= eg_count_log2;
+                            eg_suffix_cnt  <= eg_count_log2;
+                            eg_suffix_val  <= eg_symbol;
+                            eg_in_suffix   <= 1'b1;
+                        end
+                    end else begin
+                        if (eg_suffix_cnt > 5'd0) begin
+                            eg_suffix_cnt <= eg_suffix_cnt - 5'd1;
+                        end 
+                        if (eg_suffix_cnt == 5'd1 || eg_suffix_cnt == 5'd0) begin
+                            state <= S_MVD1_Y_SIGN;
+                        end
+                    end
+                end
+            end
+
+            S_MVD1_Y_SIGN: begin
+                if (bin_rdy) state <= S_MVP1;
+            end
+`else
             S_MVD1_X_GT0: begin
                 if (bin_rdy) state <= (abs_mvd_l1_x == 0) ? S_MVD1_Y_GT0 : S_MVD1_X_GT1;
             end
@@ -718,6 +939,7 @@ module syntax_pred #(
             S_MVD1_Y_SIGN: begin
                 if (bin_rdy) state <= S_MVP1;
             end
+`endif
 
             S_MVP1: begin
                 if (bin_rdy) state <= S_DONE;
