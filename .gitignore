@@ -65,6 +65,7 @@ synth/synth_log.txt
 *.hex
 *.bmp
 Trace*.txt
+dec_*.txt
 test.png
 test_dec.png
 test_hw.png
