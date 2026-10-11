@@ -362,20 +362,28 @@ module tb_b_frame_encoder;
                  $time, uut.gop_frame_poc, uut.gop_frame_slice_type, uut.ctu_addr, uut.cabac_state);
     end
 
-    // Hardware Reconstructed Frame Capture
+    // Hardware Reconstructed Frame Capture (Post-Deblock)
     reg [`PIXEL_WIDTH-1:0] hw_recon_y  [0:TOTAL_FRAMES-1][0:FRAME_PIXELS_Y-1];
     reg [`PIXEL_WIDTH-1:0] hw_recon_cb [0:TOTAL_FRAMES-1][0:FRAME_PIXELS_C-1];
     reg [`PIXEL_WIDTH-1:0] hw_recon_cr [0:TOTAL_FRAMES-1][0:FRAME_PIXELS_C-1];
+
+    // Hardware Reconstructed Frame Capture (Pre-Deblock / Raw Recon)
+    reg [`PIXEL_WIDTH-1:0] hw_pre_recon_y  [0:TOTAL_FRAMES-1][0:FRAME_PIXELS_Y-1];
+    reg [`PIXEL_WIDTH-1:0] hw_pre_recon_cb [0:TOTAL_FRAMES-1][0:FRAME_PIXELS_C-1];
+    reg [`PIXEL_WIDTH-1:0] hw_pre_recon_cr [0:TOTAL_FRAMES-1][0:FRAME_PIXELS_C-1];
 
     integer hi_init, hf_init;
     initial begin
         for (hf_init = 0; hf_init < TOTAL_FRAMES; hf_init = hf_init + 1) begin
             for (hi_init = 0; hi_init < FRAME_PIXELS_Y; hi_init = hi_init + 1) begin
                 hw_recon_y[hf_init][hi_init] = `MID_GRAY_SAMPLE;
+                hw_pre_recon_y[hf_init][hi_init] = `MID_GRAY_SAMPLE;
             end
             for (hi_init = 0; hi_init < FRAME_PIXELS_C; hi_init = hi_init + 1) begin
                 hw_recon_cb[hf_init][hi_init] = `MID_GRAY_SAMPLE;
                 hw_recon_cr[hf_init][hi_init] = `MID_GRAY_SAMPLE;
+                hw_pre_recon_cb[hf_init][hi_init] = `MID_GRAY_SAMPLE;
+                hw_pre_recon_cr[hf_init][hi_init] = `MID_GRAY_SAMPLE;
             end
         end
     end
@@ -388,6 +396,14 @@ module tb_b_frame_encoder;
                 hw_recon_cb[uut.gop_frame_poc][uut.filter_out_y * CHROMA_WIDTH + uut.filter_out_x] <= uut.filter_out_pixel;
             else if (uut.filter_out_comp == 2'd2)
                 hw_recon_cr[uut.gop_frame_poc][uut.filter_out_y * CHROMA_WIDTH + uut.filter_out_x] <= uut.filter_out_pixel;
+        end
+        if (uut.recon_out_valid) begin
+            if (uut.recon_out_comp == 2'd0)
+                hw_pre_recon_y[uut.gop_frame_poc][uut.abs_recon_y * TB_WIDTH + uut.abs_recon_x] <= uut.recon_out_pixel;
+            else if (uut.recon_out_comp == 2'd1)
+                hw_pre_recon_cb[uut.gop_frame_poc][uut.abs_recon_y_chr * CHROMA_WIDTH + uut.abs_recon_x_chr] <= uut.recon_out_pixel;
+            else if (uut.recon_out_comp == 2'd2)
+                hw_pre_recon_cr[uut.gop_frame_poc][uut.abs_recon_y_chr * CHROMA_WIDTH + uut.abs_recon_x_chr] <= uut.recon_out_pixel;
         end
     end
 
@@ -588,6 +604,22 @@ module tb_b_frame_encoder;
             end
             $fclose(fd_hw);
             $display("Dumping Hardware Reconstructed frame: hw_recon.yuv complete.");
+
+            // Dump Hardware Reconstructed Frame Before Deblocking to hw_recon_pre.yuv (10-bit Little Endian)
+            fd_hw = $fopen("hw_recon_pre.yuv", "wb");
+            for (h_f = 0; h_f < TOTAL_FRAMES; h_f = h_f + 1) begin
+                for (h_i = 0; h_i < FRAME_PIXELS_Y; h_i = h_i + 1) begin
+                    $fwrite(fd_hw, "%c%c", hw_pre_recon_y[h_f][h_i][7:0], {6'd0, hw_pre_recon_y[h_f][h_i][9:8]});
+                end
+                for (h_i = 0; h_i < FRAME_PIXELS_C; h_i = h_i + 1) begin
+                    $fwrite(fd_hw, "%c%c", hw_pre_recon_cb[h_f][h_i][7:0], {6'd0, hw_pre_recon_cb[h_f][h_i][9:8]});
+                end
+                for (h_i = 0; h_i < FRAME_PIXELS_C; h_i = h_i + 1) begin
+                    $fwrite(fd_hw, "%c%c", hw_pre_recon_cr[h_f][h_i][7:0], {6'd0, hw_pre_recon_cr[h_f][h_i][9:8]});
+                end
+            end
+            $fclose(fd_hw);
+            $display("Dumping Hardware Pre-Deblock Reconstructed frame: hw_recon_pre.yuv complete.");
 
             // Print Pipeline Profiling Scorecard
             $display("\n====================================================================================================");

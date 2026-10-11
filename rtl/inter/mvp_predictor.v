@@ -324,18 +324,20 @@ module mvp_predictor #(
         end else begin
             valid_out <= valid_in;
 
-            // AMVP: 2 candidates (zero-padded if not found)
-            amvp_mv_x_flat[MV_W*0 +: MV_W] <= amvp_out0_x;
-            amvp_mv_x_flat[MV_W*1 +: MV_W] <= amvp_out1_x;
-            amvp_mv_y_flat[MV_W*0 +: MV_W] <= amvp_out0_y;
-            amvp_mv_y_flat[MV_W*1 +: MV_W] <= amvp_out1_y;
+            if (valid_in) begin
+                // AMVP: 2 candidates (zero-padded if not found)
+                amvp_mv_x_flat[MV_W*0 +: MV_W] <= amvp_out0_x;
+                amvp_mv_x_flat[MV_W*1 +: MV_W] <= amvp_out1_x;
+                amvp_mv_y_flat[MV_W*0 +: MV_W] <= amvp_out0_y;
+                amvp_mv_y_flat[MV_W*1 +: MV_W] <= amvp_out1_y;
 
-            // Merge: up to 5 candidates (zero-padded)
-            merge_valid <= mc_v;
-            for (i = 0; i < N_MERGE; i = i + 1) begin
-                merge_mv_x_flat[MV_W*i +: MV_W]  <= mc_x[i];
-                merge_mv_y_flat[MV_W*i +: MV_W]  <= mc_y[i];
-                merge_ref_flat [RIF_W*i +: RIF_W] <= mc_r[i];
+                // Merge: up to 5 candidates (zero-padded)
+                merge_valid <= mc_v;
+                for (i = 0; i < N_MERGE; i = i + 1) begin
+                    merge_mv_x_flat[MV_W*i +: MV_W]  <= mc_x[i];
+                    merge_mv_y_flat[MV_W*i +: MV_W]  <= mc_y[i];
+                    merge_ref_flat [RIF_W*i +: RIF_W] <= mc_r[i];
+                end
             end
         end
     end

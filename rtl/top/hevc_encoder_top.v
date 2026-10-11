@@ -541,8 +541,15 @@ module hevc_encoder_top #(
     wire        md_best_skip_flag;
     wire        md_best_merge_flag;
     wire [2:0]  md_best_merge_idx;
-    wire [11:0] md_best_inter_mv_x;
-    wire [11:0] md_best_inter_mv_y;
+    wire [11:0] md_best_inter_mv_x_raw;
+    wire [11:0] md_best_inter_mv_y_raw;
+`ifdef DIAGNOSTIC_INTEGER_MV
+    wire [11:0] md_best_inter_mv_x = {md_best_inter_mv_x_raw[11:3], 3'b000};
+    wire [11:0] md_best_inter_mv_y = {md_best_inter_mv_y_raw[11:3], 3'b000};
+`else
+    wire [11:0] md_best_inter_mv_x = md_best_inter_mv_x_raw;
+    wire [11:0] md_best_inter_mv_y = md_best_inter_mv_y_raw;
+`endif
 
     reg         md_latched_is_intra;
     reg [5:0]   md_latched_intra_mode;
@@ -572,6 +579,14 @@ module hevc_encoder_top #(
         end
     end
 
+    wire        md_eff_is_intra   = md_mode_valid ? md_best_is_intra   : md_latched_is_intra;
+    wire [5:0]  md_eff_intra_mode = md_mode_valid ? md_best_intra_mode : md_latched_intra_mode;
+    wire        md_eff_skip_flag  = md_mode_valid ? md_best_skip_flag  : md_latched_skip_flag;
+    wire        md_eff_merge_flag = md_mode_valid ? md_best_merge_flag : md_latched_merge_flag;
+    wire [2:0]  md_eff_merge_idx  = md_mode_valid ? md_best_merge_idx  : md_latched_merge_idx;
+    wire [11:0] md_eff_inter_mv_x = md_mode_valid ? md_best_inter_mv_x : md_latched_inter_mv_x;
+    wire [11:0] md_eff_inter_mv_y = md_mode_valid ? md_best_inter_mv_y : md_latched_inter_mv_y;
+
     reg         latched_cu_is_split;
     reg [1:0]   latched_cu_depth;
     reg [1:0]   latched_cu_split_ctx;
@@ -580,8 +595,8 @@ module hevc_encoder_top #(
     reg         latched_cu_skip;
     reg         latched_cu_merge;
     reg [2:0]   latched_cu_merge_idx;
-    reg [11:0]  latched_cu_mv_x;
-    reg [11:0]  latched_cu_mv_y;
+    reg signed [11:0]  latched_cu_mv_x;
+    reg signed [11:0]  latched_cu_mv_y;
     reg [5:0]   latched_cu_ctu_x;
     reg [5:0]   latched_cu_ctu_y;
 `ifdef REMEDIATION
@@ -614,13 +629,13 @@ module hevc_encoder_top #(
             latched_cu_is_split   <= node_split_start;
             latched_cu_depth      <= cu_depth[1:0];
             latched_cu_split_ctx  <= cu_split_ctx;
-            latched_cu_is_intra   <= md_best_is_intra;
-            latched_cu_intra_mode <= md_best_intra_mode;
-            latched_cu_skip       <= md_best_skip_flag;
-            latched_cu_merge      <= md_best_merge_flag;
-            latched_cu_merge_idx  <= md_best_merge_idx;
-            latched_cu_mv_x       <= md_best_inter_mv_x;
-            latched_cu_mv_y       <= md_best_inter_mv_y;
+            latched_cu_is_intra   <= md_eff_is_intra;
+            latched_cu_intra_mode <= md_eff_intra_mode;
+            latched_cu_skip       <= md_eff_skip_flag;
+            latched_cu_merge      <= md_eff_merge_flag;
+            latched_cu_merge_idx  <= md_eff_merge_idx;
+            latched_cu_mv_x       <= md_eff_inter_mv_x;
+            latched_cu_mv_y       <= md_eff_inter_mv_y;
             latched_cu_ctu_x      <= ctu_x;
             latched_cu_ctu_y      <= ctu_y;
 `ifdef REMEDIATION
@@ -691,8 +706,15 @@ module hevc_encoder_top #(
     );
 
     wire        search_done;
-    wire [11:0] search_best_mv_x;
-    wire [11:0] search_best_mv_y;
+    wire [11:0] search_best_mv_x_raw;
+    wire [11:0] search_best_mv_y_raw;
+`ifdef DIAGNOSTIC_INTEGER_MV
+    wire [11:0] search_best_mv_x = {search_best_mv_x_raw[11:3], 3'b000};
+    wire [11:0] search_best_mv_y = {search_best_mv_y_raw[11:3], 3'b000};
+`else
+    wire [11:0] search_best_mv_x = search_best_mv_x_raw;
+    wire [11:0] search_best_mv_y = search_best_mv_y_raw;
+`endif
     wire [11:0] search_best_sad;
     
     wire [31:0] md_best_rd_cost;
@@ -863,7 +885,7 @@ module hevc_encoder_top #(
                         left_col_valid[ui] <= 1'b0;
                     end
                 end
-                if (ctu_y == 6'd0) begin
+                if (ctu_y == 6'd0 && ctu_x == 6'd0) begin
                     for (ui = 0; ui < 16; ui = ui + 1) begin
                         above_row_valid[ui] <= 1'b0;
                     end
@@ -876,22 +898,22 @@ module hevc_encoder_top #(
                         if (uj >= cur_bx && uj < (cur_bx + cur_bs) &&
                             ui >= cur_by && ui < (cur_by + cur_bs)) begin
                             ctu_nbr_coded[ui][uj] <= 1'b1;
-                            ctu_nbr_inter[ui][uj] <= !md_best_is_intra;
-                            ctu_nbr_mv_x[ui][uj]  <= md_best_inter_mv_x[9:0];
-                            ctu_nbr_mv_y[ui][uj]  <= md_best_inter_mv_y[9:0];
+                            ctu_nbr_inter[ui][uj] <= !md_eff_is_intra;
+                            ctu_nbr_mv_x[ui][uj]  <= md_eff_inter_mv_x[9:0];
+                            ctu_nbr_mv_y[ui][uj]  <= md_eff_inter_mv_y[9:0];
 
                             // Update boundary buffers
                             if (uj == 3'd7) begin
                                 left_col_valid[ui] <= 1'b1;
-                                left_col_inter[ui] <= !md_best_is_intra;
-                                left_col_mv_x[ui]  <= md_best_inter_mv_x[9:0];
-                                left_col_mv_y[ui]  <= md_best_inter_mv_y[9:0];
+                                left_col_inter[ui] <= !md_eff_is_intra;
+                                left_col_mv_x[ui]  <= md_eff_inter_mv_x[9:0];
+                                left_col_mv_y[ui]  <= md_eff_inter_mv_y[9:0];
                             end
                             if (ui == 3'd7) begin
                                 above_row_valid[{ctu_x[0], uj[2:0]}] <= 1'b1;
-                                above_row_inter[{ctu_x[0], uj[2:0]}] <= !md_best_is_intra;
-                                above_row_mv_x[{ctu_x[0], uj[2:0]}]  <= md_best_inter_mv_x[9:0];
-                                above_row_mv_y[{ctu_x[0], uj[2:0]}]  <= md_best_inter_mv_y[9:0];
+                                above_row_inter[{ctu_x[0], uj[2:0]}] <= !md_eff_is_intra;
+                                above_row_mv_x[{ctu_x[0], uj[2:0]}]  <= md_eff_inter_mv_x[9:0];
+                                above_row_mv_y[{ctu_x[0], uj[2:0]}]  <= md_eff_inter_mv_y[9:0];
                             end
                         end
                     end
@@ -1005,8 +1027,8 @@ module hevc_encoder_top #(
         .best_rd_cost     (md_best_rd_cost),
         .best_is_intra    (md_best_is_intra),
         .best_intra_mode  (md_best_intra_mode),
-        .best_inter_mv_x  (md_best_inter_mv_x),
-        .best_inter_mv_y  (md_best_inter_mv_y),
+        .best_inter_mv_x  (md_best_inter_mv_x_raw),
+        .best_inter_mv_y  (md_best_inter_mv_y_raw),
         .best_merge_flag  (md_best_merge_flag),
         .best_merge_idx   (md_best_merge_idx),
         .best_skip_flag   (md_best_skip_flag)
@@ -1359,6 +1381,7 @@ module hevc_encoder_top #(
     wire [11:0] abs_recon_x     = {6'd0, recon_ctu_x, 6'd0} + {6'd0, recon_out_x[5:0]};
     wire [11:0] abs_recon_x_chr = {7'd0, recon_ctu_x, 5'd0} + {7'd0, recon_out_x[4:0]};
     wire [11:0] abs_recon_y     = {6'd0, recon_ctu_y, 6'd0} + {6'd0, recon_out_y[5:0]};
+    wire [11:0] abs_recon_y_chr = {7'd0, recon_ctu_y, 5'd0} + {7'd0, recon_out_y[4:0]};
 
     integer l_i;
     always @(posedge clk or negedge rst_n) begin
@@ -1876,8 +1899,8 @@ module hevc_encoder_top #(
         .mvp_x            (mvp_x),
         .mvp_y            (mvp_y),
         .search_done      (search_done),
-        .best_mv_x        (search_best_mv_x),
-        .best_mv_y        (search_best_mv_y),
+        .best_mv_x        (search_best_mv_x_raw),
+        .best_mv_y        (search_best_mv_y_raw),
         .best_sad         (search_best_sad),
         
         .mc_start         (mc_start),
@@ -2029,59 +2052,232 @@ module hevc_encoder_top #(
     wire [5:0] cur_sample_abs_cx = {latched_cu_ctu_x[0], 5'd0} + {1'b0, reg_tu_x[4:0]} + {1'b0, inter_out_x[4:0]};
     wire [5:0] cur_sample_abs_cy = {latched_cu_ctu_y[0], 5'd0} + {1'b0, reg_tu_y[4:0]} + {1'b0, inter_out_y[4:0]};
 
-    // Motion vector components in integer units (mv_qp >>> 2)
-    wire signed [11:0] mv_x_int = latched_cu_mv_x >>> 2;
-    wire signed [11:0] mv_y_int = latched_cu_mv_y >>> 2;
+    // Motion vector components in integer units and fractional phases
+    wire signed [11:0] mv_x_int = $signed(latched_cu_mv_x) >>> 2;
+    wire signed [11:0] mv_y_int = $signed(latched_cu_mv_y) >>> 2;
+    wire [1:0] luma_frac_x = latched_cu_mv_x[1:0];
+    wire [1:0] luma_frac_y = latched_cu_mv_y[1:0];
 
-    // Reference sample coordinates clamped to picture boundary
-    wire [6:0] ref_x_luma = clamp_128($signed({6'd0, cur_sample_abs_x}) + mv_x_int);
-    wire [6:0] ref_y_luma = clamp_128($signed({6'd0, cur_sample_abs_y}) + mv_y_int);
-
-    wire [5:0] ref_x_chroma = clamp_64($signed({7'd0, cur_sample_abs_cx}) + (mv_x_int >>> 1));
-    wire [5:0] ref_y_chroma = clamp_64($signed({7'd0, cur_sample_abs_cy}) + (mv_y_int >>> 1));
+    // Chroma: MV in 1/8 units equals luma MV in 1/4 units (Clause 8.5.3.2.1)
+    wire signed [11:0] mv_xc_int = $signed(latched_cu_mv_x) >>> 3;
+    wire signed [11:0] mv_yc_int = $signed(latched_cu_mv_y) >>> 3;
+    wire [2:0] chroma_frac_x = latched_cu_mv_x[2:0];
+    wire [2:0] chroma_frac_y = latched_cu_mv_y[2:0];
 
     // Reference slot index from GOP controller
     wire [2:0] ref_slot_0 = ref_l0[2:0];
     wire [2:0] ref_slot_1 = ref_l1[2:0];
 
-    // Reference pixel lookups from DPB
-`ifdef SYNTHESIS
-    reg [9:0] ref_luma_l0, ref_cb_l0, ref_cr_l0;
-    reg [9:0] ref_luma_l1, ref_cb_l1, ref_cr_l1;
-
-    always @(posedge clk) begin
-        ref_luma_l0 <= dpb_luma_ram_l0[{ref_slot_0[0], ref_y_luma, ref_x_luma}];
-        ref_cb_l0   <= dpb_cb_ram_l0[{ref_slot_0[0], ref_y_chroma, ref_x_chroma}];
-        ref_cr_l0   <= dpb_cr_ram_l0[{ref_slot_0[0], ref_y_chroma, ref_x_chroma}];
-
-        ref_luma_l1 <= dpb_luma_ram_l1[{ref_slot_1[0], ref_y_luma, ref_x_luma}];
-        ref_cb_l1   <= dpb_cb_ram_l1[{ref_slot_1[0], ref_y_chroma, ref_x_chroma}];
-        ref_cr_l1   <= dpb_cr_ram_l1[{ref_slot_1[0], ref_y_chroma, ref_x_chroma}];
-    end
-`else
-    wire [9:0] ref_luma_l0 = dpb_luma_ram[ref_slot_0[0]][{ref_y_luma, ref_x_luma}];
-    wire [9:0] ref_cb_l0   = dpb_cb_ram[ref_slot_0[0]][{ref_y_chroma, ref_x_chroma}];
-    wire [9:0] ref_cr_l0   = dpb_cr_ram[ref_slot_0[0]][{ref_y_chroma, ref_x_chroma}];
-
-    wire [9:0] ref_luma_l1 = dpb_luma_ram[ref_slot_1[0]][{ref_y_luma, ref_x_luma}];
-    wire [9:0] ref_cb_l1   = dpb_cb_ram[ref_slot_1[0]][{ref_y_chroma, ref_x_chroma}];
-    wire [9:0] ref_cr_l1   = dpb_cr_ram[ref_slot_1[0]][{ref_y_chroma, ref_x_chroma}];
-`endif
-
-    // Prediction pixel multiplexer with optional Bi-prediction averaging (11-bit addition avoids overflow)
     wire is_bi_pred = (ctu_slice_type == 2'd0); // B-slice: Average L0 and L1
 
-    wire [10:0] bi_luma_sum = {1'b0, ref_luma_l0} + {1'b0, ref_luma_l1} + 11'd1;
-    wire [10:0] bi_cb_sum   = {1'b0, ref_cb_l0}   + {1'b0, ref_cb_l1}   + 11'd1;
-    wire [10:0] bi_cr_sum   = {1'b0, ref_cr_l0}   + {1'b0, ref_cr_l1}   + 11'd1;
+    localparam PIXEL_WIDTH = `PIXEL_WIDTH;
 
-    wire [9:0] pred_luma_val = is_bi_pred ? bi_luma_sum[10:1] : ref_luma_l0;
-    wire [9:0] pred_cb_val   = is_bi_pred ? bi_cb_sum[10:1]   : ref_cb_l0;
-    wire [9:0] pred_cr_val   = is_bi_pred ? bi_cr_sum[10:1]   : ref_cr_l0;
+    function automatic [9:0] clip_bd10;
+        input signed [24:0] v;
+        begin
+            if (v < 25'sd0) clip_bd10 = 10'd0;
+            else if (v > 25'sd1023) clip_bd10 = 10'd1023;
+            else clip_bd10 = v[9:0];
+        end
+    endfunction
+
+    function automatic [9:0] get_win_sample;
+        input [PIXEL_WIDTH*64-1:0] flat;
+        input integer r, c;
+        begin
+            get_win_sample = flat[PIXEL_WIDTH*(r*8 + c) +: PIXEL_WIDTH];
+        end
+    endfunction
+
+    function automatic signed [15:0] filter_luma_subpel_interm;
+        input [1:0] fx;
+        input [1:0] fy;
+        input [PIXEL_WIDTH*64-1:0] win_flat;
+        reg signed [24:0] sum_h [0:7];
+        reg signed [17:0] h_int [0:7];
+        reg signed [24:0] sum_v;
+        integer r, k;
+        reg signed [6:0] c_h [0:7];
+        reg signed [6:0] c_v [0:7];
+        begin
+            case (fx)
+                2'd0: begin c_h[0]=0; c_h[1]=0; c_h[2]=0; c_h[3]=64; c_h[4]=0; c_h[5]=0; c_h[6]=0; c_h[7]=0; end
+                2'd1: begin c_h[0]=-1; c_h[1]=4; c_h[2]=-10; c_h[3]=58; c_h[4]=17; c_h[5]=-5; c_h[6]=1; c_h[7]=0; end
+                2'd2: begin c_h[0]=-1; c_h[1]=4; c_h[2]=-11; c_h[3]=40; c_h[4]=40; c_h[5]=-11; c_h[6]=4; c_h[7]=-1; end
+                default: begin c_h[0]=0; c_h[1]=1; c_h[2]=-5; c_h[3]=17; c_h[4]=58; c_h[5]=-10; c_h[6]=4; c_h[7]=-1; end
+            endcase
+            case (fy)
+                2'd0: begin c_v[0]=0; c_v[1]=0; c_v[2]=0; c_v[3]=64; c_v[4]=0; c_v[5]=0; c_v[6]=0; c_v[7]=0; end
+                2'd1: begin c_v[0]=-1; c_v[1]=4; c_v[2]=-10; c_v[3]=58; c_v[4]=17; c_v[5]=-5; c_v[6]=1; c_v[7]=0; end
+                2'd2: begin c_v[0]=-1; c_v[1]=4; c_v[2]=-11; c_v[3]=40; c_v[4]=40; c_v[5]=-11; c_v[6]=4; c_v[7]=-1; end
+                default: begin c_v[0]=0; c_v[1]=1; c_v[2]=-5; c_v[3]=17; c_v[4]=58; c_v[5]=-10; c_v[6]=4; c_v[7]=-1; end
+            endcase
+
+            if (fx == 2'd0 && fy == 2'd0) begin
+                filter_luma_subpel_interm = $signed({6'd0, get_win_sample(win_flat, 3, 3)}) <<< 4;
+            end else if (fy == 2'd0) begin
+                sum_h[3] = 0;
+                for (k = 0; k < 8; k = k + 1)
+                    sum_h[3] = sum_h[3] + c_h[k] * $signed({1'b0, get_win_sample(win_flat, 3, k)});
+                filter_luma_subpel_interm = sum_h[3] >>> 2;
+            end else if (fx == 2'd0) begin
+                sum_v = 0;
+                for (k = 0; k < 8; k = k + 1)
+                    sum_v = sum_v + c_v[k] * $signed({1'b0, get_win_sample(win_flat, k, 3)});
+                filter_luma_subpel_interm = sum_v >>> 2;
+            end else begin
+                // Two-pass HV
+                for (r = 0; r < 8; r = r + 1) begin
+                    sum_h[r] = 0;
+                    for (k = 0; k < 8; k = k + 1)
+                        sum_h[r] = sum_h[r] + c_h[k] * $signed({1'b0, get_win_sample(win_flat, r, k)});
+                    h_int[r] = sum_h[r] >>> 2; // Plain truncation per Clause 8.5.3.3.3
+                end
+                sum_v = 0;
+                for (k = 0; k < 8; k = k + 1)
+                    sum_v = sum_v + c_v[k] * h_int[k];
+                filter_luma_subpel_interm = sum_v >>> 6;
+            end
+        end
+    endfunction
+
+    function automatic signed [15:0] filter_chroma_subpel_interm;
+        input [2:0] fx;
+        input [2:0] fy;
+        input [PIXEL_WIDTH*16-1:0] win_flat;
+        reg signed [24:0] sum_h [0:3];
+        reg signed [17:0] h_int [0:3];
+        reg signed [24:0] sum_v;
+        integer r, k;
+        reg signed [6:0] c_h [0:3];
+        reg signed [6:0] c_v [0:3];
+        begin
+            case (fx)
+                3'd0: begin c_h[0]=0;  c_h[1]=64; c_h[2]=0;  c_h[3]=0;  end
+                3'd1: begin c_h[0]=-2; c_h[1]=58; c_h[2]=10; c_h[3]=-2; end
+                3'd2: begin c_h[0]=-4; c_h[1]=54; c_h[2]=16; c_h[3]=-2; end
+                3'd3: begin c_h[0]=-6; c_h[1]=46; c_h[2]=28; c_h[3]=-4; end
+                3'd4: begin c_h[0]=-4; c_h[1]=36; c_h[2]=36; c_h[3]=-4; end
+                3'd5: begin c_h[0]=-4; c_h[1]=28; c_h[2]=46; c_h[3]=-6; end
+                3'd6: begin c_h[0]=-2; c_h[1]=16; c_h[2]=54; c_h[3]=-4; end
+                default: begin c_h[0]=-2; c_h[1]=10; c_h[2]=58; c_h[3]=-2; end
+            endcase
+            case (fy)
+                3'd0: begin c_v[0]=0;  c_v[1]=64; c_v[2]=0;  c_v[3]=0;  end
+                3'd1: begin c_v[0]=-2; c_v[1]=58; c_v[2]=10; c_v[3]=-2; end
+                3'd2: begin c_v[0]=-4; c_v[1]=54; c_v[2]=16; c_v[3]=-2; end
+                3'd3: begin c_v[0]=-6; c_v[1]=46; c_v[2]=28; c_v[3]=-4; end
+                3'd4: begin c_v[0]=-4; c_v[1]=36; c_v[2]=36; c_v[3]=-4; end
+                3'd5: begin c_v[0]=-4; c_v[1]=28; c_v[2]=46; c_v[3]=-6; end
+                3'd6: begin c_v[0]=-2; c_v[1]=16; c_v[2]=54; c_v[3]=-4; end
+                default: begin c_v[0]=-2; c_v[1]=10; c_v[2]=58; c_v[3]=-2; end
+            endcase
+
+            if (fx == 3'd0 && fy == 3'd0) begin
+                filter_chroma_subpel_interm = $signed({6'd0, win_flat[PIXEL_WIDTH*(1*4 + 1) +: PIXEL_WIDTH]}) <<< 4;
+            end else if (fy == 3'd0) begin
+                sum_h[1] = 0;
+                for (k = 0; k < 4; k = k + 1)
+                    sum_h[1] = sum_h[1] + c_h[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(1*4 + k) +: PIXEL_WIDTH]});
+                filter_chroma_subpel_interm = sum_h[1] >>> 2;
+            end else if (fx == 3'd0) begin
+                sum_v = 0;
+                for (k = 0; k < 4; k = k + 1)
+                    sum_v = sum_v + c_v[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(k*4 + 1) +: PIXEL_WIDTH]});
+                filter_chroma_subpel_interm = sum_v >>> 2;
+            end else begin
+                // Two-pass HV
+                for (r = 0; r < 4; r = r + 1) begin
+                    sum_h[r] = 0;
+                    for (k = 0; k < 4; k = k + 1)
+                        sum_h[r] = sum_h[r] + c_h[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(r*4 + k) +: PIXEL_WIDTH]});
+                    h_int[r] = sum_h[r] >>> 2;
+                end
+                sum_v = 0;
+                for (k = 0; k < 4; k = k + 1)
+                    sum_v = sum_v + c_v[k] * h_int[k];
+                filter_chroma_subpel_interm = sum_v >>> 6;
+            end
+        end
+    endfunction
+
+`ifdef SYNTHESIS
+    // Synthesizable path: streaming subpel filter
+    wire [9:0] synth_pred_pixel;
+    streaming_subpel_filter #(
+        .PIXEL_WIDTH(`PIXEL_WIDTH)
+    ) u_synth_subpel_filter (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .valid_in   (inter_pred_valid),
+        .comp       (reg_tu_comp),
+        .is_bi_pred (is_bi_pred),
+        .frac_x     (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
+        .frac_y     (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
+        .win_l0_flat(640'd0),
+        .win_l1_flat(640'd0),
+        .valid_out  (),
+        .pred_pixel (synth_pred_pixel)
+    );
+    assign inter_pred_pixel = synth_pred_pixel;
+`else
+    // Stage 2a Behavioral Model: Zero-latency window lookup from DPB RAMs
+    reg [PIXEL_WIDTH*64-1:0] win_luma_l0_flat;
+    reg [PIXEL_WIDTH*64-1:0] win_luma_l1_flat;
+    reg [PIXEL_WIDTH*16-1:0] win_cb_l0_flat;
+    reg [PIXEL_WIDTH*16-1:0] win_cb_l1_flat;
+    reg [PIXEL_WIDTH*16-1:0] win_cr_l0_flat;
+    reg [PIXEL_WIDTH*16-1:0] win_cr_l1_flat;
+
+    wire signed [12:0] luma_x_base = $signed({6'd0, cur_sample_abs_x}) + mv_x_int;
+    wire signed [12:0] luma_y_base = $signed({6'd0, cur_sample_abs_y}) + mv_y_int;
+
+    wire signed [12:0] chroma_x_base = $signed({7'd0, cur_sample_abs_cx}) + mv_xc_int;
+    wire signed [12:0] chroma_y_base = $signed({7'd0, cur_sample_abs_cy}) + mv_yc_int;
+
+    integer wy, wx;
+    always @(*) begin
+        for (wy = 0; wy < 8; wy = wy + 1) begin
+            for (wx = 0; wx < 8; wx = wx + 1) begin
+                win_luma_l0_flat[PIXEL_WIDTH*(wy*8 + wx) +: PIXEL_WIDTH] =
+                    dpb_luma_ram[ref_slot_0[0]][{clamp_128(luma_y_base + wy - 3), clamp_128(luma_x_base + wx - 3)}];
+                win_luma_l1_flat[PIXEL_WIDTH*(wy*8 + wx) +: PIXEL_WIDTH] =
+                    dpb_luma_ram[ref_slot_1[0]][{clamp_128(luma_y_base + wy - 3), clamp_128(luma_x_base + wx - 3)}];
+            end
+        end
+        for (wy = 0; wy < 4; wy = wy + 1) begin
+            for (wx = 0; wx < 4; wx = wx + 1) begin
+                win_cb_l0_flat[PIXEL_WIDTH*(wy*4 + wx) +: PIXEL_WIDTH] =
+                    dpb_cb_ram[ref_slot_0[0]][{clamp_64(chroma_y_base + wy - 1), clamp_64(chroma_x_base + wx - 1)}];
+                win_cb_l1_flat[PIXEL_WIDTH*(wy*4 + wx) +: PIXEL_WIDTH] =
+                    dpb_cb_ram[ref_slot_1[0]][{clamp_64(chroma_y_base + wy - 1), clamp_64(chroma_x_base + wx - 1)}];
+                win_cr_l0_flat[PIXEL_WIDTH*(wy*4 + wx) +: PIXEL_WIDTH] =
+                    dpb_cr_ram[ref_slot_0[0]][{clamp_64(chroma_y_base + wy - 1), clamp_64(chroma_x_base + wx - 1)}];
+                win_cr_l1_flat[PIXEL_WIDTH*(wy*4 + wx) +: PIXEL_WIDTH] =
+                    dpb_cr_ram[ref_slot_1[0]][{clamp_64(chroma_y_base + wy - 1), clamp_64(chroma_x_base + wx - 1)}];
+            end
+        end
+    end
+
+    wire signed [15:0] luma_interm_l0 = filter_luma_subpel_interm(luma_frac_x, luma_frac_y, win_luma_l0_flat);
+    wire signed [15:0] luma_interm_l1 = filter_luma_subpel_interm(luma_frac_x, luma_frac_y, win_luma_l1_flat);
+    wire signed [15:0] cb_interm_l0   = filter_chroma_subpel_interm(chroma_frac_x, chroma_frac_y, win_cb_l0_flat);
+    wire signed [15:0] cb_interm_l1   = filter_chroma_subpel_interm(chroma_frac_x, chroma_frac_y, win_cb_l1_flat);
+    wire signed [15:0] cr_interm_l0   = filter_chroma_subpel_interm(chroma_frac_x, chroma_frac_y, win_cr_l0_flat);
+    wire signed [15:0] cr_interm_l1   = filter_chroma_subpel_interm(chroma_frac_x, chroma_frac_y, win_cr_l1_flat);
+
+    wire [9:0] pred_luma_val = is_bi_pred ? clip_bd10((luma_interm_l0 + luma_interm_l1 + 32'sd16) >>> 5)
+                                          : clip_bd10((luma_interm_l0 + 32'sd8) >>> 4);
+    wire [9:0] pred_cb_val   = is_bi_pred ? clip_bd10((cb_interm_l0 + cb_interm_l1 + 32'sd16) >>> 5)
+                                          : clip_bd10((cb_interm_l0 + 32'sd8) >>> 4);
+    wire [9:0] pred_cr_val   = is_bi_pred ? clip_bd10((cr_interm_l0 + cr_interm_l1 + 32'sd16) >>> 5)
+                                          : clip_bd10((cr_interm_l0 + 32'sd8) >>> 4);
 
     assign inter_pred_pixel = (reg_tu_comp == 2'd0) ? pred_luma_val :
                               (reg_tu_comp == 2'd1) ? pred_cb_val :
                                                       pred_cr_val;
+
+`endif
 
     wire        intra_out_valid;
     wire [9:0]  intra_out_pixel;
@@ -3031,7 +3227,7 @@ module hevc_encoder_top #(
                     for (m_init_y = 0; m_init_y < 8; m_init_y = m_init_y + 1) begin
                         if (m_init_x >= curr_cu_bx && m_init_x < curr_cu_bx + curr_cu_bsize &&
                             m_init_y >= curr_cu_by && m_init_y < curr_cu_by + curr_cu_bsize) begin
-                            ctu_intra_mode_map[m_init_x][m_init_y] <= md_best_is_intra ? md_best_intra_mode : 6'd1;
+                            ctu_intra_mode_map[m_init_x][m_init_y] <= md_eff_is_intra ? md_eff_intra_mode : 6'd1;
                         end
                     end
                 end

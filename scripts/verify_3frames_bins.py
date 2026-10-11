@@ -2,7 +2,8 @@ import re
 
 enc_bins_by_poc = {0: [], 1: [], 2: []}
 cur_poc = 0
-with open(r'C:\Users\Admin\.gemini\antigravity\brain\3c9aaba0-0abe-459a-a1b4-9c76f03d97d8\.system_generated\tasks\task-1658.log', 'r', errors='ignore') as f:
+enc_log_path = 'transcript'
+with open(enc_log_path, 'r', errors='ignore') as f:
     for line in f:
         if 'Started frame POC=0' in line: cur_poc = 0
         elif 'Started frame POC=1' in line: cur_poc = 1
@@ -19,8 +20,14 @@ with open(r'C:\Users\Admin\.gemini\antigravity\brain\3c9aaba0-0abe-459a-a1b4-9c7
 
 dec_bins_by_poc = {0: [], 1: [], 2: []}
 cur_poc = 0
-with open('dec_output_3frames.txt', 'r', encoding='utf-16') as f:
-    for line in f:
+try:
+    with open('dec_output_3frames.txt', 'r', encoding='utf-16') as f:
+        dec_lines = f.readlines()
+except Exception:
+    with open('dec_output_3frames.txt', 'r', encoding='utf-8', errors='ignore') as f:
+        dec_lines = f.readlines()
+
+for line in dec_lines:
         m_poc = re.search(r'POC\s+(\d+)\s+TId:', line)
         if m_poc:
             cur_poc = int(m_poc.group(1)) + 1

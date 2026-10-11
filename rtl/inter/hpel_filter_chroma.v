@@ -76,8 +76,9 @@ module hpel_filter_chroma #(
 
     // Derived — do not override
     parameter BLK_EXT     = BLK_SIZE + 3,         //  7: 1 border before + 2 after
-    parameter H_INT_W     = PIXEL_WIDTH + 8,      // 18: H intermediate (64× scale)
-    parameter HV_SUM_W    = PIXEL_WIDTH + 14      // 24: HV sum (4096× scale)
+    parameter H_INT_W     = PIXEL_WIDTH + 8,      // 18: H intermediate (16× scale after >>> 2)
+    parameter HV_SUM_W    = PIXEL_WIDTH + 14,     // 24: HV sum (1024× scale)
+    parameter INTERM_WIDTH = PIXEL_WIDTH + 6      // 16: unclipped intermediate representation (matching HM Short)
 )(
     input  wire clk,
     input  wire rst_n,
@@ -93,7 +94,10 @@ module hpel_filter_chroma #(
     output reg  valid_out,
     output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] h_out_flat,
     output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] v_out_flat,
-    output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] hv_out_flat
+    output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] hv_out_flat,
+    output reg  [INTERM_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] h_interm_flat,
+    output reg  [INTERM_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] v_interm_flat,
+    output reg  [INTERM_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] hv_interm_flat
 );
 
     // =========================================================================
@@ -206,7 +210,7 @@ module hpel_filter_chroma #(
                             ref_px(ref_ext_flat, i, j+1),
                             ref_px(ref_ext_flat, i, j+2),
                             ref_px(ref_ext_flat, i, j+3)
-                        );
+                        ) >>> 2; // Plain truncation per ITU-T H.265 Clause 8.5.3.3.3
                     end
                 end
             end
@@ -230,7 +234,7 @@ module hpel_filter_chroma #(
     // =========================================================================
     // STAGE 2 — Normalize H output, compute HV sums, pass V sum
     //
-    // H output: normalize s1_hint[rb + BLK_BORDER][cb] → (hint + 32) >> 6, clip
+    // H output: normalize s1_hint[rb + BLK_BORDER][cb] → (hint + 8) >> 4, clip
     //   BLK_BORDER=1 because the block's first row is at row 1 in extended coords
     //
     // HV sum: 4-tap V filter applied to s1_hint column cb, rows rb..rb+3
@@ -238,10 +242,11 @@ module hpel_filter_chroma #(
     //
     // V sum: pass-through for Stage 3 normalization
     // =========================================================================
-    reg [PIXEL_WIDTH-1:0]      s2_hout  [0:BLK_SIZE-1][0:BLK_SIZE-1];
-    reg signed [HV_SUM_W-1:0]  s2_hvsum [0:BLK_SIZE-1][0:BLK_SIZE-1];
-    reg signed [H_INT_W-1:0]   s2_vsum  [0:BLK_SIZE-1][0:BLK_SIZE-1];
-    reg                         s2_valid;
+    reg [PIXEL_WIDTH-1:0]      s2_hout      [0:BLK_SIZE-1][0:BLK_SIZE-1];
+    reg signed [HV_SUM_W-1:0]  s2_hvsum     [0:BLK_SIZE-1][0:BLK_SIZE-1];
+    reg signed [H_INT_W-1:0]   s2_vsum      [0:BLK_SIZE-1][0:BLK_SIZE-1];
+    reg signed [H_INT_W-1:0]   s2_hint_hold [0:BLK_SIZE-1][0:BLK_SIZE-1];
+    reg                        s2_valid;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -255,8 +260,9 @@ module hpel_filter_chroma #(
                     // ---- H output: normalize h_int at block row i+BLK_BORDER ----
                     begin : s2_h
                         reg signed [HV_SUM_W-1:0] sh;
-                        sh = (s1_hint[i + BLK_BORDER][j] + H_ROUND) >>> 6;
+                        sh = (s1_hint[i + BLK_BORDER][j] + 32'sd8) >>> 4;
                         s2_hout[i][j] <= clip_px(sh);
+                        s2_hint_hold[i][j] <= s1_hint[i + BLK_BORDER][j];
                     end
 
                     // ---- HV sum: 4-tap V on H-intermediates ----
@@ -279,15 +285,18 @@ module hpel_filter_chroma #(
     // =========================================================================
     // STAGE 3 — Normalize and pack all three outputs
     // H:  s2_hout  → already normalized, pack directly
-    // V:  (s2_vsum  + 32)   >> 6,  clip → v_out_flat
-    // HV: (s2_hvsum + 2048) >> 12, clip → hv_out_flat
+    // V:  (s2_vsum  + 32)  >> 6,  clip → v_out_flat
+    // HV: (s2_hvsum + 512) >> 10, clip → hv_out_flat
     // =========================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            valid_out   <= 1'b0;
-            h_out_flat  <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
-            v_out_flat  <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
-            hv_out_flat <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            valid_out      <= 1'b0;
+            h_out_flat     <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            v_out_flat     <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            hv_out_flat    <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            h_interm_flat  <= {(INTERM_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            v_interm_flat  <= {(INTERM_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            hv_interm_flat <= {(INTERM_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
         end else begin
             valid_out <= s2_valid;
 
@@ -297,20 +306,26 @@ module hpel_filter_chroma #(
                     // H: direct pack
                     h_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
                         <= s2_hout[i][j];
+                    h_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                        <= s2_hint_hold[i][j][INTERM_WIDTH-1:0];
 
                     // V: normalize
                     begin : s3_v
                         reg signed [HV_SUM_W-1:0] sv;
-                        sv = (s2_vsum[i][j] + H_ROUND) >>> 6;
+                        sv = (s2_vsum[i][j] + 32'sd32) >>> 6;
                         v_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH] <= clip_px(sv);
                     end
+                    v_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                        <= (s2_vsum[i][j] >>> 2);
 
                     // HV: normalize
                     begin : s3_hv
                         reg signed [HV_SUM_W-1:0] shv;
-                        shv = (s2_hvsum[i][j] + HV_ROUND) >>> 12;
+                        shv = (s2_hvsum[i][j] + 32'sd512) >>> 10;
                         hv_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH] <= clip_px(shv);
                     end
+                    hv_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                        <= (s2_hvsum[i][j] >>> 6);
                 end
             end
         end

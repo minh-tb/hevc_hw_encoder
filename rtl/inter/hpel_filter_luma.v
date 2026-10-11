@@ -76,8 +76,9 @@ module hpel_filter_luma #(
 
     // Derived — do not override
     parameter BLK_EXT     = BLK_SIZE + 7,         // 11: extended reference rows/cols
-    parameter H_INT_W     = PIXEL_WIDTH + 8,      // 18: H intermediate (64× pixel scale)
-    parameter HV_SUM_W    = PIXEL_WIDTH + 15      // 25: HV sum (4096× scale)
+    parameter H_INT_W     = PIXEL_WIDTH + 8,      // 18: H intermediate (16× pixel scale after >>> 2)
+    parameter HV_SUM_W    = PIXEL_WIDTH + 15,     // 25: HV sum (1024× scale)
+    parameter INTERM_WIDTH = PIXEL_WIDTH + 6      // 16: unclipped intermediate representation (matching HM Short)
 )(
     input  wire clk,
     input  wire rst_n,
@@ -92,9 +93,12 @@ module hpel_filter_luma #(
     // Three half-pel output blocks (all computed in parallel, same latency)
     // out[r][c] = out_flat[ PW*(BLK_SIZE*r + c) +: PW ]
     output reg  valid_out,
-    output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] h_out_flat,   // H half-pel
-    output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] v_out_flat,   // V half-pel
-    output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] hv_out_flat   // HV diagonal
+    output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] h_out_flat,   // H half-pel (uni-pred)
+    output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] v_out_flat,   // V half-pel (uni-pred)
+    output reg  [PIXEL_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] hv_out_flat,  // HV diagonal (uni-pred)
+    output reg  [INTERM_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] h_interm_flat,  // H 14-bit intermediate
+    output reg  [INTERM_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] v_interm_flat,  // V 14-bit intermediate
+    output reg  [INTERM_WIDTH*BLK_SIZE*BLK_SIZE - 1 : 0] hv_interm_flat  // HV 14-bit intermediate
 );
 
     // =========================================================================
@@ -201,7 +205,7 @@ module hpel_filter_luma #(
                             ref_px(ref_ext_flat, i, j+5),
                             ref_px(ref_ext_flat, i, j+6),
                             ref_px(ref_ext_flat, i, j+7)
-                        );
+                        ) >>> 2; // Plain truncation per ITU-T H.265 Clause 8.5.3.3.3 (NO +2 offset)
                     end
                 end
             end
@@ -230,7 +234,7 @@ module hpel_filter_luma #(
     // =========================================================================
     // STAGE 2 — Normalize H output, compute HV sums, pass V sum
     //
-    // h_out[rb][cb]:  normalize s1_hint[rb+3][cb] → (h_int+32)>>6, clip
+    // h_out[rb][cb]:  normalize s1_hint[rb+3][cb] → (h_int+8)>>4, clip
     //                 (rows 3..3+BLK_SIZE-1 of h_int = block rows)
     //
     // hv_sum[rb][cb]: V filter applied to s1_hint column cb, rows rb..rb+7
@@ -238,13 +242,11 @@ module hpel_filter_luma #(
     //
     // s2_vsum: pass-through of s1_vsum for normalization in Stage 3
     // =========================================================================
-    reg [PIXEL_WIDTH-1:0]      s2_hout  [0:BLK_SIZE-1][0:BLK_SIZE-1];
-    reg signed [HV_SUM_W-1:0]  s2_hvsum [0:BLK_SIZE-1][0:BLK_SIZE-1];
-    reg signed [H_INT_W-1:0]   s2_vsum  [0:BLK_SIZE-1][0:BLK_SIZE-1];
-    reg                         s2_valid;
-
-    localparam signed [31:0] H_ROUND  = 32;    // rounding for >>6 (H/V normalize): 2^5
-    localparam signed [31:0] HV_ROUND = 2048;  // rounding for >>12 (HV normalize): 2^11
+    reg [PIXEL_WIDTH-1:0]      s2_hout      [0:BLK_SIZE-1][0:BLK_SIZE-1];
+    reg signed [HV_SUM_W-1:0]  s2_hvsum     [0:BLK_SIZE-1][0:BLK_SIZE-1];
+    reg signed [H_INT_W-1:0]   s2_vsum      [0:BLK_SIZE-1][0:BLK_SIZE-1];
+    reg signed [H_INT_W-1:0]   s2_hint_hold [0:BLK_SIZE-1][0:BLK_SIZE-1];
+    reg                        s2_valid;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -256,15 +258,15 @@ module hpel_filter_luma #(
                 for (j = 0; j < BLK_SIZE; j = j + 1) begin
 
                     // ---- H output: normalize h_int at block row i+3 ----
-                    // HM: out = ClipBD((h_int + 32) >> 6, bitDepth)
+                    // HM: out = ClipBD((h_int + 8) >> 4, bitDepth)
                     begin : h_norm
                         reg signed [HV_SUM_W-1:0] shifted_h;
-                        shifted_h = (s1_hint[i+3][j] + H_ROUND) >>> 6;
+                        shifted_h = (s1_hint[i+3][j] + 32'sd8) >>> 4;
                         s2_hout[i][j] <= clip_px(shifted_h);
+                        s2_hint_hold[i][j] <= s1_hint[i+3][j];
                     end
 
                     // ---- HV sum: V filter on H intermediates (col j, rows i..i+7) ----
-                    // HM: second filter pass on unshifted H intermediate
                     begin : hv_sum_calc
                         s2_hvsum[i][j] <= fir8_hint(s1_frac_y,
                             s1_hint[i+0][j],
@@ -290,14 +292,17 @@ module hpel_filter_luma #(
     //
     // H output: already normalized (s2_hout), pack into h_out_flat
     // V output: (s2_vsum + 32) >> 6, clip → v_out_flat
-    // HV output: (s2_hvsum + 2048) >> 12, clip → hv_out_flat
+    // HV output: (s2_hvsum + 512) >> 10, clip → hv_out_flat
     // =========================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            valid_out  <= 1'b0;
-            h_out_flat  <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
-            v_out_flat  <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
-            hv_out_flat <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            valid_out      <= 1'b0;
+            h_out_flat     <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            v_out_flat     <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            hv_out_flat    <= {(PIXEL_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            h_interm_flat  <= {(INTERM_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            v_interm_flat  <= {(INTERM_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
+            hv_interm_flat <= {(INTERM_WIDTH*BLK_SIZE*BLK_SIZE){1'b0}};
         end else begin
             valid_out <= s2_valid;
 
@@ -307,24 +312,30 @@ module hpel_filter_luma #(
                     // H output — pass s2_hout directly
                     h_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
                         <= s2_hout[i][j];
+                    h_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                        <= s2_hint_hold[i][j][INTERM_WIDTH-1:0];
 
                     // V output — normalize s2_vsum
                     // HM: ClipBD((v_sum + 32) >> 6, bitDepth)
                     begin : v_norm
                         reg signed [HV_SUM_W-1:0] shifted_v;
-                        shifted_v = (s2_vsum[i][j] + H_ROUND) >>> 6;
+                        shifted_v = (s2_vsum[i][j] + 32'sd32) >>> 6;
                         v_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
                             <= clip_px(shifted_v);
                     end
+                    v_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                        <= (s2_vsum[i][j] >>> 2);
 
                     // HV output — normalize s2_hvsum
-                    // HM: ClipBD((hv_sum + 2048) >> 12, bitDepth)
+                    // HM / ITU-T 8.5.3.3.3: ClipBD((hv_sum + 512) >> 10, bitDepth)
                     begin : hv_norm
                         reg signed [HV_SUM_W-1:0] shifted_hv;
-                        shifted_hv = (s2_hvsum[i][j] + HV_ROUND) >>> 12;
+                        shifted_hv = (s2_hvsum[i][j] + 32'sd512) >>> 10;
                         hv_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
                             <= clip_px(shifted_hv);
                     end
+                    hv_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                        <= (s2_hvsum[i][j] >>> 6);
                 end
             end
         end
