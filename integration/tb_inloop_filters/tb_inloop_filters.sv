@@ -104,6 +104,10 @@ module tb_inloop_filters;
         logic [4095:0] cu_map_mvx_l1;
         logic [4095:0] cu_map_mvy_l1;
         logic [1535:0] cu_map_qp;
+        logic [255:0]  cu_map_edge_ver;
+        logic [255:0]  cu_map_edge_hor;
+        assign cu_map_edge_ver = {256{1'b1}};
+        assign cu_map_edge_hor = {256{1'b1}};
 
         always_comb begin
             for (int i=0; i<256; i++) begin

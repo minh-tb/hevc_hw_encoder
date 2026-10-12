@@ -38,6 +38,10 @@ module tb_deblock;
     logic [15:0][15:0][15:0] cu_map_mvx_l1;
     logic [15:0][15:0][15:0] cu_map_mvy_l1;
     logic [15:0][15:0][5:0]  cu_map_qp;
+    logic [255:0]            cu_map_edge_ver;
+    logic [255:0]            cu_map_edge_hor;
+    assign cu_map_edge_ver = {256{1'b1}};
+    assign cu_map_edge_hor = {256{1'b1}};
 
     // Pixel Read I/F
     logic         pix_rd_valid;

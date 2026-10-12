@@ -127,6 +127,8 @@ module tb_flaw_deblock_stages;
         .cu_map_mvx_l1(cu_map_mvx_l1),
         .cu_map_mvy_l1(cu_map_mvy_l1),
         .cu_map_qp(cu_map_qp),
+        .cu_map_edge_ver({256{1'b1}}),
+        .cu_map_edge_hor({256{1'b1}}),
         .pix_rd_valid(pix_rd_valid),
         .pix_rd_ready(pix_rd_ready),
         .pix_rd_x(pix_rd_x),

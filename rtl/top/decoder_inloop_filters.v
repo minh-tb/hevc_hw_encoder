@@ -201,6 +201,8 @@ module decoder_inloop_filters (
     reg [4095:0] cu_map_mvx_l1;
     reg [4095:0] cu_map_mvy_l1;
     reg [1535:0] cu_map_qp;
+    reg [255:0]  cu_map_edge_ver;
+    reg [255:0]  cu_map_edge_hor;
 
     integer map_i, map_j, c_k;
     wire [3:0] map_luma_log2 = (map_update_comp == 2'd0) ? map_update_size_log2 : (map_update_size_log2 + 3'd1);
@@ -226,6 +228,8 @@ module decoder_inloop_filters (
             cu_map_mvx_l1     <= 4096'd0;
             cu_map_mvy_l1     <= 4096'd0;
             cu_map_qp         <= 1536'd0;
+            cu_map_edge_ver   <= 256'd0;
+            cu_map_edge_hor   <= 256'd0;
 
             left_map_pred_mode  <= 16'd0;
             left_map_cbf_luma   <= 16'd0;
@@ -266,6 +270,8 @@ module decoder_inloop_filters (
             if (filter_state == S_DUMP && out_ready && dump_count == 13'd6143) begin
                 cu_map_cbf_luma   <= 256'd0;
                 cu_map_cbf_chroma <= 256'd0;
+                cu_map_edge_ver   <= 256'd0;
+                cu_map_edge_hor   <= 256'd0;
 
                 if (cur_ctu_x == 0 && cur_ctu_y == 0) begin
                     corner_pred_mode   <= cu_map_pred_mode[(15*16) + 15];
@@ -345,6 +351,11 @@ module decoder_inloop_filters (
                                 cu_map_bi_pred[(map_i*16)+map_j] <= map_update_bi_pred;
                                 cu_map_mvx_l1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
                                 cu_map_mvy_l1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
+
+                                if (map_j[3:0] == map_cx || (map_blk_mask == 4'b0000 && map_j[3:0] == 4'd8))
+                                    cu_map_edge_ver[(map_i*16)+map_j] <= 1'b1;
+                                if (map_i[3:0] == map_cy || (map_blk_mask == 4'b0000 && map_i[3:0] == 4'd8))
+                                    cu_map_edge_hor[(map_i*16)+map_j] <= 1'b1;
                             end
                         end
                     end
@@ -411,6 +422,8 @@ module decoder_inloop_filters (
         .cu_map_mvx_l1    (cu_map_mvx_l1),
         .cu_map_mvy_l1    (cu_map_mvy_l1),
         .cu_map_qp        (cu_map_qp),
+        .cu_map_edge_ver  (cu_map_edge_ver),
+        .cu_map_edge_hor  (cu_map_edge_hor),
         .pix_rd_valid   (db_pix_rd_valid),
         .pix_rd_ready   (db_pix_rd_ready),
         .pix_rd_x       (db_pix_rd_x),

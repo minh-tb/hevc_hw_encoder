@@ -105,12 +105,16 @@ module streaming_subpel_filter #(
         end
     endfunction
 
-    // Pixel extraction helper
+    // Pixel extraction helper (stride 8 for luma 8x8, stride 4 for chroma 4x4)
     function automatic [PIXEL_WIDTH-1:0] get_win_px;
         input [PIXEL_WIDTH*64-1:0] flat;
         input integer r, c;
+        input [1:0] c_comp;
         begin
-            get_win_px = flat[PIXEL_WIDTH*(r*8 + c) +: PIXEL_WIDTH];
+            if (c_comp == 2'd0)
+                get_win_px = flat[PIXEL_WIDTH*(r*8 + c) +: PIXEL_WIDTH];
+            else
+                get_win_px = flat[PIXEL_WIDTH*(r*4 + c) +: PIXEL_WIDTH];
         end
     endfunction
 
@@ -166,8 +170,8 @@ module streaming_subpel_filter #(
 
             if (comp == 2'd0) begin
                 // Luma (8x8)
-                s1_int_l0 <= get_win_px(win_l0_flat, 3, 3);
-                s1_int_l1 <= get_win_px(win_l1_flat, 3, 3);
+                s1_int_l0 <= get_win_px(win_l0_flat, 3, 3, comp);
+                s1_int_l1 <= get_win_px(win_l1_flat, 3, 3, comp);
 
                 // Horizontal rows 0..7
                 for (r_idx = 0; r_idx < 8; r_idx = r_idx + 1) begin
@@ -175,8 +179,8 @@ module streaming_subpel_filter #(
                     acc_l0 = 0;
                     acc_l1 = 0;
                     for (k_idx = 0; k_idx < 8; k_idx = k_idx + 1) begin
-                        acc_l0 = acc_l0 + get_luma_coeff(frac_x[1:0], k_idx[2:0]) * $signed({1'b0, get_win_px(win_l0_flat, r_idx, k_idx)});
-                        acc_l1 = acc_l1 + get_luma_coeff(frac_x[1:0], k_idx[2:0]) * $signed({1'b0, get_win_px(win_l1_flat, r_idx, k_idx)});
+                        acc_l0 = acc_l0 + get_luma_coeff(frac_x[1:0], k_idx[2:0]) * $signed({1'b0, get_win_px(win_l0_flat, r_idx, k_idx, comp)});
+                        acc_l1 = acc_l1 + get_luma_coeff(frac_x[1:0], k_idx[2:0]) * $signed({1'b0, get_win_px(win_l1_flat, r_idx, k_idx, comp)});
                     end
                     s1_hint_l0[r_idx] <= acc_l0 >>> 2;
                     s1_hint_l1[r_idx] <= acc_l1 >>> 2;
@@ -188,24 +192,24 @@ module streaming_subpel_filter #(
                     vacc_l0 = 0;
                     vacc_l1 = 0;
                     for (k_idx = 0; k_idx < 8; k_idx = k_idx + 1) begin
-                        vacc_l0 = vacc_l0 + get_luma_coeff(frac_y[1:0], k_idx[2:0]) * $signed({1'b0, get_win_px(win_l0_flat, k_idx, 3)});
-                        vacc_l1 = vacc_l1 + get_luma_coeff(frac_y[1:0], k_idx[2:0]) * $signed({1'b0, get_win_px(win_l1_flat, k_idx, 3)});
+                        vacc_l0 = vacc_l0 + get_luma_coeff(frac_y[1:0], k_idx[2:0]) * $signed({1'b0, get_win_px(win_l0_flat, k_idx, 3, comp)});
+                        vacc_l1 = vacc_l1 + get_luma_coeff(frac_y[1:0], k_idx[2:0]) * $signed({1'b0, get_win_px(win_l1_flat, k_idx, 3, comp)});
                     end
                     s1_vsum_l0 <= vacc_l0;
                     s1_vsum_l1 <= vacc_l1;
                 end
             end else begin
                 // Chroma (4x4)
-                s1_int_l0 <= get_win_px(win_l0_flat, 1, 1);
-                s1_int_l1 <= get_win_px(win_l1_flat, 1, 1);
+                s1_int_l0 <= get_win_px(win_l0_flat, 1, 1, comp);
+                s1_int_l1 <= get_win_px(win_l1_flat, 1, 1, comp);
 
                 for (r_idx = 0; r_idx < 4; r_idx = r_idx + 1) begin
                     reg signed [24:0] acc_l0, acc_l1;
                     acc_l0 = 0;
                     acc_l1 = 0;
                     for (k_idx = 0; k_idx < 4; k_idx = k_idx + 1) begin
-                        acc_l0 = acc_l0 + get_chroma_coeff(frac_x[2:0], k_idx[1:0]) * $signed({1'b0, get_win_px(win_l0_flat, r_idx, k_idx)});
-                        acc_l1 = acc_l1 + get_chroma_coeff(frac_x[2:0], k_idx[1:0]) * $signed({1'b0, get_win_px(win_l1_flat, r_idx, k_idx)});
+                        acc_l0 = acc_l0 + get_chroma_coeff(frac_x[2:0], k_idx[1:0]) * $signed({1'b0, get_win_px(win_l0_flat, r_idx, k_idx, comp)});
+                        acc_l1 = acc_l1 + get_chroma_coeff(frac_x[2:0], k_idx[1:0]) * $signed({1'b0, get_win_px(win_l1_flat, r_idx, k_idx, comp)});
                     end
                     s1_hint_l0[r_idx] <= acc_l0 >>> 2;
                     s1_hint_l1[r_idx] <= acc_l1 >>> 2;
@@ -216,8 +220,8 @@ module streaming_subpel_filter #(
                     vacc_l0 = 0;
                     vacc_l1 = 0;
                     for (k_idx = 0; k_idx < 4; k_idx = k_idx + 1) begin
-                        vacc_l0 = vacc_l0 + get_chroma_coeff(frac_y[2:0], k_idx[1:0]) * $signed({1'b0, get_win_px(win_l0_flat, k_idx, 1)});
-                        vacc_l1 = vacc_l1 + get_chroma_coeff(frac_y[2:0], k_idx[1:0]) * $signed({1'b0, get_win_px(win_l1_flat, k_idx, 1)});
+                        vacc_l0 = vacc_l0 + get_chroma_coeff(frac_y[2:0], k_idx[1:0]) * $signed({1'b0, get_win_px(win_l0_flat, k_idx, 1, comp)});
+                        vacc_l1 = vacc_l1 + get_chroma_coeff(frac_y[2:0], k_idx[1:0]) * $signed({1'b0, get_win_px(win_l1_flat, k_idx, 1, comp)});
                     end
                     s1_vsum_l0 <= vacc_l0;
                     s1_vsum_l1 <= vacc_l1;

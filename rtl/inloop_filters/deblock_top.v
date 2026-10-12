@@ -45,6 +45,8 @@ module deblock_top (
     input  wire [4095:0] cu_map_mvx_l1,
     input  wire [4095:0] cu_map_mvy_l1,
     input  wire [1535:0] cu_map_qp,
+    input  wire [255:0]  cu_map_edge_ver,
+    input  wire [255:0]  cu_map_edge_hor,
 
     //=========================================================================
     // Pixel buffer interface
@@ -184,7 +186,7 @@ module deblock_top (
 
     wire has_left_neighbor    = (cur_ctu_x > 10'd0);
     wire has_right_neighbor   = (cur_ctu_x < (cur_frame_w >> 6) - 10'd1);
-    wire [3:0] max_col_pos    = has_right_neighbor ? (max_pos - 4'd1) : max_pos;
+    wire [3:0] max_col_pos    = max_pos;
 
     // Derived edge coordinates:
     // When is_vert: edge_col is fixed for the edge (0 or tu_edge_target), edge_row sweeps along the edge (0..max_pos)
@@ -213,6 +215,11 @@ module deblock_top (
     wire [3:0] edge_row_cu;
     assign edge_col_cu = is_chroma ? {edge_col[2:0], 1'b0} : edge_col;
     assign edge_row_cu = is_chroma ? {edge_row[2:0], 1'b0} : edge_row;
+
+    wire is_boundary_edge = is_corner_stage ? 1'b1 :
+                            is_ctu_boundary ? 1'b1 :
+                            is_vert ? cu_map_edge_ver[(edge_row_cu * 16) + edge_col_cu] :
+                                      cu_map_edge_hor[(edge_row_cu * 16) + edge_col_cu];
 
     // P-side and Q-side 4×4 block indices
     wire [3:0] p_col, p_row, q_col, q_row;
@@ -446,10 +453,10 @@ module deblock_top (
                 end
                 S_BS_WAIT: begin
                     if (bs_out_valid) begin
-                        latched_bs      <= bs_result;
+                        latched_bs      <= is_boundary_edge ? bs_result : 2'd0;
                         latched_edge_qp <= bs_edge_qp;
                         bs_out_ready    <= 1'b1;
-                        if (bs_result == 2'd0) begin
+                        if (!is_boundary_edge || bs_result == 2'd0) begin
                             sample_grp <= is_chroma ? 3'd3 : 3'd0;
                             state      <= S_NEXT_EDGE;
                         end else begin
@@ -559,7 +566,7 @@ module deblock_top (
 `ifdef REMEDIATION
                             if (edge_stage < max_edge_stage) begin
                                 edge_stage      <= edge_stage + 3'd1;
-                                is_corner_stage <= (!is_vert && has_left_neighbor && (edge_stage == 3'd0));
+                                is_corner_stage <= 1'b0;
                                 state           <= S_BS_REQ;
                             end else begin
                                 state <= S_NEXT_PASS;
@@ -586,7 +593,7 @@ module deblock_top (
 `else
                         edge_stage      <= next_has_ctu_boundary ? 1'b0 : 1'b1;
 `endif
-                        is_corner_stage <= (!next_is_vert && (cur_ctu_x > 10'd0));
+                        is_corner_stage <= 1'b0;
                         edge_pos        <= 4'd0;
                         sample_grp      <= 3'd0;
                         state           <= S_BS_REQ;

@@ -1371,9 +1371,13 @@ module hevc_encoder_top #(
     reg [`PIXEL_WIDTH-1:0] line_buf_u  [0:(FRAME_WIDTH/2)-1];
     reg [`PIXEL_WIDTH-1:0] line_buf_v  [0:(FRAME_WIDTH/2)-1];
 
-    reg [`PIXEL_WIDTH-1:0] col_buf_y   [0:`CTU_SIZE-1];
-    reg [`PIXEL_WIDTH-1:0] col_buf_u   [0:(`CTU_SIZE/2)-1];
-    reg [`PIXEL_WIDTH-1:0] col_buf_v   [0:(`CTU_SIZE/2)-1];
+    reg [`PIXEL_WIDTH-1:0] col_buf_y   [0:3][0:`CTU_SIZE-1];
+    reg [`PIXEL_WIDTH-1:0] col_buf_u   [0:3][0:(`CTU_SIZE/2)-1];
+    reg [`PIXEL_WIDTH-1:0] col_buf_v   [0:3][0:(`CTU_SIZE/2)-1];
+
+    reg [`PIXEL_WIDTH-1:0] ctu_corner_y [0:3][0:3];
+    reg [`PIXEL_WIDTH-1:0] ctu_corner_u [0:3][0:3];
+    reg [`PIXEL_WIDTH-1:0] ctu_corner_v [0:3][0:3];
 
     reg [5:0] recon_ctu_x;
     reg [5:0] recon_ctu_y;
@@ -1384,6 +1388,7 @@ module hevc_encoder_top #(
     wire [11:0] abs_recon_y_chr = {7'd0, recon_ctu_y, 5'd0} + {7'd0, recon_out_y[4:0]};
 
     integer l_i;
+    integer cc_x, cc_y;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             for (l_i = 0; l_i < FRAME_WIDTH; l_i = l_i + 1) line_buf_y[l_i] <= `MID_GRAY_SAMPLE;
@@ -1391,10 +1396,17 @@ module hevc_encoder_top #(
                 line_buf_u[l_i] <= `MID_GRAY_SAMPLE;
                 line_buf_v[l_i] <= `MID_GRAY_SAMPLE;
             end
-            for (l_i = 0; l_i < `CTU_SIZE; l_i = l_i + 1) col_buf_y[l_i] <= `MID_GRAY_SAMPLE;
-            for (l_i = 0; l_i < (`CTU_SIZE/2); l_i = l_i + 1) begin
-                col_buf_u[l_i] <= `MID_GRAY_SAMPLE;
-                col_buf_v[l_i] <= `MID_GRAY_SAMPLE;
+            for (cc_x = 0; cc_x < 4; cc_x = cc_x + 1) begin
+                for (l_i = 0; l_i < `CTU_SIZE; l_i = l_i + 1) col_buf_y[cc_x][l_i] <= `MID_GRAY_SAMPLE;
+                for (l_i = 0; l_i < (`CTU_SIZE/2); l_i = l_i + 1) begin
+                    col_buf_u[cc_x][l_i] <= `MID_GRAY_SAMPLE;
+                    col_buf_v[cc_x][l_i] <= `MID_GRAY_SAMPLE;
+                end
+                for (cc_y = 0; cc_y < 4; cc_y = cc_y + 1) begin
+                    ctu_corner_y[cc_x][cc_y] <= `MID_GRAY_SAMPLE;
+                    ctu_corner_u[cc_x][cc_y] <= `MID_GRAY_SAMPLE;
+                    ctu_corner_v[cc_x][cc_y] <= `MID_GRAY_SAMPLE;
+                end
             end
         end else if (sync_frame_done_pulse) begin
             for (l_i = 0; l_i < FRAME_WIDTH; l_i = l_i + 1) line_buf_y[l_i] <= `MID_GRAY_SAMPLE;
@@ -1402,24 +1414,37 @@ module hevc_encoder_top #(
                 line_buf_u[l_i] <= `MID_GRAY_SAMPLE;
                 line_buf_v[l_i] <= `MID_GRAY_SAMPLE;
             end
-            for (l_i = 0; l_i < `CTU_SIZE; l_i = l_i + 1) col_buf_y[l_i] <= `MID_GRAY_SAMPLE;
-            for (l_i = 0; l_i < (`CTU_SIZE/2); l_i = l_i + 1) begin
-                col_buf_u[l_i] <= `MID_GRAY_SAMPLE;
-                col_buf_v[l_i] <= `MID_GRAY_SAMPLE;
+            for (cc_x = 0; cc_x < 4; cc_x = cc_x + 1) begin
+                for (l_i = 0; l_i < `CTU_SIZE; l_i = l_i + 1) col_buf_y[cc_x][l_i] <= `MID_GRAY_SAMPLE;
+                for (l_i = 0; l_i < (`CTU_SIZE/2); l_i = l_i + 1) begin
+                    col_buf_u[cc_x][l_i] <= `MID_GRAY_SAMPLE;
+                    col_buf_v[cc_x][l_i] <= `MID_GRAY_SAMPLE;
+                end
+                for (cc_y = 0; cc_y < 4; cc_y = cc_y + 1) begin
+                    ctu_corner_y[cc_x][cc_y] <= `MID_GRAY_SAMPLE;
+                    ctu_corner_u[cc_x][cc_y] <= `MID_GRAY_SAMPLE;
+                    ctu_corner_v[cc_x][cc_y] <= `MID_GRAY_SAMPLE;
+                end
             end
         end else if (recon_out_valid) begin
             if (recon_out_comp == 2'd0) begin
                 recon_y_ram[{recon_out_y[5:0], recon_out_x[5:0]}] <= recon_out_pixel;
                 if (recon_out_y[5:0] == 6'd63) line_buf_y[abs_recon_x] <= recon_out_pixel;
-                if (recon_out_x[5:0] == 6'd63) col_buf_y[recon_out_y[5:0]] <= recon_out_pixel;
+                if (recon_out_x[5:0] == 6'd63) col_buf_y[recon_ctu_x[1:0]][recon_out_y[5:0]] <= recon_out_pixel;
+                if (recon_out_x[5:0] == 6'd63 && recon_out_y[5:0] == 6'd63)
+                    ctu_corner_y[recon_ctu_x[1:0]][recon_ctu_y[1:0]] <= recon_out_pixel;
             end else if (recon_out_comp == 2'd1) begin
                 recon_u_ram[{recon_out_y[4:0], recon_out_x[4:0]}] <= recon_out_pixel;
                 if (recon_out_y[4:0] == 5'd31) line_buf_u[abs_recon_x_chr] <= recon_out_pixel;
-                if (recon_out_x[4:0] == 5'd31) col_buf_u[recon_out_y[4:0]] <= recon_out_pixel;
+                if (recon_out_x[4:0] == 5'd31) col_buf_u[recon_ctu_x[1:0]][recon_out_y[4:0]] <= recon_out_pixel;
+                if (recon_out_x[4:0] == 5'd31 && recon_out_y[4:0] == 5'd31)
+                    ctu_corner_u[recon_ctu_x[1:0]][recon_ctu_y[1:0]] <= recon_out_pixel;
             end else if (recon_out_comp == 2'd2) begin
                 recon_v_ram[{recon_out_y[4:0], recon_out_x[4:0]}] <= recon_out_pixel;
                 if (recon_out_y[4:0] == 5'd31) line_buf_v[abs_recon_x_chr] <= recon_out_pixel;
-                if (recon_out_x[4:0] == 5'd31) col_buf_v[recon_out_y[4:0]] <= recon_out_pixel;
+                if (recon_out_x[4:0] == 5'd31) col_buf_v[recon_ctu_x[1:0]][recon_out_y[4:0]] <= recon_out_pixel;
+                if (recon_out_x[4:0] == 5'd31 && recon_out_y[4:0] == 5'd31)
+                    ctu_corner_v[recon_ctu_x[1:0]][recon_ctu_y[1:0]] <= recon_out_pixel;
             end
         end
     end
@@ -1475,6 +1500,65 @@ module hevc_encoder_top #(
                              !idct_active && !idct_start && !idct_start_pre &&
                              (latched_cu_is_intra || mc_data_ready);
     
+    //-------------------------------------------------------------------------
+    // Unified Z-Scan Spatial Availability Engine (ITU-T H.265 Clause 6.4.1)
+    //-------------------------------------------------------------------------
+    // Bit-interleaved Morton index for 4x4 blocks in 64x64 CTU
+    function automatic [7:0] z_scan_idx_4x4;
+        input [3:0] x_blk; // x >> 2
+        input [3:0] y_blk; // y >> 2
+        begin
+            z_scan_idx_4x4 = {y_blk[3], x_blk[3], y_blk[2], x_blk[2], y_blk[1], x_blk[1], y_blk[0], x_blk[0]};
+        end
+    endfunction
+
+    // Spatial availability for Bottom-Left check sample (x-1, y+N)
+    function automatic check_bottom_left_avail;
+        input [5:0] x;      // TU origin within CTU
+        input [5:0] y;      // TU origin within CTU
+        input [5:0] n;      // TU size (4, 8, 16, 32)
+        input [11:0] pic_y; // Absolute picture row
+        input [5:0] ctu_x;  // CTU col
+        reg   [6:0] bl_y;
+        begin
+            bl_y = {1'b0, y} + {1'b0, n};
+            if (pic_y + {6'd0, n} >= FRAME_HEIGHT) begin
+                check_bottom_left_avail = 1'b0; // Outside picture bottom
+            end else if (bl_y >= 7'd64) begin
+                check_bottom_left_avail = 1'b0; // Outside current CTU bottom (not yet coded)
+            end else if (x == 6'd0) begin
+                check_bottom_left_avail = (ctu_x > 0); // In left CTU (already coded)
+            end else begin
+                // Inside current CTU: available iff z-scan order is prior to current TU
+                check_bottom_left_avail = (z_scan_idx_4x4((x - 6'd1) >> 2, bl_y[5:2]) < z_scan_idx_4x4(x >> 2, y >> 2));
+            end
+        end
+    endfunction
+
+    // Spatial availability for Top-Right check sample (x+N, y-1)
+    function automatic check_top_right_avail;
+        input [5:0] x;      // TU origin within CTU
+        input [5:0] y;      // TU origin within CTU
+        input [5:0] n;      // TU size (4, 8, 16, 32)
+        input [11:0] pic_x; // Absolute picture col
+        input [5:0] ctu_y;  // CTU row
+        reg   [6:0] tr_x;
+        begin
+            tr_x = {1'b0, x} + {1'b0, n};
+            if (pic_x + {6'd0, n} >= FRAME_WIDTH) begin
+                check_top_right_avail = 1'b0; // Outside picture right
+            end else if (y == 6'd0) begin
+                // Top CTU boundary: available iff above CTU exists
+                check_top_right_avail = (ctu_y > 0);
+            end else if (tr_x >= 7'd64) begin
+                check_top_right_avail = 1'b0; // Right CTU not yet coded
+            end else begin
+                // Inside current CTU: available iff z-scan order is prior to current TU
+                check_top_right_avail = (z_scan_idx_4x4(tr_x[5:2], (y - 6'd1) >> 2) < z_scan_idx_4x4(x >> 2, y >> 2));
+            end
+        end
+    endfunction
+
     // FIX: Synchronous SRAM read for recon_ram to prevent combinational synthesis failure
     wire is_luma_comp = (reg_tu_comp == 2'd0);
     
@@ -1482,17 +1566,28 @@ module hevc_encoder_top #(
     wire [5:0] tu_n = 6'd1 << reg_tu_size_log2;
     wire [5:0] max_ctu_dim = is_luma_comp ? 6'd63 : 6'd31;
 
+    // Normalized coordinates to 64x64 CTU grid for availability derivation
+    wire [5:0] tu_avail_x = is_luma_comp ? reg_tu_x : {reg_tu_x[4:0], 1'b0};
+    wire [5:0] tu_avail_y = is_luma_comp ? reg_tu_y : {reg_tu_y[4:0], 1'b0};
+    wire [5:0] tu_avail_n = is_luma_comp ? tu_n : {tu_n[4:0], 1'b0};
+    wire [11:0] tu_pic_x = ({6'd0, latched_cu_ctu_x, 6'd0}) + {6'd0, tu_avail_x};
+    wire [11:0] tu_pic_y = ({6'd0, latched_cu_ctu_y, 6'd0}) + {6'd0, tu_avail_y};
+
+    wire top_right_avail = check_top_right_avail(tu_avail_x, tu_avail_y, tu_avail_n, tu_pic_x, latched_cu_ctu_y);
+    wire bottom_left_avail = check_bottom_left_avail(tu_avail_x, tu_avail_y, tu_avail_n, tu_pic_y, latched_cu_ctu_x);
+
     wire [7:0] top_idx_rel = (intra_ref_idx >= 8'd1) ? (intra_ref_idx - 8'd1) : 8'd0;
     wire [7:0] left_idx_rel = (intra_ref_idx > intra_ref_half) ? (intra_ref_idx - intra_ref_half - 8'd1) : 8'd0;
 
     wire [6:0] top_col_unclamped = {1'b0, reg_tu_x} + {1'b0, top_idx_rel[5:0]};
-    wire top_right_avail = (reg_tu_y == 6'd0) || (reg_tu_x[reg_tu_size_log2] == 1'b0);
-    wire [5:0] top_col_clamped = (top_col_unclamped <= {1'b0, max_ctu_dim} && (top_right_avail || top_idx_rel < {2'b0, tu_n})) ?
-                                 top_col_unclamped[5:0] : (reg_tu_x + tu_n - 6'd1);
+    wire top_col_use_unclamped = (top_idx_rel < {2'b0, tu_n}) || top_right_avail;
+    wire [6:0] top_col_effective = top_col_use_unclamped ? top_col_unclamped : ({1'b0, reg_tu_x} + {1'b0, tu_n} - 7'd1);
+    wire [5:0] top_col_clamped = (top_col_effective <= {1'b0, max_ctu_dim}) ? top_col_effective[5:0] : (reg_tu_x + tu_n - 6'd1);
+
     wire [6:0] left_row_unclamped = {1'b0, reg_tu_y} + {1'b0, left_idx_rel[5:0]};
-    wire [5:0] left_row_clamped = (reg_tu_x == 6'd0) ?
-        ((left_row_unclamped <= {1'b0, max_ctu_dim}) ? left_row_unclamped[5:0] : (reg_tu_y + tu_n - 6'd1)) :
-        ((left_idx_rel < {2'b0, tu_n}) ? left_row_unclamped[5:0] : (reg_tu_y + tu_n - 6'd1));
+    wire left_row_use_unclamped = (left_idx_rel < {2'b0, tu_n}) || bottom_left_avail;
+    wire [6:0] left_row_effective = left_row_use_unclamped ? left_row_unclamped : ({1'b0, reg_tu_y} + {1'b0, tu_n} - 7'd1);
+    wire [5:0] left_row_clamped = (left_row_effective <= {1'b0, max_ctu_dim}) ? left_row_effective[5:0] : (reg_tu_y + tu_n - 6'd1);
 
     wire [5:0] ref_calc_row = (intra_ref_idx == 0) ? (reg_tu_y - 6'd1) :
                               (intra_ref_idx <= intra_ref_half) ? (reg_tu_y - 6'd1) :
@@ -1510,8 +1605,8 @@ module hevc_encoder_top #(
             recon_rd_addr = {2'b0, ref_calc_row[4:0], ref_calc_col[4:0]};
     end
 
-    wire [11:0] abs_top_x_raw = is_luma_comp ? ({6'd0, latched_cu_ctu_x, 6'd0} + {5'd0, top_col_unclamped}) :
-                                               ({7'd0, latched_cu_ctu_x, 5'd0} + {6'd0, top_col_unclamped[4:0]});
+    wire [11:0] abs_top_x_raw = is_luma_comp ? ({6'd0, latched_cu_ctu_x, 6'd0} + {5'd0, top_col_effective}) :
+                                               ({7'd0, latched_cu_ctu_x, 5'd0} + {6'd0, top_col_effective[4:0]});
     wire [11:0] abs_ref_top_x = is_luma_comp ? 
         ((abs_top_x_raw < FRAME_WIDTH) ? abs_top_x_raw : (FRAME_WIDTH - 12'd1)) :
         ((abs_top_x_raw < (FRAME_WIDTH/2)) ? abs_top_x_raw : ((FRAME_WIDTH/2) - 12'd1));
@@ -1560,9 +1655,9 @@ module hevc_encoder_top #(
         (reg_tu_x > 0) ? (is_luma_comp ? recon_y_ram[{reg_tu_y, reg_tu_x - 6'd1}] :
                           (reg_tu_comp == 2'd1) ? recon_u_ram[{reg_tu_y[4:0], reg_tu_x[4:0] - 5'd1}] :
                                                   recon_v_ram[{reg_tu_y[4:0], reg_tu_x[4:0] - 5'd1}]) :
-        (latched_cu_ctu_x > 0) ? (is_luma_comp ? col_buf_y[reg_tu_y] :
-                                  (reg_tu_comp == 2'd1) ? col_buf_u[reg_tu_y[4:0]] :
-                                                          col_buf_v[reg_tu_y[4:0]]) :
+        (latched_cu_ctu_x > 0) ? (is_luma_comp ? col_buf_y[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y] :
+                                  (reg_tu_comp == 2'd1) ? col_buf_u[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y[4:0]] :
+                                                          col_buf_v[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y[4:0]]) :
         10'd512;
 
     reg [9:0] recon_val_wire;
@@ -1574,13 +1669,17 @@ module hevc_encoder_top #(
                                      (reg_tu_comp == 2'd1) ? recon_u_ram[recon_rd_addr[9:0]] :
                                                              recon_v_ram[recon_rd_addr[9:0]];
                 else if (reg_tu_y > 0 && latched_cu_ctu_x > 0)
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? col_buf_y[reg_tu_y - 6'd1] :
-                                     (reg_tu_comp == 2'd1) ? col_buf_u[reg_tu_y[4:0] - 5'd1] :
-                                                             col_buf_v[reg_tu_y[4:0] - 5'd1];
+                    recon_val_wire = (reg_tu_comp == 2'd0) ? col_buf_y[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y - 6'd1] :
+                                     (reg_tu_comp == 2'd1) ? col_buf_u[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y[4:0] - 5'd1] :
+                                                             col_buf_v[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y[4:0] - 5'd1];
                 else if (reg_tu_x > 0 && latched_cu_ctu_y > 0)
                     recon_val_wire = (reg_tu_comp == 2'd0) ? line_buf_y[abs_ref_corner_x] :
                                      (reg_tu_comp == 2'd1) ? line_buf_u[abs_ref_corner_x] :
                                                              line_buf_v[abs_ref_corner_x];
+                else if (latched_cu_ctu_x > 0 && latched_cu_ctu_y > 0)
+                    recon_val_wire = (reg_tu_comp == 2'd0) ? ctu_corner_y[latched_cu_ctu_x[1:0] - 2'd1][latched_cu_ctu_y[1:0] - 2'd1] :
+                                     (reg_tu_comp == 2'd1) ? ctu_corner_u[latched_cu_ctu_x[1:0] - 2'd1][latched_cu_ctu_y[1:0] - 2'd1] :
+                                                             ctu_corner_v[latched_cu_ctu_x[1:0] - 2'd1][latched_cu_ctu_y[1:0] - 2'd1];
                 else
                     recon_val_wire = (reg_tu_comp == 2'd0) ? line_buf_y[abs_ctu_corner_x] :
                                      (reg_tu_comp == 2'd1) ? line_buf_u[abs_ctu_corner_x] :
@@ -1616,9 +1715,9 @@ module hevc_encoder_top #(
                                      (reg_tu_comp == 2'd1) ? recon_u_ram[recon_rd_addr[9:0]] :
                                                              recon_v_ram[recon_rd_addr[9:0]];
                 else
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? col_buf_y[left_row_clamped] :
-                                     (reg_tu_comp == 2'd1) ? col_buf_u[left_row_clamped[4:0]] :
-                                                             col_buf_v[left_row_clamped[4:0]];
+                    recon_val_wire = (reg_tu_comp == 2'd0) ? col_buf_y[latched_cu_ctu_x[1:0] - 2'd1][left_row_clamped] :
+                                     (reg_tu_comp == 2'd1) ? col_buf_u[latched_cu_ctu_x[1:0] - 2'd1][left_row_clamped[4:0]] :
+                                                             col_buf_v[latched_cu_ctu_x[1:0] - 2'd1][left_row_clamped[4:0]];
             end else if (top_available) begin
                 recon_val_wire = first_top_sample; // HEVC sample substitution
             end else begin
@@ -1702,16 +1801,23 @@ module hevc_encoder_top #(
     wire [7:0] rmd_top_idx_rel = (rmd_ref_idx >= 8'd1) ? (rmd_ref_idx - 8'd1) : 8'd0;
     wire [7:0] rmd_left_idx_rel = (rmd_ref_idx > rmd_ref_half) ? (rmd_ref_idx - rmd_ref_half - 8'd1) : 8'd0;
 
-    wire [6:0] rmd_top_col_unclamped = {1'b0, rmd_latched_pu_x} + {1'b0, rmd_top_idx_rel[5:0]};
-    wire rmd_top_right_avail = (rmd_latched_pu_y == 6'd0) || (rmd_latched_pu_x[rmd_pu_size_log2] == 1'b0);
-    wire [5:0] rmd_top_col_clamped = (rmd_top_col_unclamped <= 7'd63 && (rmd_top_right_avail || rmd_top_idx_rel < {2'b0, rmd_N})) ?
-                                     rmd_top_col_unclamped[5:0] : (rmd_latched_pu_x + rmd_N - 6'd1);
-    wire [6:0] rmd_left_row_unclamped = {1'b0, rmd_latched_pu_y} + {1'b0, rmd_left_idx_rel[5:0]};
-    wire [5:0] rmd_left_row_clamped = (rmd_latched_pu_x == 6'd0) ?
-        ((rmd_left_row_unclamped <= 7'd63) ? rmd_left_row_unclamped[5:0] : (rmd_latched_pu_y + rmd_N - 6'd1)) :
-        ((rmd_left_idx_rel < {2'b0, rmd_N}) ? rmd_left_row_unclamped[5:0] : (rmd_latched_pu_y + rmd_N - 6'd1));
+    wire [11:0] rmd_avail_pic_x = ({6'd0, rmd_latched_ctu_x, 6'd0}) + {6'd0, rmd_latched_pu_x};
+    wire [11:0] rmd_avail_pic_y = ({6'd0, rmd_latched_ctu_y, 6'd0}) + {6'd0, rmd_latched_pu_y};
 
-    wire [11:0] rmd_abs_top_x_raw = {6'd0, rmd_latched_ctu_x, 6'd0} + {5'd0, rmd_top_col_unclamped};
+    wire rmd_top_right_avail = check_top_right_avail(rmd_latched_pu_x, rmd_latched_pu_y, rmd_N, rmd_avail_pic_x, rmd_latched_ctu_y);
+    wire rmd_bottom_left_avail = check_bottom_left_avail(rmd_latched_pu_x, rmd_latched_pu_y, rmd_N, rmd_avail_pic_y, rmd_latched_ctu_x);
+
+    wire [6:0] rmd_top_col_unclamped = {1'b0, rmd_latched_pu_x} + {1'b0, rmd_top_idx_rel[5:0]};
+    wire rmd_top_col_use_unclamped = (rmd_top_idx_rel < {2'b0, rmd_N}) || rmd_top_right_avail;
+    wire [6:0] rmd_top_col_effective = rmd_top_col_use_unclamped ? rmd_top_col_unclamped : ({1'b0, rmd_latched_pu_x} + {1'b0, rmd_N} - 7'd1);
+    wire [5:0] rmd_top_col_clamped = (rmd_top_col_effective <= 7'd63) ? rmd_top_col_effective[5:0] : (rmd_latched_pu_x + rmd_N - 6'd1);
+
+    wire [6:0] rmd_left_row_unclamped = {1'b0, rmd_latched_pu_y} + {1'b0, rmd_left_idx_rel[5:0]};
+    wire rmd_left_row_use_unclamped = (rmd_left_idx_rel < {2'b0, rmd_N}) || rmd_bottom_left_avail;
+    wire [6:0] rmd_left_row_effective = rmd_left_row_use_unclamped ? rmd_left_row_unclamped : ({1'b0, rmd_latched_pu_y} + {1'b0, rmd_N} - 7'd1);
+    wire [5:0] rmd_left_row_clamped = (rmd_left_row_effective <= 7'd63) ? rmd_left_row_effective[5:0] : (rmd_latched_pu_y + rmd_N - 6'd1);
+
+    wire [11:0] rmd_abs_top_x_raw = {6'd0, rmd_latched_ctu_x, 6'd0} + {5'd0, rmd_top_col_effective};
     wire [11:0] rmd_abs_ref_top_x = (rmd_abs_top_x_raw < FRAME_WIDTH) ? rmd_abs_top_x_raw : (FRAME_WIDTH - 12'd1);
     wire [11:0] rmd_abs_ref_corner_x = {6'd0, rmd_latched_ctu_x, 6'd0} + {6'd0, rmd_latched_pu_x} - 12'd1;
     wire [11:0] rmd_abs_ctu_corner_x = {6'd0, rmd_latched_ctu_x, 6'd0} - 12'd1;
@@ -1739,7 +1845,7 @@ module hevc_encoder_top #(
 
     wire [9:0] rmd_first_left_sample = 
         (rmd_latched_pu_x > 0) ? recon_y_ram[{rmd_latched_pu_y, rmd_latched_pu_x - 6'd1}] :
-        (rmd_latched_ctu_x > 0) ? col_buf_y[rmd_latched_pu_y] :
+        (rmd_latched_ctu_x > 0) ? col_buf_y[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_pu_y] :
         10'd512;
 
     reg [9:0] rmd_recon_val_wire;
@@ -1755,9 +1861,11 @@ module hevc_encoder_top #(
                         rmd_recon_rd_addr = {rmd_latched_pu_y - 6'd1, rmd_latched_pu_x - 6'd1};
                         rmd_recon_val_wire = recon_y_ram[rmd_recon_rd_addr];
                     end else if (rmd_latched_pu_y > 0 && rmd_latched_ctu_x > 0)
-                        rmd_recon_val_wire = col_buf_y[rmd_latched_pu_y - 6'd1];
+                        rmd_recon_val_wire = col_buf_y[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_pu_y - 6'd1];
                     else if (rmd_latched_pu_x > 0 && rmd_latched_ctu_y > 0)
                         rmd_recon_val_wire = line_buf_y[rmd_abs_ref_corner_x];
+                    else if (rmd_latched_ctu_x > 0 && rmd_latched_ctu_y > 0)
+                        rmd_recon_val_wire = ctu_corner_y[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_ctu_y[1:0] - 2'd1];
                     else
                         rmd_recon_val_wire = line_buf_y[rmd_abs_ctu_corner_x];
                 end else if (rmd_top_available) begin
@@ -1787,7 +1895,7 @@ module hevc_encoder_top #(
                         rmd_recon_rd_addr = {rmd_left_row_clamped, rmd_latched_pu_x - 6'd1};
                         rmd_recon_val_wire = recon_y_ram[rmd_recon_rd_addr];
                     end else if (rmd_latched_ctu_x > 0)
-                        rmd_recon_val_wire = col_buf_y[rmd_left_row_clamped];
+                        rmd_recon_val_wire = col_buf_y[rmd_latched_ctu_x[1:0] - 2'd1][rmd_left_row_clamped];
                 end else if (rmd_top_available) begin
                     rmd_recon_val_wire = rmd_first_top_sample;
                 end else begin
@@ -2081,125 +2189,7 @@ module hevc_encoder_top #(
         end
     endfunction
 
-    function automatic [9:0] get_win_sample;
-        input [PIXEL_WIDTH*64-1:0] flat;
-        input integer r, c;
-        begin
-            get_win_sample = flat[PIXEL_WIDTH*(r*8 + c) +: PIXEL_WIDTH];
-        end
-    endfunction
 
-    function automatic signed [15:0] filter_luma_subpel_interm;
-        input [1:0] fx;
-        input [1:0] fy;
-        input [PIXEL_WIDTH*64-1:0] win_flat;
-        reg signed [24:0] sum_h [0:7];
-        reg signed [17:0] h_int [0:7];
-        reg signed [24:0] sum_v;
-        integer r, k;
-        reg signed [6:0] c_h [0:7];
-        reg signed [6:0] c_v [0:7];
-        begin
-            case (fx)
-                2'd0: begin c_h[0]=0; c_h[1]=0; c_h[2]=0; c_h[3]=64; c_h[4]=0; c_h[5]=0; c_h[6]=0; c_h[7]=0; end
-                2'd1: begin c_h[0]=-1; c_h[1]=4; c_h[2]=-10; c_h[3]=58; c_h[4]=17; c_h[5]=-5; c_h[6]=1; c_h[7]=0; end
-                2'd2: begin c_h[0]=-1; c_h[1]=4; c_h[2]=-11; c_h[3]=40; c_h[4]=40; c_h[5]=-11; c_h[6]=4; c_h[7]=-1; end
-                default: begin c_h[0]=0; c_h[1]=1; c_h[2]=-5; c_h[3]=17; c_h[4]=58; c_h[5]=-10; c_h[6]=4; c_h[7]=-1; end
-            endcase
-            case (fy)
-                2'd0: begin c_v[0]=0; c_v[1]=0; c_v[2]=0; c_v[3]=64; c_v[4]=0; c_v[5]=0; c_v[6]=0; c_v[7]=0; end
-                2'd1: begin c_v[0]=-1; c_v[1]=4; c_v[2]=-10; c_v[3]=58; c_v[4]=17; c_v[5]=-5; c_v[6]=1; c_v[7]=0; end
-                2'd2: begin c_v[0]=-1; c_v[1]=4; c_v[2]=-11; c_v[3]=40; c_v[4]=40; c_v[5]=-11; c_v[6]=4; c_v[7]=-1; end
-                default: begin c_v[0]=0; c_v[1]=1; c_v[2]=-5; c_v[3]=17; c_v[4]=58; c_v[5]=-10; c_v[6]=4; c_v[7]=-1; end
-            endcase
-
-            if (fx == 2'd0 && fy == 2'd0) begin
-                filter_luma_subpel_interm = $signed({6'd0, get_win_sample(win_flat, 3, 3)}) <<< 4;
-            end else if (fy == 2'd0) begin
-                sum_h[3] = 0;
-                for (k = 0; k < 8; k = k + 1)
-                    sum_h[3] = sum_h[3] + c_h[k] * $signed({1'b0, get_win_sample(win_flat, 3, k)});
-                filter_luma_subpel_interm = sum_h[3] >>> 2;
-            end else if (fx == 2'd0) begin
-                sum_v = 0;
-                for (k = 0; k < 8; k = k + 1)
-                    sum_v = sum_v + c_v[k] * $signed({1'b0, get_win_sample(win_flat, k, 3)});
-                filter_luma_subpel_interm = sum_v >>> 2;
-            end else begin
-                // Two-pass HV
-                for (r = 0; r < 8; r = r + 1) begin
-                    sum_h[r] = 0;
-                    for (k = 0; k < 8; k = k + 1)
-                        sum_h[r] = sum_h[r] + c_h[k] * $signed({1'b0, get_win_sample(win_flat, r, k)});
-                    h_int[r] = sum_h[r] >>> 2; // Plain truncation per Clause 8.5.3.3.3
-                end
-                sum_v = 0;
-                for (k = 0; k < 8; k = k + 1)
-                    sum_v = sum_v + c_v[k] * h_int[k];
-                filter_luma_subpel_interm = sum_v >>> 6;
-            end
-        end
-    endfunction
-
-    function automatic signed [15:0] filter_chroma_subpel_interm;
-        input [2:0] fx;
-        input [2:0] fy;
-        input [PIXEL_WIDTH*16-1:0] win_flat;
-        reg signed [24:0] sum_h [0:3];
-        reg signed [17:0] h_int [0:3];
-        reg signed [24:0] sum_v;
-        integer r, k;
-        reg signed [6:0] c_h [0:3];
-        reg signed [6:0] c_v [0:3];
-        begin
-            case (fx)
-                3'd0: begin c_h[0]=0;  c_h[1]=64; c_h[2]=0;  c_h[3]=0;  end
-                3'd1: begin c_h[0]=-2; c_h[1]=58; c_h[2]=10; c_h[3]=-2; end
-                3'd2: begin c_h[0]=-4; c_h[1]=54; c_h[2]=16; c_h[3]=-2; end
-                3'd3: begin c_h[0]=-6; c_h[1]=46; c_h[2]=28; c_h[3]=-4; end
-                3'd4: begin c_h[0]=-4; c_h[1]=36; c_h[2]=36; c_h[3]=-4; end
-                3'd5: begin c_h[0]=-4; c_h[1]=28; c_h[2]=46; c_h[3]=-6; end
-                3'd6: begin c_h[0]=-2; c_h[1]=16; c_h[2]=54; c_h[3]=-4; end
-                default: begin c_h[0]=-2; c_h[1]=10; c_h[2]=58; c_h[3]=-2; end
-            endcase
-            case (fy)
-                3'd0: begin c_v[0]=0;  c_v[1]=64; c_v[2]=0;  c_v[3]=0;  end
-                3'd1: begin c_v[0]=-2; c_v[1]=58; c_v[2]=10; c_v[3]=-2; end
-                3'd2: begin c_v[0]=-4; c_v[1]=54; c_v[2]=16; c_v[3]=-2; end
-                3'd3: begin c_v[0]=-6; c_v[1]=46; c_v[2]=28; c_v[3]=-4; end
-                3'd4: begin c_v[0]=-4; c_v[1]=36; c_v[2]=36; c_v[3]=-4; end
-                3'd5: begin c_v[0]=-4; c_v[1]=28; c_v[2]=46; c_v[3]=-6; end
-                3'd6: begin c_v[0]=-2; c_v[1]=16; c_v[2]=54; c_v[3]=-4; end
-                default: begin c_v[0]=-2; c_v[1]=10; c_v[2]=58; c_v[3]=-2; end
-            endcase
-
-            if (fx == 3'd0 && fy == 3'd0) begin
-                filter_chroma_subpel_interm = $signed({6'd0, win_flat[PIXEL_WIDTH*(1*4 + 1) +: PIXEL_WIDTH]}) <<< 4;
-            end else if (fy == 3'd0) begin
-                sum_h[1] = 0;
-                for (k = 0; k < 4; k = k + 1)
-                    sum_h[1] = sum_h[1] + c_h[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(1*4 + k) +: PIXEL_WIDTH]});
-                filter_chroma_subpel_interm = sum_h[1] >>> 2;
-            end else if (fx == 3'd0) begin
-                sum_v = 0;
-                for (k = 0; k < 4; k = k + 1)
-                    sum_v = sum_v + c_v[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(k*4 + 1) +: PIXEL_WIDTH]});
-                filter_chroma_subpel_interm = sum_v >>> 2;
-            end else begin
-                // Two-pass HV
-                for (r = 0; r < 4; r = r + 1) begin
-                    sum_h[r] = 0;
-                    for (k = 0; k < 4; k = k + 1)
-                        sum_h[r] = sum_h[r] + c_h[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(r*4 + k) +: PIXEL_WIDTH]});
-                    h_int[r] = sum_h[r] >>> 2;
-                end
-                sum_v = 0;
-                for (k = 0; k < 4; k = k + 1)
-                    sum_v = sum_v + c_v[k] * h_int[k];
-                filter_chroma_subpel_interm = sum_v >>> 6;
-            end
-        end
-    endfunction
 
 `ifdef SYNTHESIS
     // Synthesizable path: streaming subpel filter
@@ -2259,23 +2249,39 @@ module hevc_encoder_top #(
         end
     end
 
-    wire signed [15:0] luma_interm_l0 = filter_luma_subpel_interm(luma_frac_x, luma_frac_y, win_luma_l0_flat);
-    wire signed [15:0] luma_interm_l1 = filter_luma_subpel_interm(luma_frac_x, luma_frac_y, win_luma_l1_flat);
-    wire signed [15:0] cb_interm_l0   = filter_chroma_subpel_interm(chroma_frac_x, chroma_frac_y, win_cb_l0_flat);
-    wire signed [15:0] cb_interm_l1   = filter_chroma_subpel_interm(chroma_frac_x, chroma_frac_y, win_cb_l1_flat);
-    wire signed [15:0] cr_interm_l0   = filter_chroma_subpel_interm(chroma_frac_x, chroma_frac_y, win_cr_l0_flat);
-    wire signed [15:0] cr_interm_l1   = filter_chroma_subpel_interm(chroma_frac_x, chroma_frac_y, win_cr_l1_flat);
+    wire [PIXEL_WIDTH*16-1:0] win_chroma_l0 = (reg_tu_comp == 2'd1) ? win_cb_l0_flat : win_cr_l0_flat;
+    wire [PIXEL_WIDTH*16-1:0] win_chroma_l1 = (reg_tu_comp == 2'd1) ? win_cb_l1_flat : win_cr_l1_flat;
+    wire signed [15:0] interm_val_l0;
+    wire signed [15:0] interm_val_l1;
 
-    wire [9:0] pred_luma_val = is_bi_pred ? clip_bd10((luma_interm_l0 + luma_interm_l1 + 32'sd16) >>> 5)
-                                          : clip_bd10((luma_interm_l0 + 32'sd8) >>> 4);
-    wire [9:0] pred_cb_val   = is_bi_pred ? clip_bd10((cb_interm_l0 + cb_interm_l1 + 32'sd16) >>> 5)
-                                          : clip_bd10((cb_interm_l0 + 32'sd8) >>> 4);
-    wire [9:0] pred_cr_val   = is_bi_pred ? clip_bd10((cr_interm_l0 + cr_interm_l1 + 32'sd16) >>> 5)
-                                          : clip_bd10((cr_interm_l0 + 32'sd8) >>> 4);
+    subpel_interpolation_core #(
+        .PIXEL_WIDTH (`PIXEL_WIDTH),
+        .INTERM_WIDTH(16)
+    ) u_subpel_core_l0 (
+        .is_chroma      (reg_tu_comp != 2'd0),
+        .frac_x         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
+        .frac_y         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
+        .win_luma_flat  (win_luma_l0_flat),
+        .win_chroma_flat(win_chroma_l0),
+        .interm_val     (interm_val_l0)
+    );
 
-    assign inter_pred_pixel = (reg_tu_comp == 2'd0) ? pred_luma_val :
-                              (reg_tu_comp == 2'd1) ? pred_cb_val :
-                                                      pred_cr_val;
+    subpel_interpolation_core #(
+        .PIXEL_WIDTH (`PIXEL_WIDTH),
+        .INTERM_WIDTH(16)
+    ) u_subpel_core_l1 (
+        .is_chroma      (reg_tu_comp != 2'd0),
+        .frac_x         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
+        .frac_y         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
+        .win_luma_flat  (win_luma_l1_flat),
+        .win_chroma_flat(win_chroma_l1),
+        .interm_val     (interm_val_l1)
+    );
+
+    wire [9:0] pred_inter_val = is_bi_pred ? clip_bd10((interm_val_l0 + interm_val_l1 + 32'sd16) >>> 5)
+                                           : clip_bd10((interm_val_l0 + 32'sd8) >>> 4);
+
+    assign inter_pred_pixel = pred_inter_val;
 
 `endif
 
