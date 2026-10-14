@@ -78,3 +78,7 @@ __pycache__/
 *.vvp
 synth/vivado_output/
 synth/vivado_output_dct/
+
+# Documentation & visual dashboards (local / non-repo)
+walkthrough*.md
+visual_verification_dashboard.html
