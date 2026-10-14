@@ -1,0 +1,192 @@
+//=============================================================================
+// ctu_raster_scan.v
+// CTU Address Generator — Raster Scan Order
+//
+// Mapped from HM source:
+//   TLibEncoder/TEncSlice.cpp
+//   Void TEncSlice::encodeCtus() — outer CTU loop, raster scan
+//   TLibCommon/TComPic.cpp       getCtu(ctuRsAddr) — raster address
+//
+// HEVC spec: Section 6.5.1 (CTU raster scan)
+//
+// Function:
+//   Generates sequential CTU addresses in raster scan order
+//   (left-to-right, top-to-bottom) across the frame.
+//   Outputs CTU position in both linear (raster addr) and
+//   2D (ctu_x, ctu_y) coordinates for downstream modules.
+//
+// HM raster address formula:
+//   ctuRsAddr = ctu_y * frame_width_in_ctus + ctu_x
+//   ctu_x = ctuRsAddr % frame_width_in_ctus
+//   ctu_y = ctuRsAddr / frame_width_in_ctus
+//
+// Config:
+//   CTU_SIZE = 64px (MaxCUWidth=64 in config)
+//   4K frame: 3840×2160 → 60×34 = 2040 CTUs per frame
+//   Frame dimensions passed as parameters for flexibility
+//
+// Pipeline:
+//   Generates one CTU address per valid/ready handshake.
+//   Downstream (ctu_partitioner) asserts ready when done with current CTU.
+//   New frame starts on frame_start pulse.
+//
+// Outputs also include:
+//   - is_first_ctu_in_row: for SAO/deblock row triggers
+//   - is_last_ctu_in_row:  for CTU-row flush
+//   - is_last_ctu:         for end-of-frame signal to slice controller
+//=============================================================================
+
+`include "parameter_pkg.vh"
+`include "hevc_interfaces.vh"
+
+module ctu_raster_scan #(
+    parameter FRAME_WIDTH  = 3840,
+    parameter FRAME_HEIGHT = 2160
+)(
+    input  wire         clk,
+    input  wire         rst_n,
+
+    // Frame control
+    input  wire         frame_start,    // pulse: begin new frame scan
+    input  wire [9:0]   frame_poc,      // POC for this frame
+    input  wire [1:0]   frame_slice_type, // SLICE_B/P/I
+    input  wire [5:0]   frame_qp_in,    // Dynamic QP from rate controller
+
+    // CTU output stream
+    output reg          ctu_valid,
+    input  wire         ctu_ready,
+
+    // CTU address outputs (CTU_INFO_BUS_SIGNALS subset)
+    output wire [`CTU_ADDR_WIDTH-1:0]  ctu_addr,       // linear raster address
+    output wire [`CTU_COORD_WIDTH-1:0] ctu_x,          // CTU column (unit: CTU = 64px)
+    output wire [`CTU_COORD_WIDTH-1:0] ctu_y,          // CTU row
+    output reg  [`FRAME_DIM_WIDTH-1:0] frame_width_px, // frame width in pixels
+    output reg  [`FRAME_DIM_WIDTH-1:0] frame_height_px,// frame height in pixels
+    output reg  [9:0]   poc,
+    output reg  [1:0]   slice_type,
+    output reg  [5:0]   qp,             // base QP from parameter_pkg
+
+    // Position flags
+    output wire         is_first_in_row,
+    output wire         is_last_in_row,
+    output wire         is_last_ctu,    // last CTU of frame
+
+    // Frame-level status
+    output reg          frame_active,   // 1 while scanning a frame
+    output reg          frame_done      // pulse when last CTU accepted
+);
+    reg                 frame_wait_last;
+
+    //-------------------------------------------------------------------------
+    // Frame dimension derivation
+    // CTU size = 64px (CTU_SIZE from parameter_pkg)
+    // Width  in CTUs = ceil(FRAME_WIDTH  / 64)
+    // Height in CTUs = ceil(FRAME_HEIGHT / 64)
+    //-------------------------------------------------------------------------
+    localparam CTU_LOG2   = `CTU_SIZE_LOG2;                      // 6
+    localparam W_CTUS     = (FRAME_WIDTH  + `CTU_SIZE - 1) >> CTU_LOG2;  // 60 for 3840
+    localparam H_CTUS     = (FRAME_HEIGHT + `CTU_SIZE - 1) >> CTU_LOG2;  // 34 for 2160
+    localparam TOTAL_CTUS = W_CTUS * H_CTUS;                    // 2040 for 4K
+
+    // Width/height fit in CTU_COORD_WIDTH (max 4096/64=64 CTUs per dim for 4K, easily 6-bit)
+    localparam [`CTU_COORD_WIDTH-1:0] W_CTUS_COORD = W_CTUS[`CTU_COORD_WIDTH-1:0];
+    localparam [`CTU_COORD_WIDTH-1:0] H_CTUS_COORD = H_CTUS[`CTU_COORD_WIDTH-1:0];
+    localparam [`CTU_ADDR_WIDTH-1:0] TOTAL_ADDR = TOTAL_CTUS[`CTU_ADDR_WIDTH-1:0];
+
+    //-------------------------------------------------------------------------
+    // Counters
+    //-------------------------------------------------------------------------
+    reg [`CTU_COORD_WIDTH-1:0] cur_x;       // current CTU column 0..W_CTUS-1
+    reg [`CTU_COORD_WIDTH-1:0] cur_y;       // current CTU row    0..H_CTUS-1
+    reg [`CTU_ADDR_WIDTH-1:0]  cur_addr;    // linear raster addr 0..TOTAL_CTUS-1
+
+    assign ctu_addr        = cur_addr;
+    assign ctu_x           = cur_x;
+    assign ctu_y           = cur_y;
+    assign is_first_in_row = (cur_x == 0);
+    assign is_last_in_row  = (cur_x == W_CTUS_COORD - 1);
+    assign is_last_ctu     = (cur_addr == TOTAL_ADDR - 1);
+
+    //-------------------------------------------------------------------------
+    // Fire condition
+    //-------------------------------------------------------------------------
+    wire fire = ctu_valid && ctu_ready;
+
+    //-------------------------------------------------------------------------
+    // Main FSM
+    //-------------------------------------------------------------------------
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            ctu_valid      <= 1'b0;
+            frame_active   <= 1'b0;
+            frame_wait_last<= 1'b0;
+            frame_done     <= 1'b0;
+            cur_x          <= 0;
+            cur_y          <= 0;
+            cur_addr       <= 0;
+            poc            <= 0;
+            slice_type     <= `SLICE_B;
+            qp             <= `QP_DEFAULT;
+            frame_width_px <= 0;
+            frame_height_px<= 0;
+        end else begin
+            frame_done <= 1'b0;   // default pulse-low
+
+            if (frame_start && !frame_active) begin
+                // Latch frame parameters and begin scan
+                frame_active    <= 1'b1;
+                cur_x           <= 0;
+                cur_y           <= 0;
+                cur_addr        <= 0;
+                frame_wait_last <= 1'b0;
+                poc             <= frame_poc;
+                slice_type      <= frame_slice_type;
+                $display("Time=%0t: [CTU_RASTER] Frame started. Latching slice_type=%0d, qp=%0d", $time, frame_slice_type, (frame_qp_in != 6'd0) ? frame_qp_in : `QP_DEFAULT);
+                qp              <= (frame_qp_in != 6'd0) ? frame_qp_in : `QP_DEFAULT;
+                frame_width_px  <= FRAME_WIDTH[13:0];
+                frame_height_px <= FRAME_HEIGHT[13:0];
+                ctu_valid       <= 1'b1;
+            end else if (frame_active && fire) begin
+                // Current CTU completed — advance to next or finish frame
+                if (cur_addr == TOTAL_ADDR - 1) begin
+                    // Entire frame completed
+                    frame_active    <= 1'b0;
+                    frame_done      <= 1'b1;
+                    ctu_valid       <= 1'b0;
+                    cur_x           <= 0;
+                    cur_y           <= 0;
+                    cur_addr        <= 0;
+                end else begin
+                    // Advance raster position
+                    cur_addr <= cur_addr + 1;
+
+                    if (cur_x == W_CTUS_COORD - 1) begin
+                        cur_x <= 0;
+                        cur_y <= cur_y + 1;
+                    end else begin
+                        cur_x <= cur_x + 1;
+                    end
+
+                    ctu_valid <= 1'b1;
+                end
+            end
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // Simulation checks
+    //-------------------------------------------------------------------------
+    // synthesis translate_off
+    always @(posedge clk) begin
+        if (rst_n) begin
+            if (frame_start && frame_active)
+                $display("WARN  [ctu_raster_scan] frame_start during active scan (POC=%0d) at time=%0t",
+                         poc, $time);
+            if (frame_done)
+                $display("INFO  [ctu_raster_scan] frame done POC=%0d total CTUs=%0d at time=%0t",
+                         poc, TOTAL_CTUS, $time);
+        end
+    end
+    // synthesis translate_on
+
+endmodule

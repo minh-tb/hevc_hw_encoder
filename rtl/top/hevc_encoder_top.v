@@ -27,6 +27,7 @@ module hevc_encoder_top #(
     input  wire         encode_start,
     input  wire [15:0]  total_frames,
     output wire         encode_done,
+    output wire         frame_done,
 
     //=========================================================================
     // Input Video Stream (YUV 4:2:0)
@@ -2689,6 +2690,7 @@ module hevc_encoder_top #(
     end
     // synthesis translate_on
     assign sync_frame_done_pulse = combined_frame_done && !combined_frame_done_d;
+    assign frame_done            = sync_frame_done_pulse;
 
     // synthesis translate_off
     always @(posedge clk) begin

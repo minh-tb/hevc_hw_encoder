@@ -1,0 +1,702 @@
+//=============================================================================
+// deblock_top.sv
+// Deblocking Filter — Top Level Orchestrator (SystemVerilog Translation)
+//
+// Mapped from HM source:
+//   TLibCommon/TComLoopFilter.cpp
+//   xDeblockCTU()          — per-CTU entry point
+//   xEdgeFilterLuma()      — iterate over luma edges
+//   xEdgeFilterChroma()    — iterate over chroma edges
+//
+// HEVC spec: Section 8.7.2 (deblocking filter process)
+//=============================================================================
+
+`include "parameter_pkg.vh"
+`include "hevc_interfaces.vh"
+
+module deblock_top (
+    input  wire         clk,
+    input  wire         rst_n,
+
+    //=========================================================================
+    // CTU control — one CTU at a time
+    //=========================================================================
+    input  wire         ctu_valid,          // new CTU ready for deblocking
+    output wire         ctu_ready,
+    input  wire [15:0]  ctu_addr,
+    input  wire [9:0]   ctu_x,              // CTU position in frame
+    input  wire [9:0]   ctu_y,
+    input  wire [11:0]  frame_width_px,
+    input  wire [11:0]  frame_height_px,
+
+    //=========================================================================
+    // CU info shadow map — filled by encoder as CUs are encoded
+    // Indexed by 4×4 block within CTU: [row4][col4], 0..15 each
+    // Total: 16×16 = 256 entries per CTU
+    //=========================================================================
+    input  wire [255:0]  cu_map_pred_mode,  // 0=inter, 1=intra
+    input  wire [255:0]  cu_map_cbf_luma,
+    input  wire [255:0]  cu_map_cbf_chroma,
+    input  wire [767:0]  cu_map_ref_l0,
+    input  wire [767:0]  cu_map_ref_l1,
+    input  wire [255:0]  cu_map_bi_pred,
+    input  wire [4095:0] cu_map_mvx_l0,
+    input  wire [4095:0] cu_map_mvy_l0,
+    input  wire [4095:0] cu_map_mvx_l1,
+    input  wire [4095:0] cu_map_mvy_l1,
+    input  wire [1535:0] cu_map_qp,
+    input  wire [255:0]  cu_map_edge_ver,
+    input  wire [255:0]  cu_map_edge_hor,
+
+    //=========================================================================
+    // Pixel buffer interface
+    // Read reconstructed pixels, write deblocked pixels back
+    // Luma:   64×64 pixels, row-major
+    // Chroma: 32×32 pixels each (Cb, Cr)
+    //=========================================================================
+    // Read request
+    output reg            pix_rd_valid,
+    input  wire           pix_rd_ready,
+    output reg    [5:0]   pix_rd_x,          // pixel x within CTU (luma coords)
+    output reg    [5:0]   pix_rd_y,
+    output reg    [1:0]   pix_rd_comp,
+
+    // Read response
+    input  wire           pix_resp_valid,
+    output wire           pix_resp_ready,
+    input  wire [`PIXEL_WIDTH-1:0] pix_resp_data,
+
+    // Write back
+    output reg            pix_wr_valid,
+    input  wire           pix_wr_ready,
+    output reg    [5:0]   pix_wr_x,
+    output reg    [5:0]   pix_wr_y,
+    output reg    [1:0]   pix_wr_comp,
+    output reg    [`PIXEL_WIDTH-1:0] pix_wr_data,
+
+    //=========================================================================
+    // Cross-CTU Boundary Interfaces
+    //=========================================================================
+    // Neighbor CU info shadow maps (16 blocks along edge)
+    // Left CTU's rightmost column (col 15, rows 0..15)
+    input  wire [15:0]    nbr_col_pred_mode,
+    input  wire [15:0]    nbr_col_cbf_luma,
+    input  wire [15:0]    nbr_col_cbf_chroma,
+    input  wire [47:0]    nbr_col_ref_l0,
+    input  wire [47:0]    nbr_col_ref_l1,
+    input  wire [15:0]    nbr_col_bi_pred,
+    input  wire [255:0]   nbr_col_mvx_l0,
+    input  wire [255:0]   nbr_col_mvy_l0,
+    input  wire [255:0]   nbr_col_mvx_l1,
+    input  wire [255:0]   nbr_col_mvy_l1,
+    input  wire [95:0]    nbr_col_qp,
+
+    // Above CTU's bottom row (row 15, cols 0..15)
+    input  wire [15:0]    nbr_row_pred_mode,
+    input  wire [15:0]    nbr_row_cbf_luma,
+    input  wire [15:0]    nbr_row_cbf_chroma,
+    input  wire [47:0]    nbr_row_ref_l0,
+    input  wire [47:0]    nbr_row_ref_l1,
+    input  wire [15:0]    nbr_row_bi_pred,
+    input  wire [255:0]   nbr_row_mvx_l0,
+    input  wire [255:0]   nbr_row_mvy_l0,
+    input  wire [255:0]   nbr_row_mvx_l1,
+    input  wire [255:0]   nbr_row_mvy_l1,
+    input  wire [95:0]    nbr_row_qp,
+
+    // Neighbor access indicators
+    output wire           pix_rd_neighbor,   // 1=read from neighbor buffer (col_buf or line_buf)
+    output wire           pix_rd_is_vert,    // 1=vertical edge (col_buf), 0=horizontal edge (line_buf)
+    output wire           pix_rd_corner,     // 1=delayed corner block access
+    output wire           pix_wr_neighbor,   // 1=write to neighbor buffer and frame store
+    output wire           pix_wr_is_vert,
+    output wire           pix_wr_corner,
+
+    //=========================================================================
+    // Done signal
+    //=========================================================================
+    output reg            ctu_done          // pulse when CTU deblocking complete
+);
+
+    //-------------------------------------------------------------------------
+    // Processing pass encoding: 6 passes per CTU (Luma V/H, Cb V/H, Cr V/H)
+    //-------------------------------------------------------------------------
+    localparam [2:0] PASS_LUMA_VERT  = 3'd0;
+    localparam [2:0] PASS_LUMA_HORIZ = 3'd1;
+    localparam [2:0] PASS_CB_VERT    = 3'd2;
+    localparam [2:0] PASS_CB_HORIZ   = 3'd3;
+    localparam [2:0] PASS_CR_VERT    = 3'd4;
+    localparam [2:0] PASS_CR_HORIZ   = 3'd5;
+
+    //-------------------------------------------------------------------------
+    // FSM states
+    //-------------------------------------------------------------------------
+    localparam [3:0]
+        S_IDLE        = 4'd0,
+        S_BS_REQ      = 4'd1,   // drive boundary_strength inputs
+        S_BS_WAIT     = 4'd2,   // wait for BS result
+        S_PIX_LOAD    = 4'd3,   // load 8 samples (luma) or 4 (chroma)
+        S_FILT_PUSH   = 4'd9,   // push luma line to db_filter_luma
+        S_FILT_WAIT   = 4'd4,   // wait for filter output
+        S_PIX_WRITE   = 4'd5,   // write filtered samples back
+        S_NEXT_EDGE   = 4'd6,   // advance to next edge
+        S_NEXT_PASS   = 4'd7,   // advance to next pass
+        S_DONE        = 4'd8;
+
+    reg [3:0]    state;
+    reg [2:0]    pass;            // current processing pass (0..5)
+`ifdef REMEDIATION
+    reg [2:0]    edge_stage;      // 0..7 (Luma 8x8 raster edges), 0..3 (Chroma)
+`else
+    reg          edge_stage;      // 0: CTU boundary edge, 1: internal TU edge
+`endif
+    reg          is_corner_stage; // 1: filtering delayed left neighbor CTU corner column
+    reg [3:0]    edge_pos;        // 0..15 (Luma) or 0..7 (Chroma)
+    reg [2:0]    sample_grp;      // which 4-sample group along the edge (0..3 luma, 0..1 chroma)
+    reg [2:0]    resp_cnt;        // sample read response counter
+    reg [2:0]    write_cnt;       // which sample we're writing back (0..5 luma, 0..1 chroma)
+
+    // Latch current CTU info
+    reg [15:0]   cur_ctu_addr;
+    reg [9:0]    cur_ctu_x, cur_ctu_y;
+    reg [11:0]   cur_frame_w, cur_frame_h;
+
+    assign ctu_ready      = (state == S_IDLE);
+    assign pix_resp_ready = (state == S_PIX_LOAD);
+
+    //-------------------------------------------------------------------------
+    // Edge geometry helpers
+    //-------------------------------------------------------------------------
+    wire is_luma, is_vert, is_chroma;
+    wire [1:0] cur_comp;
+    
+    assign is_luma   = (pass == PASS_LUMA_VERT || pass == PASS_LUMA_HORIZ);
+    assign is_vert   = (pass == PASS_LUMA_VERT || pass == PASS_CB_VERT || pass == PASS_CR_VERT);
+    assign is_chroma = !is_luma;
+    assign cur_comp  = is_luma ? 2'd0 :
+                       (pass == PASS_CB_VERT || pass == PASS_CB_HORIZ) ? 2'd1 : 2'd2;
+
+`ifdef REMEDIATION
+    wire [2:0] max_edge_stage = is_luma ? 3'd7 : 3'd3;
+    wire [3:0] cur_edge_block = {edge_stage, 1'b0}; // 0, 2, 4, 6, 8, 10, 12, 14
+`else
+    wire [3:0] tu_edge_target = is_luma ? 4'd8 : 4'd4;
+`endif
+    wire [3:0] max_pos        = is_luma ? 4'd15 : 4'd7;
+
+    wire has_left_neighbor    = (cur_ctu_x > 10'd0);
+    wire has_right_neighbor   = (cur_ctu_x < (cur_frame_w >> 6) - 10'd1);
+    wire [3:0] max_col_pos    = max_pos;
+
+    // Derived edge coordinates:
+    // When is_vert: edge_col is fixed for the edge (0 or tu_edge_target), edge_row sweeps along the edge (0..max_pos)
+    // When !is_vert:
+    //   If is_corner_stage: edge_col is max_pos (column 15/7 of left CTU), edge_row is fixed
+    //   Else: edge_col is edge_pos (0..max_col_pos), edge_row is fixed
+`ifdef REMEDIATION
+    wire [3:0] edge_col = is_vert ? cur_edge_block :
+                          (is_corner_stage ? max_pos : edge_pos);
+    wire [3:0] edge_row = is_vert ? edge_pos : cur_edge_block;
+    wire is_ctu_boundary = (edge_stage == 3'd0);
+`else
+    wire [3:0] edge_col = is_vert ? ((edge_stage == 1'b0) ? 4'd0 : tu_edge_target) :
+                          (is_corner_stage ? max_pos : edge_pos);
+    wire [3:0] edge_row = is_vert ? edge_pos : ((edge_stage == 1'b0) ? 4'd0 : tu_edge_target);
+    wire is_ctu_boundary = (edge_stage == 1'b0);
+`endif
+
+    // Transition helper for next pass
+    wire [2:0] next_pass = pass + 3'd1;
+    wire next_is_vert = (next_pass == PASS_LUMA_VERT || next_pass == PASS_CB_VERT || next_pass == PASS_CR_VERT);
+    wire next_has_ctu_boundary = next_is_vert ? (cur_ctu_x > 10'd0) : (cur_ctu_y > 10'd0);
+
+    // CU Map coordinates (Scale chroma 8x8 grid to 16x16 luma grid)
+    wire [3:0] edge_col_cu;
+    wire [3:0] edge_row_cu;
+    assign edge_col_cu = is_chroma ? {edge_col[2:0], 1'b0} : edge_col;
+    assign edge_row_cu = is_chroma ? {edge_row[2:0], 1'b0} : edge_row;
+
+    wire is_boundary_edge = is_corner_stage ? 1'b1 :
+                            is_ctu_boundary ? 1'b1 :
+                            is_vert ? cu_map_edge_ver[(edge_row_cu * 16) + edge_col_cu] :
+                                      cu_map_edge_hor[(edge_row_cu * 16) + edge_col_cu];
+
+    // P-side and Q-side 4×4 block indices
+    wire [3:0] p_col, p_row, q_col, q_row;
+    assign p_col = is_vert  ? (edge_col_cu > 4'd0 ? edge_col_cu - 4'd1 : 4'd15) : edge_col_cu;
+    assign p_row = !is_vert ? (edge_row_cu > 4'd0 ? edge_row_cu - 4'd1 : 4'd15) : edge_row_cu;
+    assign q_col = edge_col_cu;
+    assign q_row = edge_row_cu;
+
+    // Multiplex P-side and Q-side metadata:
+    // When is_corner_stage: P-side comes from nbr_row (edge_stage 0) or nbr_col (edge_stage 1), Q-side from nbr_col
+    // When is_ctu_boundary: P-side comes from left neighbor column cache (is_vert) or top neighbor row cache (!is_vert)
+    wire        p_is_intra_sel = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_pred_mode[15] : nbr_col_pred_mode[p_row]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_pred_mode[p_row] : nbr_row_pred_mode[p_col]) :
+                                  cu_map_pred_mode[(p_row*16)+p_col]);
+
+    wire [5:0]  p_qp_sel       = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_qp[15*6 +: 6] : nbr_col_qp[p_row*6 +: 6]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_qp[p_row*6 +: 6] : nbr_row_qp[p_col*6 +: 6]) :
+                                  cu_map_qp[((p_row*16)+p_col)*6 +: 6]);
+
+    wire        p_cbf_l_sel    = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_cbf_luma[15] : nbr_col_cbf_luma[p_row]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_cbf_luma[p_row] : nbr_row_cbf_luma[p_col]) :
+                                  cu_map_cbf_luma[(p_row*16)+p_col]);
+
+    wire        p_cbf_c_sel    = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_cbf_chroma[15] : nbr_col_cbf_chroma[p_row]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_cbf_chroma[p_row] : nbr_row_cbf_chroma[p_col]) :
+                                  cu_map_cbf_chroma[(p_row*16)+p_col]);
+
+    wire [2:0]  p_ref_l0_sel   = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_ref_l0[15*3 +: 3] : nbr_col_ref_l0[p_row*3 +: 3]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_ref_l0[p_row*3 +: 3] : nbr_row_ref_l0[p_col*3 +: 3]) :
+                                  cu_map_ref_l0[((p_row*16)+p_col)*3 +: 3]);
+
+    wire [2:0]  p_ref_l1_sel   = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_ref_l1[15*3 +: 3] : nbr_col_ref_l1[p_row*3 +: 3]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_ref_l1[p_row*3 +: 3] : nbr_row_ref_l1[p_col*3 +: 3]) :
+                                  cu_map_ref_l1[((p_row*16)+p_col)*3 +: 3]);
+
+    wire        p_bi_pred_sel  = is_corner_stage ?
+                                 ((edge_stage == 1'b0) ? nbr_row_bi_pred[15] : nbr_col_bi_pred[p_row]) :
+                                 (is_ctu_boundary ?
+                                  (is_vert ? nbr_col_bi_pred[p_row] : nbr_row_bi_pred[p_col]) :
+                                  cu_map_bi_pred[(p_row*16)+p_col]);
+
+    wire signed [15:0] p_mvx_l0_sel = is_corner_stage ?
+                                      ((edge_stage == 1'b0) ? nbr_row_mvx_l0[15*16 +: 16] : nbr_col_mvx_l0[p_row*16 +: 16]) :
+                                      (is_ctu_boundary ?
+                                       (is_vert ? nbr_col_mvx_l0[p_row*16 +: 16] : nbr_row_mvx_l0[p_col*16 +: 16]) :
+                                       cu_map_mvx_l0[((p_row*16)+p_col)*16 +: 16]);
+
+    wire signed [15:0] p_mvy_l0_sel = is_corner_stage ?
+                                      ((edge_stage == 1'b0) ? nbr_row_mvy_l0[15*16 +: 16] : nbr_col_mvy_l0[p_row*16 +: 16]) :
+                                      (is_ctu_boundary ?
+                                       (is_vert ? nbr_col_mvy_l0[p_row*16 +: 16] : nbr_row_mvy_l0[p_col*16 +: 16]) :
+                                       cu_map_mvy_l0[((p_row*16)+p_col)*16 +: 16]);
+
+    wire signed [15:0] p_mvx_l1_sel = is_corner_stage ?
+                                      ((edge_stage == 1'b0) ? nbr_row_mvx_l1[15*16 +: 16] : nbr_col_mvx_l1[p_row*16 +: 16]) :
+                                      (is_ctu_boundary ?
+                                       (is_vert ? nbr_col_mvx_l1[p_row*16 +: 16] : nbr_row_mvx_l1[p_col*16 +: 16]) :
+                                       cu_map_mvx_l1[((p_row*16)+p_col)*16 +: 16]);
+
+    wire signed [15:0] p_mvy_l1_sel = is_corner_stage ?
+                                      ((edge_stage == 1'b0) ? nbr_row_mvy_l1[15*16 +: 16] : nbr_col_mvy_l1[p_row*16 +: 16]) :
+                                      (is_ctu_boundary ?
+                                       (is_vert ? nbr_col_mvy_l1[p_row*16 +: 16] : nbr_row_mvy_l1[p_col*16 +: 16]) :
+                                       cu_map_mvy_l1[((p_row*16)+p_col)*16 +: 16]);
+
+    wire        q_is_intra_sel = is_corner_stage ? nbr_col_pred_mode[q_row] : cu_map_pred_mode[(q_row*16)+q_col];
+    wire [5:0]  q_qp_sel       = is_corner_stage ? nbr_col_qp[q_row*6 +: 6] : cu_map_qp[((q_row*16)+q_col)*6 +: 6];
+    wire        q_cbf_l_sel    = is_corner_stage ? nbr_col_cbf_luma[q_row] : cu_map_cbf_luma[(q_row*16)+q_col];
+    wire        q_cbf_c_sel    = is_corner_stage ? nbr_col_cbf_chroma[q_row] : cu_map_cbf_chroma[(q_row*16)+q_col];
+    wire [2:0]  q_ref_l0_sel   = is_corner_stage ? nbr_col_ref_l0[q_row*3 +: 3] : cu_map_ref_l0[((q_row*16)+q_col)*3 +: 3];
+    wire [2:0]  q_ref_l1_sel   = is_corner_stage ? nbr_col_ref_l1[q_row*3 +: 3] : cu_map_ref_l1[((q_row*16)+q_col)*3 +: 3];
+    wire        q_bi_pred_sel  = is_corner_stage ? nbr_col_bi_pred[q_row] : cu_map_bi_pred[(q_row*16)+q_col];
+    wire signed [15:0] q_mvx_l0_sel = is_corner_stage ? nbr_col_mvx_l0[q_row*16 +: 16] : cu_map_mvx_l0[((q_row*16)+q_col)*16 +: 16];
+    wire signed [15:0] q_mvy_l0_sel = is_corner_stage ? nbr_col_mvy_l0[q_row*16 +: 16] : cu_map_mvy_l0[((q_row*16)+q_col)*16 +: 16];
+    wire signed [15:0] q_mvx_l1_sel = is_corner_stage ? nbr_col_mvx_l1[q_row*16 +: 16] : cu_map_mvx_l1[((q_row*16)+q_col)*16 +: 16];
+    wire signed [15:0] q_mvy_l1_sel = is_corner_stage ? nbr_col_mvy_l1[q_row*16 +: 16] : cu_map_mvy_l1[((q_row*16)+q_col)*16 +: 16];
+
+    //-------------------------------------------------------------------------
+    // boundary_strength instance
+    //-------------------------------------------------------------------------
+    reg          bs_in_valid, bs_out_ready;
+    wire         bs_in_ready, bs_out_valid;
+    wire [1:0]   bs_result;
+    wire [5:0]   bs_edge_qp;
+
+    boundary_strength u_bs (
+        .clk             (clk),
+        .rst_n           (rst_n),
+        .in_valid        (bs_in_valid),
+        .in_ready        (bs_in_ready),
+        .is_vertical     (is_vert),
+        .is_ctu_boundary (is_ctu_boundary),
+        
+        .p_is_intra      (p_is_intra_sel),
+        .p_qp            (p_qp_sel),
+        .p_cbf_luma      (p_cbf_l_sel),
+        .p_cbf_chroma    (p_cbf_c_sel),
+        .p_ref_idx_l0    (p_ref_l0_sel),
+        .p_ref_idx_l1    (p_ref_l1_sel),
+        .p_bi_pred       (p_bi_pred_sel),
+        .p_mvx_l0        (p_mvx_l0_sel),
+        .p_mvy_l0        (p_mvy_l0_sel),
+        .p_mvx_l1        (p_mvx_l1_sel),
+        .p_mvy_l1        (p_mvy_l1_sel),
+        
+        .q_is_intra      (q_is_intra_sel),
+        .q_qp            (q_qp_sel),
+        .q_cbf_luma      (q_cbf_l_sel),
+        .q_cbf_chroma    (q_cbf_c_sel),
+        .q_ref_idx_l0    (q_ref_l0_sel),
+        .q_ref_idx_l1    (q_ref_l1_sel),
+        .q_bi_pred       (q_bi_pred_sel),
+        .q_mvx_l0        (q_mvx_l0_sel),
+        .q_mvy_l0        (q_mvy_l0_sel),
+        .q_mvx_l1        (q_mvx_l1_sel),
+        .q_mvy_l1        (q_mvy_l1_sel),
+        
+        .edge_qp         (bs_edge_qp),
+        .out_valid       (bs_out_valid),
+        .out_ready       (bs_out_ready),
+        .bs              (bs_result)
+    );
+
+    //-------------------------------------------------------------------------
+    // Pixel sample registers and Filters
+    //-------------------------------------------------------------------------
+    reg [`PIXEL_WIDTH-1:0] px_p [0:3];
+    reg [`PIXEL_WIDTH-1:0] px_q [0:3];
+    reg [1:0]  latched_bs;
+    reg [5:0]  latched_edge_qp;
+
+    reg luma_in_valid;
+    wire luma_out_ready;
+    wire luma_in_ready, luma_out_valid;
+    wire [`PIXEL_WIDTH-1:0] luma_p0f, luma_p1f, luma_p2f, luma_q0f, luma_q1f, luma_q2f;
+    wire luma_mod_p, luma_mod_q;
+
+    assign luma_out_ready = (state == S_PIX_WRITE) && is_luma && pix_wr_ready && (write_cnt == 3'd5);
+
+    db_filter_luma u_luma (
+        .clk(clk), .rst_n(rst_n),
+        .in_valid(luma_in_valid), .in_ready(luma_in_ready),
+        .bs(latched_bs), .edge_qp(latched_edge_qp),
+        .p0(px_p[0]), .p1(px_p[1]), .p2(px_p[2]), .p3(px_p[3]),
+        .q0(px_q[0]), .q1(px_q[1]), .q2(px_q[2]), .q3(px_q[3]),
+        .out_valid(luma_out_valid), .out_ready(luma_out_ready),
+        .p0_f(luma_p0f), .p1_f(luma_p1f), .p2_f(luma_p2f),
+        .q0_f(luma_q0f), .q1_f(luma_q1f), .q2_f(luma_q2f),
+        .modified_p(luma_mod_p), .modified_q(luma_mod_q)
+    );
+
+    reg chr_in_valid, chr_out_ready;
+    wire chr_in_ready, chr_out_valid, chr_modified;
+    wire [`PIXEL_WIDTH-1:0] chr_p0f, chr_q0f, chr_p1p, chr_q1p;
+
+    db_filter_chroma u_chroma (
+        .clk(clk), .rst_n(rst_n),
+        .in_valid(chr_in_valid), .in_ready(chr_in_ready),
+        .bs(latched_bs), .edge_qp(latched_edge_qp),
+        .comp(cur_comp),
+        .p0(px_p[0]), .p1(px_p[1]), .q0(px_q[0]), .q1(px_q[1]),
+        .out_valid(chr_out_valid), .out_ready(chr_out_ready),
+        .p0_f(chr_p0f), .q0_f(chr_q0f), .p1_pass(chr_p1p), .q1_pass(chr_q1p),
+        .modified(chr_modified)
+    );
+
+    //-------------------------------------------------------------------------
+    // Main FSM
+    //-------------------------------------------------------------------------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state        <= S_IDLE;
+            pass         <= PASS_LUMA_VERT;
+            edge_stage   <= 1'b1;
+            is_corner_stage <= 1'b0;
+            edge_pos     <= 4'd0;
+            sample_grp   <= 3'd0;
+            resp_cnt     <= 3'd0;
+            write_cnt    <= 3'd0;
+            ctu_done     <= 1'b0;
+            bs_in_valid  <= 1'b0;
+            bs_out_ready <= 1'b0;
+            luma_in_valid<= 1'b0;
+            chr_in_valid <= 1'b0;
+            chr_out_ready<= 1'b0;
+            pix_rd_valid <= 1'b0;
+        end else begin
+            ctu_done       <= 1'b0;
+            bs_in_valid    <= 1'b0;
+            luma_in_valid  <= 1'b0;
+            chr_in_valid   <= 1'b0;
+            chr_out_ready  <= 1'b0;
+
+            case (state)
+                S_IDLE: begin
+                    if (ctu_valid) begin
+                        cur_ctu_addr <= ctu_addr;
+                        cur_ctu_x    <= ctu_x;
+                        cur_ctu_y    <= ctu_y;
+                        cur_frame_w  <= frame_width_px;
+                        cur_frame_h  <= frame_height_px;
+                        pass         <= PASS_LUMA_VERT;
+`ifdef REMEDIATION
+                        edge_stage   <= (ctu_x > 10'd0) ? 3'd0 : 3'd1;
+`else
+                        edge_stage   <= (ctu_x > 10'd0) ? 1'b0 : 1'b1;
+`endif
+                        is_corner_stage <= 1'b0;
+                        edge_pos     <= 4'd0;
+                        sample_grp   <= 3'd0;
+                        state        <= S_BS_REQ;
+                    end
+                end
+                S_BS_REQ: begin
+                    bs_in_valid  <= 1'b1;
+                    bs_out_ready <= 1'b1;
+                    if (bs_in_valid && bs_in_ready)
+                        state <= S_BS_WAIT;
+                end
+                S_BS_WAIT: begin
+                    if (bs_out_valid) begin
+                        latched_bs      <= is_boundary_edge ? bs_result : 2'd0;
+                        latched_edge_qp <= bs_edge_qp;
+                        bs_out_ready    <= 1'b1;
+                        if (!is_boundary_edge || bs_result == 2'd0) begin
+                            sample_grp <= is_chroma ? 3'd3 : 3'd0;
+                            state      <= S_NEXT_EDGE;
+                        end else begin
+                            resp_cnt     <= 3'd0;
+                            sample_grp   <= is_luma ? 3'd0 : sample_grp;
+                            pix_rd_valid <= 1'b1;
+                            pix_rd_comp  <= cur_comp;
+                            state        <= S_PIX_LOAD;
+                        end
+                    end
+                end
+                S_PIX_LOAD: begin
+                    bs_out_ready <= 1'b0;
+                    if (pix_rd_valid && pix_rd_ready) begin
+                        pix_rd_valid <= 1'b0;
+                    end
+
+                    if (pix_resp_valid && pix_resp_ready) begin
+                        if (resp_cnt < (is_luma ? 3'd4 : 3'd2)) px_p[resp_cnt[1:0]] <= pix_resp_data;
+                        else                                    px_q[resp_cnt[1:0] - (is_luma ? 2'd0 : 2'd2)] <= pix_resp_data;
+
+                        if (resp_cnt < (is_luma ? 3'd7 : 3'd3)) begin
+                            resp_cnt     <= resp_cnt + 3'd1;
+                            pix_rd_valid <= 1'b1;
+                            pix_rd_comp  <= cur_comp;
+                        end else begin
+                            resp_cnt     <= 3'd0;
+                            pix_rd_valid <= 1'b0;
+                            if (is_luma) begin
+                                luma_in_valid <= 1'b1;
+                                state         <= S_FILT_PUSH;
+                            end else begin
+                                chr_in_valid  <= 1'b1;
+                                state         <= S_FILT_WAIT;
+                            end
+                        end
+                    end
+                end
+                S_FILT_PUSH: begin
+                    if (is_luma) begin
+                        if (luma_in_ready) begin
+                            luma_in_valid <= 1'b0;
+                            if (sample_grp < 3'd3) begin
+                                sample_grp   <= sample_grp + 3'd1;
+                                resp_cnt     <= 3'd0;
+                                pix_rd_valid <= 1'b1;
+                                pix_rd_comp  <= cur_comp;
+                                state        <= S_PIX_LOAD;
+                            end else begin
+                                sample_grp   <= 3'd0;
+                                state        <= S_FILT_WAIT;
+                            end
+                        end else begin
+                            luma_in_valid <= 1'b1;
+                        end
+                    end
+                end
+                S_FILT_WAIT: begin
+                    if (is_luma) begin
+                        if (luma_out_valid) begin
+                            write_cnt <= 3'd0;
+                            state     <= S_PIX_WRITE;
+                        end
+                    end else begin
+                        chr_out_ready <= 1'b1;
+                        if (chr_out_valid) begin
+                            chr_out_ready <= 1'b0;
+                            write_cnt     <= 3'd0;
+                            state         <= S_PIX_WRITE;
+                        end
+                    end
+                end
+                S_PIX_WRITE: begin
+                    if (pix_wr_ready) begin
+                        if (write_cnt == (is_luma ? 3'd5 : 3'd1)) begin
+                            write_cnt <= 3'd0;
+                            if (is_luma) begin
+                                if (sample_grp < 3'd3) begin
+                                    sample_grp <= sample_grp + 3'd1;
+                                end else begin
+                                    sample_grp <= 3'd3;
+                                    state      <= S_NEXT_EDGE;
+                                end
+                            end else begin
+                                state <= S_NEXT_EDGE;
+                            end
+                        end else begin
+                            write_cnt <= write_cnt + 3'd1;
+                        end
+                    end
+                end
+                S_NEXT_EDGE: begin
+                    if (is_chroma && (sample_grp < 3'd3)) begin
+                        sample_grp <= sample_grp + 3'd1;
+                        state      <= S_BS_REQ;
+                    end else begin
+                        sample_grp <= 3'd0;
+                        if (!is_vert && is_corner_stage) begin
+                            is_corner_stage <= 1'b0;
+                            edge_pos        <= 4'd0;
+                            state           <= S_BS_REQ;
+                        end else if (edge_pos < (is_vert ? max_pos : max_col_pos)) begin
+                            edge_pos <= edge_pos + 4'd1;
+                            state    <= S_BS_REQ;
+                        end else begin
+                            edge_pos <= 4'd0;
+`ifdef REMEDIATION
+                            if (edge_stage < max_edge_stage) begin
+                                edge_stage      <= edge_stage + 3'd1;
+                                is_corner_stage <= 1'b0;
+                                state           <= S_BS_REQ;
+                            end else begin
+                                state <= S_NEXT_PASS;
+                            end
+`else
+                            if (edge_stage == 1'b0) begin
+                                edge_stage      <= 1'b1;
+                                is_corner_stage <= (!is_vert && has_left_neighbor);
+                                state           <= S_BS_REQ;
+                            end else begin
+                                state <= S_NEXT_PASS;
+                            end
+`endif
+                        end
+                    end
+                end
+                S_NEXT_PASS: begin
+                    if (pass == PASS_CR_HORIZ) begin
+                        state <= S_DONE;
+                    end else begin
+                        pass            <= pass + 3'd1;
+`ifdef REMEDIATION
+                        edge_stage      <= next_has_ctu_boundary ? 3'd0 : 3'd1;
+`else
+                        edge_stage      <= next_has_ctu_boundary ? 1'b0 : 1'b1;
+`endif
+                        is_corner_stage <= 1'b0;
+                        edge_pos        <= 4'd0;
+                        sample_grp      <= 3'd0;
+                        state           <= S_BS_REQ;
+                    end
+                end
+                S_DONE: begin
+                    ctu_done <= 1'b1;
+                    state    <= S_IDLE;
+                end
+                default: state <= S_IDLE;
+            endcase
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // Pixel combinational address and data generation
+    //-------------------------------------------------------------------------
+    wire [2:0] px_idx;
+    wire       loading_q;
+    wire [2:0] q_idx;
+    wire [5:0] ec, er;
+    wire [2:0] sg;
+    wire [2:0] wr_q_idx;
+
+    assign px_idx    = resp_cnt;
+    assign loading_q = is_luma ? (px_idx >= 3'd4) : (px_idx >= 3'd2);
+    assign q_idx     = is_luma ? (px_idx - 3'd4) : (px_idx - 3'd2);
+    assign wr_q_idx  = is_luma ? (write_cnt - 3'd3) : (write_cnt - 3'd1);
+
+    assign ec = edge_col;
+    assign er = edge_row;
+    assign sg = sample_grp;
+
+    always @(*) begin
+        // Defaults to prevent latches
+        pix_rd_x = 6'd0;
+        pix_rd_y = 6'd0;
+        
+        if (is_vert) begin
+            pix_rd_y = {er, 2'b00} + {3'b0, sg};
+            if (loading_q) pix_rd_x = {ec, 2'b00} + {3'b0, q_idx};
+            else           pix_rd_x = {ec, 2'b00} - 6'd1 - {3'b0, px_idx};
+        end else begin
+            pix_rd_x = {ec, 2'b00} + {3'b0, sg};
+            if (loading_q) pix_rd_y = {er, 2'b00} + {3'b0, q_idx};
+            else           pix_rd_y = {er, 2'b00} - 6'd1 - {3'b0, px_idx};
+        end
+    end
+
+    always @(*) begin
+        pix_wr_valid = (state == S_PIX_WRITE);
+        pix_wr_comp  = cur_comp;
+
+        // Combinational write data
+        if (is_luma) begin
+            case (write_cnt)
+                3'd0: pix_wr_data = luma_p0f;
+                3'd1: pix_wr_data = luma_p1f;
+                3'd2: pix_wr_data = luma_p2f;
+                3'd3: pix_wr_data = luma_q0f;
+                3'd4: pix_wr_data = luma_q1f;
+                3'd5: pix_wr_data = luma_q2f;
+                default: pix_wr_data = {`PIXEL_WIDTH{1'b0}};
+            endcase
+        end else begin
+            case (write_cnt)
+                3'd0: pix_wr_data = chr_p0f;
+                3'd1: pix_wr_data = chr_q0f;
+                default: pix_wr_data = {`PIXEL_WIDTH{1'b0}};
+            endcase
+        end
+
+        // Combinational write address
+        pix_wr_x = 6'd0;
+        pix_wr_y = 6'd0;
+        if (is_vert) begin
+            pix_wr_y = {er, 2'b00} + {3'b0, sg};
+            if (write_cnt <= (is_luma ? 3'd2 : 3'd0)) pix_wr_x = {ec, 2'b00} - 6'd1 - {3'b0, write_cnt};
+            else                                      pix_wr_x = {ec, 2'b00} + {3'b0, wr_q_idx};
+        end else begin
+            pix_wr_x = {ec, 2'b00} + {3'b0, sg};
+            if (write_cnt <= (is_luma ? 3'd2 : 3'd0)) pix_wr_y = {er, 2'b00} - 6'd1 - {3'b0, write_cnt};
+            else                                      pix_wr_y = {er, 2'b00} + {3'b0, wr_q_idx};
+        end
+    end
+
+    // Neighbor buffer and frame store control indicators
+    assign pix_rd_is_vert  = is_vert;
+    assign pix_wr_is_vert  = is_vert;
+    assign pix_rd_corner   = is_corner_stage;
+    assign pix_wr_corner   = is_corner_stage;
+    assign pix_rd_neighbor = is_corner_stage ? 1'b1 : (is_ctu_boundary && !loading_q);
+    assign pix_wr_neighbor = is_corner_stage ? 1'b1 : (is_ctu_boundary && (write_cnt <= (is_luma ? 3'd2 : 3'd0)));
+
+    //-------------------------------------------------------------------------
+    // Simulation checks
+    //-------------------------------------------------------------------------
+    // synthesis translate_off
+    always @(posedge clk) begin
+        if (rst_n && ctu_done)
+            $display("INFO  [deblock_top] CTU done addr=%0d (%0d,%0d) at time=%0t",
+                     cur_ctu_addr, cur_ctu_x, cur_ctu_y, $time);
+    end
+    // synthesis translate_on
+
+endmodule

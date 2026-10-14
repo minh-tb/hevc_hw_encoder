@@ -1,18 +1,24 @@
 #=============================================================================
 # synth_vivado.tcl
 # Vivado ML / Enterprise Synthesis Script for HEVC Hardware Encoder
-# Target Part: Zynq UltraScale+ (xczu9eg-ffvb1156-2-e)
+# Target Part: Zynq UltraScale+ (xczu19eg-ffvb1517-2-e)
 # Mode: Out-of-Context (OOC) Synthesis & Timing Analysis
 #=============================================================================
 
-set top_module "hevc_encoder_top"
+# Select top module (Default: SoC wrapper hevc_encoder_axi_top)
+if { [info exists env(TOP_MODULE)] } {
+    set top_module $env(TOP_MODULE)
+} else {
+    set top_module "hevc_encoder_axi_top"
+}
+
 set output_dir "synth/vivado_output"
 
-# Default part: Zynq UltraScale+ MPSoC
+# Default target FPGA part: Zynq UltraScale+ xczu19eg (522k LUTs capacity)
 if { [info exists env(VIVADO_PART)] } {
     set target_part $env(VIVADO_PART)
 } else {
-    set target_part "xczu9eg-ffvb1156-2-e"
+    set target_part "xczu19eg-ffvb1517-2-e"
 }
 
 file mkdir $output_dir
@@ -21,8 +27,8 @@ puts "================================================================="
 puts " Starting Vivado Synthesis for $top_module on $target_part"
 puts "================================================================="
 
-# Enable multi-threaded synthesis (up to 6 physical cores)
-catch {set_param general.maxThreads 6}
+# Enable multi-threaded synthesis (up to 8 physical cores if available)
+catch {set_param general.maxThreads 8}
 
 # 1. Create in-memory project
 create_project -in_memory -part $target_part
@@ -79,6 +85,7 @@ set rtl_files [list \
     "rtl/inter/ref_frame_buffer.v" \
     "rtl/inter/sad_4x4.v" \
     "rtl/inter/sad_8x8.v" \
+    "rtl/inter/streaming_subpel_filter.v" \
     "rtl/inter/tz_search.v" \
     "rtl/intra/intra_angular.v" \
     "rtl/intra/intra_dc.v" \
@@ -108,6 +115,7 @@ set rtl_files [list \
     "rtl/transform/transform_1d_core.v" \
     "rtl/transform/transpose_ram_32x32.v" \
     "rtl/transform/dct_top.v" \
+    "rtl/top/hevc_encoder_axi_top.v" \
 ]
 read_verilog -sv $rtl_files
 
@@ -120,16 +128,25 @@ puts " Running synth_design on $top_module..."
 puts "================================================================="
 synth_design -top $top_module -part $target_part -mode out_of_context -verilog_define {SYNTHESIS=1}
 
-# 5. Generate Reports
+# 5. Export Synthesized Design Checkpoint (.dcp)
 puts "================================================================="
-puts " Generating Synthesis & Timing Reports..."
+puts " Exporting Synthesized Design Checkpoint..."
+puts "================================================================="
+write_checkpoint -force "$output_dir/${top_module}_synth.dcp"
+
+# 6. Generate Comprehensive Reports
+puts "================================================================="
+puts " Generating Synthesis, Utilization, Timing & Power Reports..."
 puts "================================================================="
 report_utilization -file "$output_dir/utilization_synth.rpt" -pb "$output_dir/utilization_synth.pb"
+report_utilization -hierarchical -file "$output_dir/utilization_hierarchical.rpt"
 report_timing_summary -file "$output_dir/timing_summary_synth.rpt" -delay_type max -max_paths 10
 report_power -file "$output_dir/power_synth.rpt"
+report_methodology -file "$output_dir/methodology_synth.rpt"
 
 puts "================================================================="
 puts " Vivado Synthesis Flow Completed Successfully!"
 puts " Reports saved to: $output_dir"
+puts " Checkpoint: $output_dir/${top_module}_synth.dcp"
 puts "================================================================="
-exit
+exit 0

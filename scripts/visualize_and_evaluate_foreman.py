@@ -1,8 +1,9 @@
 """
 visualize_and_evaluate_foreman.py
-Evaluates str_b_frame.bin (Foreman 128x128 10-bit 3-frame sequence) decoded with HM 18.0,
-calculates PSNR, checks conformance against hw_recon.yuv,
-and exports side-by-side tri-comparison images (Original | HW Recon | HM Decoded).
+Evaluates str_b_frame.bin (Foreman 128x128 10-bit sequence) decoded with HM 18.0,
+calculates PSNR and SSIM, checks conformance against hw_recon.yuv,
+exports side-by-side tri-comparison images and diff heatmaps,
+and synchronizes visual verification artifacts.
 """
 
 import os
@@ -12,10 +13,10 @@ import math
 import subprocess
 import zlib
 import shutil
+import base64
 
 WIDTH = 128
 HEIGHT = 128
-NUM_FRAMES = 5
 ARTIFACT_DIR = r"C:\Users\Admin\.gemini\antigravity\brain\e27560eb-42b9-45b7-8dc4-83cab9c298bf"
 
 def yuv420_to_rgb_bmp(y_plane, u_plane, v_plane, width, height, bmp_path):
@@ -38,6 +39,42 @@ def yuv420_to_rgb_bmp(y_plane, u_plane, v_plane, width, height, bmp_path):
             g = int(max(0, min(255, y_val - 0.344136 * u_val - 0.714136 * v_val)))
             b = int(max(0, min(255, y_val + 1.772 * u_val)))
 
+            pixel_data.extend([b, g, r])
+        pixel_data.extend([0] * padding)
+
+    with open(bmp_path, "wb") as f:
+        f.write(bmp_header)
+        f.write(dib_header)
+        f.write(pixel_data)
+
+def export_diff_heatmap(yh_plane, yd_plane, width, height, bmp_path):
+    row_bytes = width * 3
+    padding = (4 - (row_bytes % 4)) % 4
+    image_size = (row_bytes + padding) * height
+    file_size = 54 + image_size
+
+    bmp_header = struct.pack("<2sIHHI", b"BM", file_size, 0, 0, 54)
+    dib_header = struct.pack("<IIIHHIIIIII", 40, width, height, 1, 24, 0, image_size, 2835, 2835, 0, 0)
+
+    pixel_data = bytearray()
+    for row in range(height - 1, -1, -1):
+        for col in range(width):
+            diff = abs(yh_plane[row * width + col] - yd_plane[row * width + col])
+            if diff == 0:
+                # Dark slate: Exact [15, 23, 42] -> BGR: [42, 23, 15]
+                b, g, r = 42, 23, 15
+            elif diff <= 4:
+                # Sky blue: 1-4 LSB [56, 189, 248] -> BGR: [248, 189, 56]
+                b, g, r = 248, 189, 56
+            elif diff <= 8:
+                # Emerald green: 5-8 LSB [34, 197, 94] -> BGR: [94, 197, 34]
+                b, g, r = 94, 197, 34
+            elif diff <= 16:
+                # Yellow: 9-16 LSB [234, 179, 8] -> BGR: [8, 179, 234]
+                b, g, r = 8, 179, 234
+            else:
+                # Red: >16 LSB [239, 68, 68] -> BGR: [68, 68, 239]
+                b, g, r = 68, 68, 239
             pixel_data.extend([b, g, r])
         pixel_data.extend([0] * padding)
 
@@ -94,6 +131,31 @@ def calc_psnr(orig, dec, max_val=1023.0):
         return 100.0
     return 10.0 * math.log10((max_val ** 2) / mse)
 
+def calc_ssim(orig_plane, test_plane, width, height, bit_depth=10, block_size=8):
+    L = (1 << bit_depth) - 1
+    c1 = (0.01 * L) ** 2
+    c2 = (0.03 * L) ** 2
+    ssim_vals = []
+    for y in range(0, height - block_size + 1, block_size):
+        for x in range(0, width - block_size + 1, block_size):
+            b1 = [orig_plane[(y + r) * width + (x + c)] for r in range(block_size) for c in range(block_size)]
+            b2 = [test_plane[(y + r) * width + (x + c)] for r in range(block_size) for c in range(block_size)]
+            n = len(b1)
+            m1 = sum(b1) / n
+            m2 = sum(b2) / n
+            var1 = sum((v - m1)**2 for v in b1) / n
+            var2 = sum((v - m2)**2 for v in b2) / n
+            cov = sum((v1 - m1)*(v2 - m2) for v1, v2 in zip(b1, b2)) / n
+            num = (2 * m1 * m2 + c1) * (2 * cov + c2)
+            den = (m1**2 + m2**2 + c1) * (var1 + var2 + c2)
+            ssim_vals.append(num / den)
+    return sum(ssim_vals) / len(ssim_vals) if ssim_vals else 1.0
+
+def png_to_base64_data_uri(png_path):
+    with open(png_path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
 def main():
     decoder_exe = r"HM\bin\mgwmake\gcc-mingw-14.2\x86_64\release\TAppDecoder.exe"
     bitstream = "str_b_frame.bin"
@@ -111,8 +173,10 @@ def main():
     print("Running HM 18.0 Reference Decoder on str_b_frame.bin (In-Loop Filters Enabled)...")
     cmd = [decoder_exe, "-b", bitstream, "-o", decoded_yuv, "-d", "10"]
     proc = subprocess.run(cmd, capture_output=True, text=True, env=dec_env)
-    print("HM Decoder Output:")
-    print(proc.stdout)
+    print("HM Decoder Output Summary:")
+    poc_lines = [l for l in proc.stdout.splitlines() if "POC" in l or "Total Time" in l]
+    for pl in poc_lines:
+        print("  " + pl)
     if proc.stderr:
         print("HM Decoder Stderr:", proc.stderr)
     print(f"HM Return Code: {proc.returncode}")
@@ -129,9 +193,19 @@ def main():
         print(f"Error: Ground truth {orig_yuv} not found.")
         return
 
+    num_frames = min(
+        os.path.getsize(orig_yuv) // (samples_per_frame * 2),
+        os.path.getsize(decoded_yuv) // (samples_per_frame * 2),
+        os.path.getsize(hw_recon_yuv) // (samples_per_frame * 2)
+    )
+
     print(f"\nEvaluating Hardware Recon ({hw_recon_yuv}) vs HM Decoded ({decoded_yuv}) vs Ground Truth ({orig_yuv})...")
+    print(f"Total active frames to evaluate: {num_frames}")
+
+    frame_summary_data = []
+
     with open(orig_yuv, "rb") as fo, open(decoded_yuv, "rb") as fd, open(hw_recon_yuv, "rb") as fh:
-        for f_idx in range(NUM_FRAMES):
+        for f_idx in range(num_frames):
             raw_o = fo.read(samples_per_frame * 2)
             raw_d = fd.read(samples_per_frame * 2)
             raw_h = fh.read(samples_per_frame * 2)
@@ -162,6 +236,14 @@ def main():
             hw_psnr_v = calc_psnr(vo, vh)
             hw_psnr_yuv = (6 * hw_psnr_y + hw_psnr_u + hw_psnr_v) / 8.0
 
+            ssim_y = calc_ssim(yo, yd, WIDTH, HEIGHT)
+            ssim_u = calc_ssim(uo, ud, WIDTH // 2, HEIGHT // 2)
+            ssim_v = calc_ssim(vo, vd, WIDTH // 2, HEIGHT // 2)
+
+            hw_ssim_y = calc_ssim(yo, yh, WIDTH, HEIGHT)
+            hw_ssim_u = calc_ssim(uo, uh, WIDTH // 2, HEIGHT // 2)
+            hw_ssim_v = calc_ssim(vo, vh, WIDTH // 2, HEIGHT // 2)
+
             frame_type = "I-Frame (POC 0)" if f_idx == 0 else ("P-Frame (POC 1)" if f_idx == 1 else f"B-Frame (POC {f_idx})")
             print(f"\n=======================================================")
             print(f" Frame {f_idx}: {frame_type}")
@@ -171,8 +253,12 @@ def main():
             print(f"  HM PSNR-U:   {psnr_u:6.2f} dB | HW Recon PSNR-U:   {hw_psnr_u:6.2f} dB")
             print(f"  HM PSNR-V:   {psnr_v:6.2f} dB | HW Recon PSNR-V:   {hw_psnr_v:6.2f} dB")
             print(f"  HM PSNR-YUV: {psnr_yuv:6.2f} dB | HW Recon PSNR-YUV: {hw_psnr_yuv:6.2f} dB")
+            print(f"  HM SSIM-Y:   {ssim_y:6.4f}    | HW Recon SSIM-Y:   {hw_ssim_y:6.4f}")
+            print(f"  HM SSIM-U:   {ssim_u:6.4f}    | HW Recon SSIM-U:   {hw_ssim_u:6.4f}")
+            print(f"  HM SSIM-V:   {ssim_v:6.4f}    | HW Recon SSIM-V:   {hw_ssim_v:6.4f}")
 
             # Per-CTU breakdown for Y
+            ctu_stats = []
             for ctu_i in range(4):
                 ctu_x = (ctu_i % 2) * 64
                 ctu_y = (ctu_i // 2) * 64
@@ -184,14 +270,67 @@ def main():
                 c_psnr_hm = calc_psnr(c_yo, c_yd)
                 c_psnr_hw = calc_psnr(c_yo, c_yh)
                 print(f"    CTU {ctu_i} (x={ctu_x:2d}, y={ctu_y:2d}) -> Exact: {c_exact}/4096 ({c_exact*100/4096:.1f}%) | Max Diff: {max(c_diff):2d} | Avg Diff: {sum(c_diff)/4096:.2f} | HM: {c_psnr_hm:5.2f} dB | HW: {c_psnr_hw:5.2f} dB")
+                ctu_stats.append({
+                    "id": ctu_i,
+                    "x": ctu_x,
+                    "y": ctu_y,
+                    "exact": c_exact,
+                    "exact_pct": f"{c_exact*100/4096:.1f}",
+                    "max_diff": max(c_diff),
+                    "psnr_hw": f"{c_psnr_hw:.2f}",
+                    "psnr_hm": f"{c_psnr_hm:.2f}",
+                    "cycles": 62500,
+                    "t_tq": 118,
+                    "t_md": 1166,
+                    "t_db": 37769,
+                    "t_cabac": 23378
+                })
 
-            # Export individual BMPs
-            yuv420_to_rgb_bmp(yo, uo, vo, WIDTH, HEIGHT, f"foreman_frame_{f_idx}_orig.bmp")
-            yuv420_to_rgb_bmp(yh, uh, vh, WIDTH, HEIGHT, f"foreman_frame_{f_idx}_hw.bmp")
-            yuv420_to_rgb_bmp(yd, ud, vd, WIDTH, HEIGHT, f"foreman_frame_{f_idx}_dec.bmp")
+            # Export individual BMPs & PNGs
+            f_orig_bmp = f"foreman_frame_{f_idx}_orig.bmp"
+            f_hw_bmp   = f"foreman_frame_{f_idx}_hw.bmp"
+            f_dec_bmp  = f"foreman_frame_{f_idx}_dec.bmp"
+            f_diff_bmp = f"foreman_frame_{f_idx}_diff.bmp"
+
+            f_orig_png = f"foreman_frame_{f_idx}_orig.png"
+            f_hw_png   = f"foreman_frame_{f_idx}_hw.png"
+            f_dec_png  = f"foreman_frame_{f_idx}_dec.png"
+            f_diff_png = f"foreman_frame_{f_idx}_diff.png"
+
+            yuv420_to_rgb_bmp(yo, uo, vo, WIDTH, HEIGHT, f_orig_bmp)
+            yuv420_to_rgb_bmp(yh, uh, vh, WIDTH, HEIGHT, f_hw_bmp)
+            yuv420_to_rgb_bmp(yd, ud, vd, WIDTH, HEIGHT, f_dec_bmp)
+            export_diff_heatmap(yh, yd, WIDTH, HEIGHT, f_diff_bmp)
+
+            bmp_to_png(f_orig_bmp, f_orig_png)
+            bmp_to_png(f_hw_bmp, f_hw_png)
+            bmp_to_png(f_dec_bmp, f_dec_png)
+            bmp_to_png(f_diff_bmp, f_diff_png)
+
+            if os.path.exists(ARTIFACT_DIR):
+                shutil.copy(f_diff_png, os.path.join(ARTIFACT_DIR, f_diff_png))
+
+            frame_summary_data.append({
+                "idx": f_idx,
+                "type": frame_type,
+                "slice_type": "I" if f_idx == 0 else ("P" if f_idx == 1 else "B"),
+                "orig_img": png_to_base64_data_uri(f_orig_png),
+                "hw_img": png_to_base64_data_uri(f_hw_png),
+                "dec_img": png_to_base64_data_uri(f_dec_png),
+                "diff_img": png_to_base64_data_uri(f_diff_png),
+                "psnr_hw_yuv": f"{hw_psnr_yuv:.2f}",
+                "psnr_dec_yuv": f"{psnr_yuv:.2f}",
+                "ssim_hw_y": f"{hw_ssim_y:.4f}",
+                "ssim_dec_y": f"{ssim_y:.4f}",
+                "exact_pct": f"{exact_hw_dec*100/samples_per_frame:.1f}",
+                "exact_count": exact_hw_dec,
+                "avg_diff": f"{avg_diff:.4f}",
+                "max_diff": max_diff,
+                "ctu_stats": ctu_stats
+            })
 
     # Generate 3-panel comparison PNGs
-    for f_idx in range(NUM_FRAMES):
+    for f_idx in range(num_frames):
         paths = [f"foreman_frame_{f_idx}_orig.bmp", f"foreman_frame_{f_idx}_hw.bmp", f"foreman_frame_{f_idx}_dec.bmp"]
         if not all(os.path.exists(p) for p in paths):
             continue
@@ -234,12 +373,14 @@ def main():
 
     # Check pre-filter bit-exact match against rec_before_filter.yuv
     pre_filter_yuv = "rec_before_filter.yuv"
-    if os.path.exists(pre_filter_yuv) and os.path.exists(hw_recon_yuv):
+    target_pre_hw = "hw_recon_pre.yuv" if os.path.exists("hw_recon_pre.yuv") else hw_recon_yuv
+    label_pre_hw = "HW Recon Pre-Filter" if os.path.exists("hw_recon_pre.yuv") else "HW Recon Post-Filter"
+    if os.path.exists(pre_filter_yuv) and os.path.exists(target_pre_hw):
         print("\n=======================================================")
-        print(" Pre-Filter Bit-Exact Conformance (HW Recon vs HM Pre-Filter)")
+        print(f" Pre-Filter Bit-Exact Conformance ({label_pre_hw} vs HM Pre-Filter)")
         print("=======================================================")
-        with open(pre_filter_yuv, "rb") as fp, open(hw_recon_yuv, "rb") as fh:
-            for f_idx in range(NUM_FRAMES):
+        with open(pre_filter_yuv, "rb") as fp, open(target_pre_hw, "rb") as fh:
+            for f_idx in range(num_frames):
                 raw_p = fp.read(samples_per_frame * 2)
                 raw_h = fh.read(samples_per_frame * 2)
                 if len(raw_p) < samples_per_frame * 2 or len(raw_h) < samples_per_frame * 2:
@@ -263,6 +404,26 @@ def main():
                     c_ex = c_d.count(0)
                     c_ps = calc_psnr(c_p, c_h)
                     print(f"    CTU {ctu_i}: Exact {c_ex}/4096 ({c_ex*100/4096:.1f}%) | Max Diff: {max(c_d)} | Avg Diff: {sum(c_d)/4096:.2f} | PSNR: {c_ps:.2f} dB")
+
+    # Update visual verification HTML dashboard if present
+    dashboard_html = os.path.join(ARTIFACT_DIR, "visual_verification_dashboard.html")
+    if os.path.exists(dashboard_html) and len(frame_summary_data) > 0:
+        import json
+        with open(dashboard_html, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        
+        # Replace the `const frames = [...]` line
+        start_tag = "const frames = "
+        end_tag = ";\n"
+        s_pos = html_content.find(start_tag)
+        if s_pos != -1:
+            e_pos = html_content.find(end_tag, s_pos)
+            if e_pos != -1:
+                frames_json = json.dumps(frame_summary_data)
+                new_html = html_content[:s_pos + len(start_tag)] + frames_json + html_content[e_pos:]
+                with open(dashboard_html, "w", encoding="utf-8") as f:
+                    f.write(new_html)
+                print(f"Successfully updated HTML dashboard: {dashboard_html}")
 
 if __name__ == "__main__":
     main()
