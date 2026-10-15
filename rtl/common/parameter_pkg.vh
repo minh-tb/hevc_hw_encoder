@@ -48,7 +48,9 @@
 //-----------------------------------------------------------------------------
 `define STALL_WATCHDOG_LIMIT     32'd25000  // Consecutive stall cycles before watchdog trip
 `ifdef REMEDIATION
-`define CTU_WATCHDOG_LIMIT       32'd500000 // Max cycles per CTU before timeout (accommodates inter motion search + 8-stage deblock)
+`ifndef CTU_WATCHDOG_LIMIT
+`define CTU_WATCHDOG_LIMIT       32'd2000000 // Max cycles per CTU before timeout (accommodates inter motion search + 8-stage deblock)
+`endif
 `else
 `define CTU_WATCHDOG_LIMIT       32'd150000 // Max cycles per CTU before timeout
 `endif

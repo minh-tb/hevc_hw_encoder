@@ -279,11 +279,11 @@ def main():
                     "max_diff": max(c_diff),
                     "psnr_hw": f"{c_psnr_hw:.2f}",
                     "psnr_hm": f"{c_psnr_hm:.2f}",
-                    "cycles": 62500,
-                    "t_tq": 118,
-                    "t_md": 1166,
-                    "t_db": 37769,
-                    "t_cabac": 23378
+                    "cycles": None,
+                    "t_tq": None,
+                    "t_md": None,
+                    "t_db": None,
+                    "t_cabac": None
                 })
 
             # Export individual BMPs & PNGs
@@ -405,25 +405,29 @@ def main():
                     c_ps = calc_psnr(c_p, c_h)
                     print(f"    CTU {ctu_i}: Exact {c_ex}/4096 ({c_ex*100/4096:.1f}%) | Max Diff: {max(c_d)} | Avg Diff: {sum(c_d)/4096:.2f} | PSNR: {c_ps:.2f} dB")
 
-    # Update visual verification HTML dashboard if present
-    dashboard_html = os.path.join(ARTIFACT_DIR, "visual_verification_dashboard.html")
-    if os.path.exists(dashboard_html) and len(frame_summary_data) > 0:
-        import json
-        with open(dashboard_html, "r", encoding="utf-8") as f:
-            html_content = f.read()
-        
-        # Replace the `const frames = [...]` line
-        start_tag = "const frames = "
-        end_tag = ";\n"
-        s_pos = html_content.find(start_tag)
-        if s_pos != -1:
-            e_pos = html_content.find(end_tag, s_pos)
-            if e_pos != -1:
-                frames_json = json.dumps(frame_summary_data)
-                new_html = html_content[:s_pos + len(start_tag)] + frames_json + html_content[e_pos:]
-                with open(dashboard_html, "w", encoding="utf-8") as f:
-                    f.write(new_html)
-                print(f"Successfully updated HTML dashboard: {dashboard_html}")
+    # Update visual verification HTML dashboard if present (in repo root or ARTIFACT_DIR)
+    dashboard_candidates = [
+        "visual_verification_dashboard.html",
+        os.path.join(ARTIFACT_DIR, "visual_verification_dashboard.html")
+    ]
+    for dashboard_html in dashboard_candidates:
+        if os.path.exists(dashboard_html) and len(frame_summary_data) > 0:
+            import json
+            with open(dashboard_html, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            
+            # Replace the `const frames = [...]` line
+            start_tag = "const frames = "
+            end_tag = ";\n"
+            s_pos = html_content.find(start_tag)
+            if s_pos != -1:
+                e_pos = html_content.find(end_tag, s_pos)
+                if e_pos != -1:
+                    frames_json = json.dumps(frame_summary_data)
+                    new_html = html_content[:s_pos + len(start_tag)] + frames_json + html_content[e_pos:]
+                    with open(dashboard_html, "w", encoding="utf-8") as f:
+                        f.write(new_html)
+                    print(f"Successfully updated HTML dashboard: {dashboard_html}")
 
 if __name__ == "__main__":
     main()

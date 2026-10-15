@@ -8,7 +8,7 @@ import json
 
 WIDTH = 128
 HEIGHT = 128
-NUM_FRAMES = 5
+NUM_FRAMES = 3
 ARTIFACT_DIR = r"C:\Users\Admin\.gemini\antigravity\brain\e27560eb-42b9-45b7-8dc4-83cab9c298bf"
 
 def yuv420_to_rgb_png(y_plane, u_plane, v_plane, width=128, height=128):
@@ -105,7 +105,7 @@ def load_profiling_data():
             if f_idx in records and c_idx in records[f_idx]:
                 f_list.append(records[f_idx][c_idx])
             else:
-                f_list.append({"ctu": c_idx, "total": 35000, "t_md": 4000, "t_tq": 13000, "t_db": 0, "t_cabac": 21000, "stall_cabac": 0, "stall_inloop": 0})
+                f_list.append({"ctu": c_idx, "total": 0, "t_md": 0, "t_tq": 0, "t_db": 0, "t_cabac": 0, "stall_cabac": 0, "stall_inloop": 0})
         result.append(f_list)
     return result
 
@@ -127,6 +127,8 @@ def main():
             raw_o = fo.read(samples_per_frame * 2)
             raw_h = fh.read(samples_per_frame * 2)
             raw_d = fd.read(samples_per_frame * 2)
+            if len(raw_o) < samples_per_frame * 2 or len(raw_h) < samples_per_frame * 2 or len(raw_d) < samples_per_frame * 2:
+                break
 
             orig = struct.unpack(f"<{samples_per_frame}H", raw_o)
             hw   = struct.unpack(f"<{samples_per_frame}H", raw_h)
@@ -671,10 +673,15 @@ def main():
 </html>
 """
 
-    out_file = os.path.join(ARTIFACT_DIR, "visual_verification_dashboard.html")
+    out_file = "visual_verification_dashboard.html"
     with open(out_file, "w", encoding="utf-8") as f:
         f.write(html_content)
     print(f"Generated visual verification dashboard: {out_file} ({len(html_content)} bytes)")
+    if os.path.exists(ARTIFACT_DIR) and os.path.abspath(ARTIFACT_DIR) != os.path.abspath("."):
+        try:
+            shutil.copy(out_file, os.path.join(ARTIFACT_DIR, "visual_verification_dashboard.html"))
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()

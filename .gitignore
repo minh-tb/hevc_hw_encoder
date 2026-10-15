@@ -69,6 +69,10 @@ dec_*.txt
 test.png
 test_dec.png
 test_hw.png
+foreman_frame_*_dec.png
+foreman_frame_*_hw.png
+foreman_frame_*_orig.png
+
 
 # System & Python caches
 .system_generated/

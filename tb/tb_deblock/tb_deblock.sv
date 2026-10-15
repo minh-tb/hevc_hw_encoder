@@ -75,6 +75,7 @@ module tb_deblock;
     logic [255:0] nbr_col_mvx_l1;
     logic [255:0] nbr_col_mvy_l1;
     logic [95:0]  nbr_col_qp;
+    logic [15:0]  nbr_col_edge_hor;
 
     logic [15:0]  nbr_row_pred_mode;
     logic [15:0]  nbr_row_cbf_luma;

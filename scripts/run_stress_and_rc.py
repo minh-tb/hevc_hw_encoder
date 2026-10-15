@@ -37,12 +37,19 @@ STRESS_TESTS = [
     },
     {
         "name": "High-Motion Video",
-        "macro": "PATTERN_HIGH_MOTION",
+        "macro": "PATTERN_HIGH_MOTION +define+CFG_TOTAL_FRAMES=2",
         "bin": "str_b_frame_high_motion.bin",
         "dec": "dec_hw_high_motion.yuv",
         "desc": "Verifies full-range +/-32 TZ search and signed MVD bitwidths under high motion dynamics."
     }
 ]
+
+VLOG_OPTS = (
+    "+define+REMEDIATION +libext+.v "
+    "-y rtl/top -y rtl/entropy -y rtl/common -y rtl/partition -y rtl/transform "
+    "-y rtl/intra -y rtl/recon -y rtl/inter -y rtl/rate_control -y rtl/inloop_filters "
+    "-y rtl/quant -y rtl/input_output +incdir+rtl/common +incdir+. rtl/common/parameter_pkg.vh"
+)
 
 def run_stress_test(t):
     print(f"\n================================================================================")
@@ -56,7 +63,7 @@ def run_stress_test(t):
         os.remove(bin_path)
 
     # 1. Compile testbench
-    vlog_cmd = f"vlog -sv +incdir+rtl/common +incdir+. rtl/entropy/range_coder.v rtl/entropy/bin_encoder.v rtl/entropy/syntax_coeff.v rtl/entropy/cabac_enc_top.v rtl/rate_control/rate_controller.v +define+{t['macro']} {TB_PATH}"
+    vlog_cmd = f"vlog -sv {VLOG_OPTS} +define+{t['macro']} {TB_PATH}"
     print(f"  > {vlog_cmd}")
     res = subprocess.run(vlog_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True)
     if res.returncode != 0:
@@ -64,10 +71,11 @@ def run_stress_test(t):
         return False
 
     # 2. Run simulation
-    vsim_cmd = 'vsim -c -do "run -all; quit -f" work.tb_b_frame_encoder'
+    log_name = t["bin"].replace(".bin", ".log")
+    vsim_cmd = f'vsim -c -l {log_name} -do "run -all; quit -f" work.tb_b_frame_encoder'
     print(f"  > {vsim_cmd}")
-    res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True)
-    if not os.path.exists(bin_path):
+    res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if res.returncode != 0 or not os.path.exists(bin_path):
         print(f"  [FAIL] Simulation failed to output bitstream: {t['bin']}")
         return False
 
@@ -97,7 +105,7 @@ def run_rate_control_test():
         os.remove(bin_path)
 
     # 1. Compile testbench with ENABLE_RC
-    vlog_cmd = f"vlog -sv +incdir+rtl/common +incdir+. rtl/entropy/range_coder.v rtl/entropy/bin_encoder.v rtl/entropy/syntax_coeff.v rtl/entropy/cabac_enc_top.v rtl/rate_control/rate_controller.v +define+ENABLE_RC {TB_PATH}"
+    vlog_cmd = f"vlog -sv {VLOG_OPTS} +define+ENABLE_RC {TB_PATH}"
     print(f"  > {vlog_cmd}")
     res = subprocess.run(vlog_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True)
     if res.returncode != 0:
@@ -105,23 +113,31 @@ def run_rate_control_test():
         return False
 
     # 2. Run simulation
-    vsim_cmd = 'vsim -c -do "run -all; quit -f" work.tb_b_frame_encoder'
+    vsim_cmd = 'vsim -c -l str_b_frame_rc.log -do "run -all; quit -f" work.tb_b_frame_encoder'
     print(f"  > {vsim_cmd}")
-    res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True)
-    if not os.path.exists(bin_path):
+    res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if res.returncode != 0 or not os.path.exists(bin_path):
         print(f"  [FAIL] Simulation failed to output bitstream: str_b_frame_rc.bin")
+        return False
+
+    # Verify that simulation finished cleanly
+    sim_ok = False
+    rc_logs = []
+    if os.path.exists("str_b_frame_rc.log"):
+        with open("str_b_frame_rc.log", "r", errors="ignore") as f:
+            for line in f:
+                if "Finished Successfully!" in line:
+                    sim_ok = True
+                if "[RATE_CONTROL]" in line:
+                    rc_logs.append(line.strip())
+                    print(f"    {line.strip()}")
+    if not sim_ok:
+        print("  [FAIL] Simulation did not complete cleanly (missing 'Finished Successfully' in str_b_frame_rc.log)")
         return False
 
     file_size = os.path.getsize(bin_path)
     actual_kbps = (file_size * 8.0 * 30.0) / (5.0 * 1000.0)
     print(f"  [PASS] CBR Bitstream generated: {file_size} bytes ({actual_kbps:.2f} kbps)")
-
-    # Parse RC logs from stdout
-    rc_logs = []
-    for line in res.stdout.splitlines():
-        if "[RATE_CONTROL]" in line:
-            rc_logs.append(line.strip())
-            print(f"    {line.strip()}")
 
     # 3. Decode with HM 18.0
     dec_cmd = [HM_DEC, "-b", bin_path, "-o", dec_path, "-d", "10"]

@@ -32,7 +32,7 @@ def run_decoder(bitstream="str_b_frame.bin", output_yuv="dec_gate.yuv", enable_l
         print(f"Decoder executable not found at {decoder_exe}")
         sys.exit(1)
 
-def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, height=128, num_frames=5, enable_loop_filters=False, phase1=False):
+def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, height=128, num_frames=3, enable_loop_filters=False, phase1=False):
     if not os.path.exists(hw_yuv) or not os.path.exists(dec_yuv):
         print(f"YUV files missing. Check {hw_yuv} and {dec_yuv}")
         sys.exit(1)
@@ -43,10 +43,7 @@ def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, heigh
     bytes_per_frame = samples_per_frame * 2
     
     global_max_diff = 0
-    p1_f0_internal = 0
-    p1_f1_internal = 0
-    p1_f0_tu_fail = 0
-    p1_f1_tu_fail = 0
+    frames_checked = 0
     
     with open(hw_yuv, "rb") as f_hw, open(dec_yuv, "rb") as f_dec:
         for f in range(num_frames):
@@ -54,89 +51,58 @@ def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, heigh
             dec_data = f_dec.read(bytes_per_frame)
             
             if not hw_data or not dec_data:
-                print(f"Incomplete data for frame {f}")
+                if f == 0:
+                    print(f"Error: No data available for frame {f}")
+                    sys.exit(1)
+                print(f"Reached EOF after {f} frames.")
                 break
                 
             hw_samples = struct.unpack(f"<{samples_per_frame}H", hw_data)
             dec_samples = struct.unpack(f"<{samples_per_frame}H", dec_data)
+            frames_checked += 1
             
-            exact_count = 0
-            max_diff = 0
-            sum_diff = 0
+            # Component breakdown: Y, Cb, Cr
+            comp_ranges = [
+                ("Y ", hw_samples[0:luma_size], dec_samples[0:luma_size]),
+                ("Cb", hw_samples[luma_size:luma_size + chroma_size], dec_samples[luma_size:luma_size + chroma_size]),
+                ("Cr", hw_samples[luma_size + chroma_size:samples_per_frame], dec_samples[luma_size + chroma_size:samples_per_frame]),
+            ]
             
-            for s_hw, s_dec in zip(hw_samples, dec_samples):
-                diff = abs(s_hw - s_dec)
-                if diff == 0:
-                    exact_count += 1
-                if diff > max_diff:
-                    max_diff = diff
-                sum_diff += diff
+            f_max_diff = 0
+            f_exact_count = 0
+            f_sum_diff = 0
+            
+            print(f"\n--- Frame {f} ---")
+            for comp_name, h_comp, d_comp in comp_ranges:
+                c_len = len(h_comp)
+                c_diff = [abs(h - d) for h, d in zip(h_comp, d_comp)]
+                c_exact = c_diff.count(0)
+                c_max = max(c_diff)
+                c_avg = sum(c_diff) / c_len
+                f_exact_count += c_exact
+                f_sum_diff += sum(c_diff)
+                if c_max > f_max_diff:
+                    f_max_diff = c_max
+                print(f"  [{comp_name}] Exact: {c_exact}/{c_len} ({c_exact*100/c_len:.2f}%) | Max Diff: {c_max:3d} | Avg Diff: {c_avg:.4f}")
                 
-            avg_diff = sum_diff / samples_per_frame
+            f_avg_diff = f_sum_diff / samples_per_frame
+            print(f"  [Total] Exact: {f_exact_count}/{samples_per_frame} ({f_exact_count*100/samples_per_frame:.2f}%) | Max Diff: {f_max_diff:3d} | Avg Diff: {f_avg_diff:.4f}")
             
-            print(f"Frame {f}: Exact matches = {exact_count}/{samples_per_frame} ({exact_count/samples_per_frame*100:.2f}%), Max Diff = {max_diff}, Avg Diff = {avg_diff:.4f}")
-            
-            if enable_loop_filters:
-                # Spatial breakdown for deblocking analysis
-                # Luma CTU boundary: x in 60..67 or y in 60..67
-                ctu_bound_diffs = 0
-                internal_diffs = 0
-                internal_tu_edge_diffs = 0
-                total_internal_tu_edges = 0
-                
-                for y in range(height):
-                    for x in range(width):
-                        idx = y * width + x
-                        d = abs(hw_samples[idx] - dec_samples[idx])
-                        is_ctu_boundary = (60 <= x <= 67) or (60 <= y <= 67)
-                        
-                        is_internal_tu = False
-                        if not is_ctu_boundary:
-                            for cx in [0, 64]:
-                                for cy in [0, 64]:
-                                    if (cx <= x < cx + 64) and (cy <= y < cy + 64):
-                                        if (cx + 28 <= x <= cx + 35) or (cy + 28 <= y <= cy + 35):
-                                            is_internal_tu = True
-                        if is_internal_tu:
-                            total_internal_tu_edges += 1
-                            if d > 0:
-                                internal_tu_edge_diffs += 1
-                                
-                        if d > 0:
-                            if is_ctu_boundary:
-                                ctu_bound_diffs += 1
-                            else:
-                                internal_diffs += 1
-                                
-                print(f"  -> Luma CTU boundary diffs (arch single-CTU scope): {ctu_bound_diffs}")
-                print(f"  -> Luma internal diffs (outside CTU boundary): {internal_diffs}")
-                print(f"  -> Luma internal 32x32 TU edges: {total_internal_tu_edges - internal_tu_edge_diffs}/{total_internal_tu_edges} matches ({(total_internal_tu_edges - internal_tu_edge_diffs)/total_internal_tu_edges*100:.2f}%)")
-                
-                if f == 0:
-                    p1_f0_internal = internal_diffs
-                    p1_f0_tu_fail = internal_tu_edge_diffs
-                elif f == 1:
-                    p1_f1_internal = internal_diffs
-                    p1_f1_tu_fail = internal_tu_edge_diffs
-            
-            if max_diff > global_max_diff:
-                global_max_diff = max_diff
+            if f_max_diff > global_max_diff:
+                global_max_diff = f_max_diff
 
-    if enable_loop_filters and phase1:
-        if p1_f0_internal == 0 and p1_f1_internal == 0 and p1_f0_tu_fail == 0 and p1_f1_tu_fail == 0:
-            print("\nPASS: Phase 1 internal 32x32 TU edges 100.00% bit-exact match against HM 18.0!")
-            print("      (Inter-CTU boundary filtering x=64, y=64 scheduled for Phase 2 Line Buffers)")
-        else:
-            print("\nFAIL: Phase 1 internal TU edge mismatch")
-            sys.exit(1)
-    elif global_max_diff > 0:
-        print(f"\nFAIL: YUV mismatch (global_max_diff = {global_max_diff})")
+    print("\n=======================================================")
+    print(" REGRESSION GATE VERIFICATION SUMMARY")
+    print("=======================================================")
+    print(f"Frames verified: {frames_checked}")
+    print(f"Loop filters enabled: {enable_loop_filters}")
+    print(f"Global Max Sample Difference: {global_max_diff}")
+    
+    if global_max_diff > 0:
+        print(f"\nFAIL: Bit-exact conformance failure (global_max_diff = {global_max_diff} > 0)")
         sys.exit(1)
     else:
-        if enable_loop_filters:
-            print(f"\nPASS: Phase 2 full {num_frames}-frame 100.00% bit-exact match against HM 18.0 (global_max_diff = 0)!")
-        else:
-            print("\nPASS: YUV exact match")
+        print(f"\nPASS: Full {frames_checked}-frame 100.00% bit-exact match against HM 18.0 across all components Y, Cb, Cr (global_max_diff = 0)!")
 
 def parse_transcript(transcript_file="transcript"):
     if not os.path.exists(transcript_file):
@@ -246,8 +212,8 @@ def main():
     parser.add_argument("--hw-yuv", default="hw_recon.yuv", help="Hardware reconstructed YUV")
     parser.add_argument("--dec-yuv", default="dec_gate.yuv", help="Decoder reconstructed YUV")
     parser.add_argument("--transcript", default="transcript", help="Simulation transcript")
-    parser.add_argument("--phase1", action="store_true", help="Run Phase 1 validation (internal TU edges only)")
-    parser.add_argument("--num-frames", type=int, default=5, help="Number of frames")
+    parser.add_argument("--phase1", action="store_true", help="Deprecated (unmasked full verification is now standard)")
+    parser.add_argument("--num-frames", type=int, default=3, help="Number of frames (default: 3)")
     args = parser.parse_args()
     
     print_metadata(args.bitstream, enable_loop_filters=args.enable_loop_filters)

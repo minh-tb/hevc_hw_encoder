@@ -123,6 +123,7 @@ module decoder_inloop_filters (
     reg [255:0]  left_map_mvx_l1;
     reg [255:0]  left_map_mvy_l1;
     reg [95:0]   left_map_qp;
+    reg [15:0]   left_map_edge_hor;
 
     // Above CTU's bottom row (row 15, cols 0..31 for 2 CTUs)
     reg [31:0]   top_map_pred_mode;
@@ -152,6 +153,7 @@ module decoder_inloop_filters (
     reg signed [15:0] corner_mvy_l0;
     reg signed [15:0] corner_mvx_l1;
     reg signed [15:0] corner_mvy_l1;
+    reg        corner_edge_hor;
 
     integer init_i, init_j;
     initial begin
@@ -242,6 +244,7 @@ module decoder_inloop_filters (
             left_map_mvx_l1     <= 256'd0;
             left_map_mvy_l1     <= 256'd0;
             left_map_qp         <= 96'd0;
+            left_map_edge_hor   <= 16'd0;
 
             top_map_pred_mode   <= 32'd0;
             top_map_cbf_luma    <= 32'd0;
@@ -265,6 +268,7 @@ module decoder_inloop_filters (
             corner_mvy_l0      <= 16'd0;
             corner_mvx_l1      <= 16'd0;
             corner_mvy_l1      <= 16'd0;
+            corner_edge_hor    <= 1'b0;
         end else begin
             // Clear CBFs and latch neighbor CU caches when CTU finishes dumping to frame store
             if (filter_state == S_DUMP && out_ready && dump_count == 13'd6143) begin
@@ -285,6 +289,7 @@ module decoder_inloop_filters (
                     corner_mvy_l0      <= cu_map_mvy_l0[((15*16) + 15)*16 +: 16];
                     corner_mvx_l1      <= cu_map_mvx_l1[((15*16) + 15)*16 +: 16];
                     corner_mvy_l1      <= cu_map_mvy_l1[((15*16) + 15)*16 +: 16];
+                    corner_edge_hor    <= cu_map_edge_hor[(15*16) + 15];
                 end
 
                 for (c_k = 0; c_k < 16; c_k = c_k + 1) begin
@@ -299,6 +304,7 @@ module decoder_inloop_filters (
                     left_map_mvx_l1[c_k*16 +: 16]        <= cu_map_mvx_l1[((c_k*16) + 15)*16 +: 16];
                     left_map_mvy_l1[c_k*16 +: 16]        <= cu_map_mvy_l1[((c_k*16) + 15)*16 +: 16];
                     left_map_qp[c_k*6 +: 6]              <= cu_map_qp[((c_k*16) + 15)*6 +: 6];
+                    left_map_edge_hor[c_k]               <= cu_map_edge_hor[(c_k*16) + 15];
 
                     if (cur_ctu_x[0]) begin
                         top_map_pred_mode[16 + c_k]              <= cu_map_pred_mode[(15*16) + c_k];
@@ -449,6 +455,7 @@ module decoder_inloop_filters (
         .nbr_col_mvx_l1     (left_map_mvx_l1),
         .nbr_col_mvy_l1     (left_map_mvy_l1),
         .nbr_col_qp         (left_map_qp),
+        .nbr_col_edge_hor   (left_map_edge_hor),
         .nbr_row_pred_mode  (db_pix_rd_corner ? {corner_pred_mode, 15'd0}  : (cur_ctu_x[0] ? top_map_pred_mode[31:16] : top_map_pred_mode[15:0])),
         .nbr_row_cbf_luma   (db_pix_rd_corner ? {corner_cbf_luma, 15'd0}   : (cur_ctu_x[0] ? top_map_cbf_luma[31:16]  : top_map_cbf_luma[15:0])),
         .nbr_row_cbf_chroma (db_pix_rd_corner ? {corner_cbf_chroma, 15'd0} : (cur_ctu_x[0] ? top_map_cbf_chroma[31:16]: top_map_cbf_chroma[15:0])),
@@ -807,14 +814,20 @@ module decoder_inloop_filters (
                         2'd0: begin
                             if (db_pix_wr_y < 6'd60)
                                 col_buf_luma[db_pix_wr_y[5:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
+                            else
+                                corner_buf_luma[db_pix_wr_y[1:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                         end
                         2'd1: begin
                             if (db_pix_wr_y < 5'd30)
                                 col_buf_cb[db_pix_wr_y[4:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
+                            else
+                                corner_buf_cb[db_pix_wr_y[0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                         end
                         2'd2: begin
                             if (db_pix_wr_y < 5'd30)
                                 col_buf_cr[db_pix_wr_y[4:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
+                            else
+                                corner_buf_cr[db_pix_wr_y[0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                         end
                         default: ;
                     endcase

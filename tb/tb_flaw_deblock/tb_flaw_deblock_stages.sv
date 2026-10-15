@@ -154,6 +154,7 @@ module tb_flaw_deblock_stages;
         .nbr_col_mvx_l1(nbr_col_mvx_l1),
         .nbr_col_mvy_l1(nbr_col_mvy_l1),
         .nbr_col_qp(nbr_col_qp),
+        .nbr_col_edge_hor(16'd0),
         .nbr_row_pred_mode(nbr_row_pred_mode),
         .nbr_row_cbf_luma(nbr_row_cbf_luma),
         .nbr_row_cbf_chroma(nbr_row_cbf_chroma),

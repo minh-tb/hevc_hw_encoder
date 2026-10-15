@@ -90,6 +90,7 @@ module deblock_top (
     input  wire [255:0]   nbr_col_mvx_l1,
     input  wire [255:0]   nbr_col_mvy_l1,
     input  wire [95:0]    nbr_col_qp,
+    input  wire [15:0]    nbr_col_edge_hor,
 
     // Above CTU's bottom row (row 15, cols 0..15)
     input  wire [15:0]    nbr_row_pred_mode,
@@ -186,7 +187,7 @@ module deblock_top (
 
     wire has_left_neighbor    = (cur_ctu_x > 10'd0);
     wire has_right_neighbor   = (cur_ctu_x < (cur_frame_w >> 6) - 10'd1);
-    wire [3:0] max_col_pos    = max_pos;
+    wire [3:0] max_col_pos    = (has_right_neighbor && !is_vert) ? (max_pos - 4'd1) : max_pos;
 
     // Derived edge coordinates:
     // When is_vert: edge_col is fixed for the edge (0 or tu_edge_target), edge_row sweeps along the edge (0..max_pos)
@@ -216,8 +217,8 @@ module deblock_top (
     assign edge_col_cu = is_chroma ? {edge_col[2:0], 1'b0} : edge_col;
     assign edge_row_cu = is_chroma ? {edge_row[2:0], 1'b0} : edge_row;
 
-    wire is_boundary_edge = is_corner_stage ? 1'b1 :
-                            is_ctu_boundary ? 1'b1 :
+    wire is_boundary_edge = is_ctu_boundary ? 1'b1 :
+                            is_corner_stage ? nbr_col_edge_hor[edge_row_cu] :
                             is_vert ? cu_map_edge_ver[(edge_row_cu * 16) + edge_col_cu] :
                                       cu_map_edge_hor[(edge_row_cu * 16) + edge_col_cu];
 
@@ -566,7 +567,7 @@ module deblock_top (
 `ifdef REMEDIATION
                             if (edge_stage < max_edge_stage) begin
                                 edge_stage      <= edge_stage + 3'd1;
-                                is_corner_stage <= 1'b0;
+                                is_corner_stage <= (!is_vert && has_left_neighbor);
                                 state           <= S_BS_REQ;
                             end else begin
                                 state <= S_NEXT_PASS;
@@ -590,10 +591,11 @@ module deblock_top (
                         pass            <= pass + 3'd1;
 `ifdef REMEDIATION
                         edge_stage      <= next_has_ctu_boundary ? 3'd0 : 3'd1;
+                        is_corner_stage <= (!next_is_vert && has_left_neighbor);
 `else
                         edge_stage      <= next_has_ctu_boundary ? 1'b0 : 1'b1;
-`endif
                         is_corner_stage <= 1'b0;
+`endif
                         edge_pos        <= 4'd0;
                         sample_grp      <= 3'd0;
                         state           <= S_BS_REQ;
