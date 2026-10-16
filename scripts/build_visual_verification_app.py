@@ -5,6 +5,7 @@ import zlib
 import base64
 import math
 import json
+import shutil
 
 WIDTH = 128
 HEIGHT = 128
@@ -75,7 +76,7 @@ def load_profiling_data():
         r"T_MD=(\d+)\s+\|\s+T_TQ=(\d+)\s+\|\s+T_DB=(\d+)\s+\|\s+T_CABAC=(\d+)\s+\|\s+"
         r"Stall_CABAC=(\d+)\s+\|\s+Stall_Inloop=(\d+)"
     )
-    for log_candidate in ["transcript", "sim_profile.log", "sim_run.log"]:
+    for log_candidate in ["transcript_3frames.log", "transcript", "sim_profile.log", "sim_run.log"]:
         if os.path.exists(log_candidate):
             with open(log_candidate, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
@@ -105,7 +106,7 @@ def load_profiling_data():
             if f_idx in records and c_idx in records[f_idx]:
                 f_list.append(records[f_idx][c_idx])
             else:
-                f_list.append({"ctu": c_idx, "total": 0, "t_md": 0, "t_tq": 0, "t_db": 0, "t_cabac": 0, "stall_cabac": 0, "stall_inloop": 0})
+                f_list.append({"ctu": c_idx, "total": None, "t_md": None, "t_tq": None, "t_db": None, "t_cabac": None, "stall_cabac": None, "stall_inloop": None})
         result.append(f_list)
     return result
 
@@ -208,13 +209,13 @@ def main():
                 "exact_pct": round(exact_count * 100.0 / samples_per_frame, 2),
                 "max_diff": max_diff,
                 "avg_diff": round(avg_diff, 3),
-                "total_cycles": sum(c["total"] for c in profiling_data[f_idx]),
+                "total_cycles": sum(c["total"] or 0 for c in profiling_data[f_idx]) if any(c["total"] is not None for c in profiling_data[f_idx]) else None,
                 "ctu_stats": ctu_stats
             })
 
     all_exact = all(f["exact_count"] == samples_per_frame for f in frame_data) if frame_data else False
     max_diff_all = max(f["max_diff"] for f in frame_data) if frame_data else 0
-    total_stalls_all = sum(c.get("stall_cabac", 0) + c.get("stall_inloop", 0) for f in profiling_data for c in f)
+    total_stalls_all = sum((c.get("stall_cabac") or 0) + (c.get("stall_inloop") or 0) for f in profiling_data for c in f)
 
     if all_exact:
         conformance_badge_class = "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
@@ -228,7 +229,7 @@ def main():
         stall_badge_text = "Zero Pipeline Stalls"
     else:
         stall_badge_class = "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-        stall_badge_text = f"{total_stalls_all} Pipeline Stalls"
+        stall_badge_text = f"{total_stalls_all:,} Pipeline Stalls"
 
     # Build HTML
     html_content = f"""<!DOCTYPE html>
@@ -499,7 +500,7 @@ def main():
           </div>
           <div class="mt-3 pt-2 border-t border-[var(--border)] flex justify-between text-xs font-mono">
             <span class="text-[var(--muted-foreground)] font-sans">Pipeline Stalls:</span>
-            <span class="text-emerald-400 font-semibold">0 Cycles (Zero Stalls)</span>
+            <span class="text-emerald-400 font-semibold" id="prof-stalls">0 Cycles (Zero Stalls)</span>
           </div>
         </div>
 
@@ -652,18 +653,34 @@ def main():
       document.getElementById('detail-psnr-hm').innerText = `${{c.psnr_hm}} dB`;
       document.getElementById('detail-exact').innerText = `${{c.exact.toLocaleString()}} / 4,096 (${{c.exact_pct}}%)`;
       document.getElementById('detail-max-diff').innerText = `${{c.max_diff}} / 1023`;
-      document.getElementById('detail-cycles').innerText = `${{c.cycles.toLocaleString()}} cyc`;
+      document.getElementById('detail-cycles').innerText = c.cycles != null ? `${{c.cycles.toLocaleString()}} cyc` : 'N/A';
 
       // Profiling bars
-      document.getElementById('prof-tq').innerText = `${{c.t_tq.toLocaleString()}} cyc`;
-      document.getElementById('prof-md').innerText = `${{c.t_md.toLocaleString()}} cyc`;
-      document.getElementById('prof-db').innerText = `${{c.t_db.toLocaleString()}} cyc`;
-      document.getElementById('prof-cabac').innerText = `${{c.t_cabac.toLocaleString()}} cyc`;
+      document.getElementById('prof-tq').innerText = c.t_tq != null ? `${{c.t_tq.toLocaleString()}} cyc` : 'N/A';
+      document.getElementById('prof-md').innerText = c.t_md != null ? `${{c.t_md.toLocaleString()}} cyc` : 'N/A';
+      document.getElementById('prof-db').innerText = c.t_db != null ? `${{c.t_db.toLocaleString()}} cyc` : 'N/A';
+      document.getElementById('prof-cabac').innerText = c.t_cabac != null ? `${{c.t_cabac.toLocaleString()}} cyc` : 'N/A';
 
-      document.getElementById('bar-tq').style.width = Math.min(100, Math.round(c.t_tq * 100 / c.cycles)) + '%';
-      document.getElementById('bar-md').style.width = Math.min(100, Math.round(c.t_md * 100 / c.cycles)) + '%';
-      document.getElementById('bar-db').style.width = Math.min(100, Math.round(c.t_db * 100 / c.cycles)) + '%';
-      document.getElementById('bar-cabac').style.width = Math.min(100, Math.round(c.t_cabac * 100 / c.cycles)) + '%';
+      const cyc = c.cycles || 1;
+      document.getElementById('bar-tq').style.width = (c.t_tq != null && c.cycles ? Math.min(100, Math.round(c.t_tq * 100 / cyc)) : 0) + '%';
+      document.getElementById('bar-md').style.width = (c.t_md != null && c.cycles ? Math.min(100, Math.round(c.t_md * 100 / cyc)) : 0) + '%';
+      document.getElementById('bar-db').style.width = (c.t_db != null && c.cycles ? Math.min(100, Math.round(c.t_db * 100 / cyc)) : 0) + '%';
+      document.getElementById('bar-cabac').style.width = (c.t_cabac != null && c.cycles ? Math.min(100, Math.round(c.t_cabac * 100 / cyc)) : 0) + '%';
+
+      const stallsEl = document.getElementById('prof-stalls');
+      if (stallsEl) {{
+        const ctuStalls = (c.stall_cabac || 0) + (c.stall_inloop || 0);
+        if (c.stall_cabac == null && c.stall_inloop == null) {{
+          stallsEl.innerText = 'N/A';
+          stallsEl.className = 'text-[var(--muted-foreground)] font-semibold';
+        }} else if (ctuStalls === 0) {{
+          stallsEl.innerText = '0 Cycles (Zero Stalls)';
+          stallsEl.className = 'text-emerald-400 font-semibold';
+        }} else {{
+          stallsEl.innerText = `${{ctuStalls.toLocaleString()}} Cycles (CABAC: ${{(c.stall_cabac || 0).toLocaleString()}}, Inloop: ${{(c.stall_inloop || 0).toLocaleString()}})`;
+          stallsEl.className = 'text-amber-400 font-semibold';
+        }}
+      }}
     }}
 
     // Initial render

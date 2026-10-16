@@ -87,6 +87,7 @@ module tb_spatial_availability;
         $display("================================================================");
 
         fd = $fopen("tb/tb_spatial_availability/golden_vectors.txt", "r");
+        if (fd == 0) fd = $fopen("golden_vectors.txt", "r");
         if (fd == 0) begin
             $display("[FATAL] Could not open golden_vectors.txt");
             $finish;

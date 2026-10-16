@@ -170,6 +170,7 @@ module tb_deblock;
     task automatic load_ctu_from_file(string filename);
         int fd, r;
         fd = $fopen(filename, "r");
+        if (!fd) fd = $fopen({"tb/tb_deblock/", filename}, "r");
         if (!fd) begin
             $display("WARNING: Could not open %s. Using random data.", filename);
             generate_random_ctu();
@@ -226,6 +227,7 @@ module tb_deblock;
     task automatic check_ctu_to_file(string filename);
         int fd, r, mismatch_cnt = 0, match_cnt = 0;
         fd = $fopen(filename, "r");
+        if (!fd) fd = $fopen({"tb/tb_deblock/", filename}, "r");
         if (!fd) begin
             $display("WARNING: Could not open golden file %s. Skipping check.", filename);
             return;

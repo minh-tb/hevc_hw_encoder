@@ -156,6 +156,38 @@ def png_to_base64_data_uri(png_path):
         encoded = base64.b64encode(f.read()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
 
+def load_profiling_data(num_frames=3):
+    import re
+    records = {}
+    pattern = re.compile(
+        r"\[PROFILER\] Frame\s+(\d+)\s+CTU\s+(\d+):\s+Total=(\d+)\s+cycles\s+\|\s+"
+        r"T_MD=(\d+)\s+\|\s+T_TQ=(\d+)\s+\|\s+T_DB=(\d+)\s+\|\s+T_CABAC=(\d+)\s+\|\s+"
+        r"Stall_CABAC=(\d+)\s+\|\s+Stall_Inloop=(\d+)"
+    )
+    for log_candidate in ["transcript_3frames.log", "transcript", "sim_profile.log", "sim_run.log"]:
+        if os.path.exists(log_candidate):
+            with open(log_candidate, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    m = pattern.search(line)
+                    if m:
+                        f_idx = int(m.group(1))
+                        c_idx = int(m.group(2))
+                        if f_idx not in records:
+                            records[f_idx] = {}
+                        records[f_idx][c_idx] = {
+                            "ctu": c_idx,
+                            "total": int(m.group(3)),
+                            "t_md": int(m.group(4)),
+                            "t_tq": int(m.group(5)),
+                            "t_db": int(m.group(6)),
+                            "t_cabac": int(m.group(7)),
+                            "stall_cabac": int(m.group(8)),
+                            "stall_inloop": int(m.group(9)),
+                        }
+            if records:
+                break
+    return records
+
 def main():
     decoder_exe = r"HM\bin\mgwmake\gcc-mingw-14.2\x86_64\release\TAppDecoder.exe"
     bitstream = "str_b_frame.bin"
@@ -203,6 +235,7 @@ def main():
     print(f"Total active frames to evaluate: {num_frames}")
 
     frame_summary_data = []
+    prof_records = load_profiling_data(num_frames)
 
     with open(orig_yuv, "rb") as fo, open(decoded_yuv, "rb") as fd, open(hw_recon_yuv, "rb") as fh:
         for f_idx in range(num_frames):
@@ -269,6 +302,7 @@ def main():
                 c_exact = c_diff.count(0)
                 c_psnr_hm = calc_psnr(c_yo, c_yd)
                 c_psnr_hw = calc_psnr(c_yo, c_yh)
+                c_prof = prof_records.get(f_idx, {}).get(ctu_i, {})
                 print(f"    CTU {ctu_i} (x={ctu_x:2d}, y={ctu_y:2d}) -> Exact: {c_exact}/4096 ({c_exact*100/4096:.1f}%) | Max Diff: {max(c_diff):2d} | Avg Diff: {sum(c_diff)/4096:.2f} | HM: {c_psnr_hm:5.2f} dB | HW: {c_psnr_hw:5.2f} dB")
                 ctu_stats.append({
                     "id": ctu_i,
@@ -279,11 +313,13 @@ def main():
                     "max_diff": max(c_diff),
                     "psnr_hw": f"{c_psnr_hw:.2f}",
                     "psnr_hm": f"{c_psnr_hm:.2f}",
-                    "cycles": None,
-                    "t_tq": None,
-                    "t_md": None,
-                    "t_db": None,
-                    "t_cabac": None
+                    "cycles": c_prof.get("total"),
+                    "t_tq": c_prof.get("t_tq"),
+                    "t_md": c_prof.get("t_md"),
+                    "t_db": c_prof.get("t_db"),
+                    "t_cabac": c_prof.get("t_cabac"),
+                    "stall_cabac": c_prof.get("stall_cabac"),
+                    "stall_inloop": c_prof.get("stall_inloop")
                 })
 
             # Export individual BMPs & PNGs
@@ -371,13 +407,16 @@ def main():
             shutil.copy(out_png, os.path.join(ARTIFACT_DIR, out_png))
             print(f"Copied {out_png} to artifact directory.")
 
-    # Check pre-filter bit-exact match against rec_before_filter.yuv
+    # Check pre-filter bit-exact match against rec_before_filter.yuv (regenerated above by TAppDecoder.exe)
     pre_filter_yuv = "rec_before_filter.yuv"
-    target_pre_hw = "hw_recon_pre.yuv" if os.path.exists("hw_recon_pre.yuv") else hw_recon_yuv
-    label_pre_hw = "HW Recon Pre-Filter" if os.path.exists("hw_recon_pre.yuv") else "HW Recon Post-Filter"
-    if os.path.exists(pre_filter_yuv) and os.path.exists(target_pre_hw):
+    target_pre_hw = "hw_recon_pre.yuv"
+    if (
+        os.path.exists(pre_filter_yuv)
+        and os.path.exists(target_pre_hw)
+        and os.path.getsize(target_pre_hw) == os.path.getsize(hw_recon_yuv)
+    ):
         print("\n=======================================================")
-        print(f" Pre-Filter Bit-Exact Conformance ({label_pre_hw} vs HM Pre-Filter)")
+        print(" Pre-Filter Bit-Exact Conformance (HW Recon Pre-Filter vs HM Pre-Filter)")
         print("=======================================================")
         with open(pre_filter_yuv, "rb") as fp, open(target_pre_hw, "rb") as fh:
             for f_idx in range(num_frames):
@@ -404,6 +443,8 @@ def main():
                     c_ex = c_d.count(0)
                     c_ps = calc_psnr(c_p, c_h)
                     print(f"    CTU {ctu_i}: Exact {c_ex}/4096 ({c_ex*100/4096:.1f}%) | Max Diff: {max(c_d)} | Avg Diff: {sum(c_d)/4096:.2f} | PSNR: {c_ps:.2f} dB")
+    else:
+        print(f"\n[WARNING] Skipping Pre-Filter Bit-Exact Conformance: '{target_pre_hw}' missing or size mismatch against '{hw_recon_yuv}'.")
 
     # Update visual verification HTML dashboard if present (in repo root or ARTIFACT_DIR)
     dashboard_candidates = [

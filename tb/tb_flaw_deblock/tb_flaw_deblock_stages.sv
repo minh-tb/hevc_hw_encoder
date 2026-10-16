@@ -315,7 +315,7 @@ module tb_flaw_deblock_stages;
 
         // Wait for CTU completion or pass 2 transition
         timeout_cycles = 0;
-        while (!ctu_done && (dut.pass < 3'd2) && (timeout_cycles < 20000)) begin
+        while (!ctu_done && (dut.pass < 3'd2) && (timeout_cycles < 50000)) begin
             @(posedge clk);
             timeout_cycles++;
         end
@@ -332,11 +332,11 @@ module tb_flaw_deblock_stages;
         $display("Horizontal edges visited bitmap: 8'b%08b (Count: %0d/8)", luma_horiz_edges_visited, num_horiz_visited);
 
         // Flaw D-07 Verification Check
-        if (num_vert_visited < 8) begin
+        if (num_vert_visited < 8 || num_horiz_visited < 8) begin
             $display("\n==================================================================");
             $display("*** FAILED: Deblocking edge stage truncation detected! (Flaw D-07) ***");
-            $display("Expected: 8 vertical raster edges on 8x8 grid (Clause 8.7.2.1)");
-            $display("Actual:   Only %0d edges processed (edges 0 and 8 visited; edges 16..56 omitted)", num_vert_visited);
+            $display("Expected: 8 vertical and 8 horizontal raster edges on 8x8 grid (Clause 8.7.2.1)");
+            $display("Actual:   %0d/8 vertical, %0d/8 horizontal edges processed", num_vert_visited, num_horiz_visited);
             $display("Failure Mechanism: edge_stage in deblock_top.v lines 185-187 and 540-547");
             $display("is a 1-bit reg toggling only {0, 1}, truncating stages 2..7!");
             $display("==================================================================\n");

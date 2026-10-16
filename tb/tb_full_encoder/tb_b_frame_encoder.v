@@ -73,38 +73,47 @@ module tb_b_frame_encoder;
     localparam CFG_QP = 6'd22;
     localparam BITSTREAM_OUT = "str_b_frame_qp22.bin";
     localparam RECON_OUT = "hw_recon_qp22.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre_qp22.yuv";
 `elsif SWEEP_QP_27
     localparam CFG_QP = 6'd27;
     localparam BITSTREAM_OUT = "str_b_frame_qp27.bin";
     localparam RECON_OUT = "hw_recon_qp27.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre_qp27.yuv";
 `elsif SWEEP_QP_32
     localparam CFG_QP = 6'd32;
     localparam BITSTREAM_OUT = "str_b_frame_qp32.bin";
     localparam RECON_OUT = "hw_recon_qp32.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre_qp32.yuv";
 `elsif SWEEP_QP_37
     localparam CFG_QP = 6'd37;
     localparam BITSTREAM_OUT = "str_b_frame_qp37.bin";
     localparam RECON_OUT = "hw_recon_qp37.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre_qp37.yuv";
 `elsif PATTERN_FLAT
     localparam CFG_QP = 6'd29;
     localparam BITSTREAM_OUT = "str_b_frame_flat.bin";
     localparam RECON_OUT = "hw_recon_flat.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre_flat.yuv";
 `elsif PATTERN_CHECKER
     localparam CFG_QP = 6'd29;
     localparam BITSTREAM_OUT = "str_b_frame_checker.bin";
     localparam RECON_OUT = "hw_recon_checker.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre_checker.yuv";
 `elsif PATTERN_HIGH_MOTION
     localparam CFG_QP = 6'd29;
     localparam BITSTREAM_OUT = "str_b_frame_high_motion.bin";
     localparam RECON_OUT = "hw_recon_high_motion.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre_high_motion.yuv";
 `elsif ENABLE_RC
     localparam CFG_QP = 6'd29;
     localparam BITSTREAM_OUT = "str_b_frame_rc.bin";
     localparam RECON_OUT = "hw_recon_rc.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre_rc.yuv";
 `else
     localparam CFG_QP = 6'd29;
     localparam BITSTREAM_OUT = "str_b_frame.bin";
     localparam RECON_OUT = "hw_recon.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre.yuv";
 `endif
 
 `ifdef ENABLE_RC
@@ -603,10 +612,10 @@ module tb_b_frame_encoder;
                 end
             end
             $fclose(fd_hw);
-            $display("Dumping Hardware Reconstructed frame: hw_recon.yuv complete.");
+            $display("Dumping Hardware Reconstructed frame: %s complete.", RECON_OUT);
 
-            // Dump Hardware Reconstructed Frame Before Deblocking to hw_recon_pre.yuv (10-bit Little Endian)
-            fd_hw = $fopen("hw_recon_pre.yuv", "wb");
+            // Dump Hardware Reconstructed Frame Before Deblocking to RECON_PRE_OUT (10-bit Little Endian)
+            fd_hw = $fopen(RECON_PRE_OUT, "wb");
             for (h_f = 0; h_f < TOTAL_FRAMES; h_f = h_f + 1) begin
                 for (h_i = 0; h_i < FRAME_PIXELS_Y; h_i = h_i + 1) begin
                     $fwrite(fd_hw, "%c%c", hw_pre_recon_y[h_f][h_i][7:0], {6'd0, hw_pre_recon_y[h_f][h_i][9:8]});
@@ -619,7 +628,7 @@ module tb_b_frame_encoder;
                 end
             end
             $fclose(fd_hw);
-            $display("Dumping Hardware Pre-Deblock Reconstructed frame: hw_recon_pre.yuv complete.");
+            $display("Dumping Hardware Pre-Deblock Reconstructed frame: %s complete.", RECON_PRE_OUT);
 
             // Print Pipeline Profiling Scorecard
             $display("\n====================================================================================================");
