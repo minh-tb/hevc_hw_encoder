@@ -105,6 +105,17 @@ def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, heigh
         print(f"\nPASS: Full {frames_checked}-frame 100.00% bit-exact match against HM 18.0 across all components Y, Cb, Cr (global_max_diff = 0)!")
 
 def parse_transcript(transcript_file="transcript"):
+    if transcript_file == "transcript" and os.path.exists("transcript_3frames.log"):
+        has_encoder_log = False
+        if os.path.exists(transcript_file):
+            with open(transcript_file, "r", errors="ignore") as f:
+                for line in f:
+                    if "[MODE_DECISION]" in line:
+                        has_encoder_log = True
+                        break
+        if not has_encoder_log:
+            transcript_file = "transcript_3frames.log"
+
     if not os.path.exists(transcript_file):
         print(f"Transcript file {transcript_file} not found. Skipping parsing.")
         return
