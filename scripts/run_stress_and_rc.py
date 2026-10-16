@@ -88,6 +88,10 @@ def run_stress_test(t, force=False):
     if not is_sim_output_valid(bin_path, log_path, force=force):
         if os.path.exists(bin_path):
             os.remove(bin_path)
+        if os.path.exists(log_path):
+            os.remove(log_path)
+        if os.path.exists(dec_path):
+            os.remove(dec_path)
 
         # 1. Compile testbench
         vlog_cmd = f"vlog -sv {VLOG_OPTS} +define+{t['macro']} {TB_PATH}"
@@ -134,6 +138,10 @@ def run_rate_control_test(force=False):
     if not is_sim_output_valid(bin_path, log_path, force=force):
         if os.path.exists(bin_path):
             os.remove(bin_path)
+        if os.path.exists(log_path):
+            os.remove(log_path)
+        if os.path.exists(dec_path):
+            os.remove(dec_path)
 
         # 1. Compile testbench with ENABLE_RC
         vlog_cmd = f"vlog -sv {VLOG_OPTS} +define+ENABLE_RC {TB_PATH}"
@@ -147,7 +155,7 @@ def run_rate_control_test(force=False):
         vsim_cmd = 'vsim -c -l str_b_frame_rc.log -do "run -all; quit -f" work.tb_b_frame_encoder'
         print(f"  > {vsim_cmd}")
         res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if res.returncode != 0 or not os.path.exists(bin_path):
+        if res.returncode != 0 or not is_sim_output_valid(bin_path, log_path, force=False):
             print(f"  [FAIL] Simulation failed to output bitstream: str_b_frame_rc.bin")
             return False
     else:
