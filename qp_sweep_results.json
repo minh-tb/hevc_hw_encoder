@@ -1,0 +1,79 @@
+{
+  "sequence": "foreman_128x128_10b",
+  "width": 128,
+  "height": 128,
+  "frames": 3,
+  "fps": 30,
+  "hw_results": [
+    {
+      "qp": 22,
+      "bytes": 5163,
+      "bitrate_kbps": 413.04,
+      "psnr_y": 42.19299456425532,
+      "psnr_yuv": 42.995618645116814,
+      "bit_exact": true,
+      "max_diff": 0
+    },
+    {
+      "qp": 27,
+      "bytes": 3060,
+      "bitrate_kbps": 244.8,
+      "psnr_y": 39.16698270793243,
+      "psnr_yuv": 39.89540700145939,
+      "bit_exact": true,
+      "max_diff": 0
+    },
+    {
+      "qp": 32,
+      "bytes": 2008,
+      "bitrate_kbps": 160.64,
+      "psnr_y": 37.49777156628485,
+      "psnr_yuv": 37.4266904634394,
+      "bit_exact": true,
+      "max_diff": 0
+    },
+    {
+      "qp": 37,
+      "bytes": 1334,
+      "bitrate_kbps": 106.72,
+      "psnr_y": 34.75677556061755,
+      "psnr_yuv": 34.66608708130519,
+      "bit_exact": true,
+      "max_diff": 0
+    }
+  ],
+  "hm_results": [
+    {
+      "qp": 22,
+      "bytes": 2332,
+      "bitrate_kbps": 186.56,
+      "psnr_y": 42.826744713816346,
+      "psnr_yuv": 43.65483854773648
+    },
+    {
+      "qp": 27,
+      "bytes": 1298,
+      "bitrate_kbps": 103.84,
+      "psnr_y": 39.64725979215263,
+      "psnr_yuv": 40.62572074731764
+    },
+    {
+      "qp": 32,
+      "bytes": 800,
+      "bitrate_kbps": 64.0,
+      "psnr_y": 36.580376228776515,
+      "psnr_yuv": 37.90694101032489
+    },
+    {
+      "qp": 37,
+      "bytes": 480,
+      "bitrate_kbps": 38.4,
+      "psnr_y": 33.621314053576334,
+      "psnr_yuv": 35.21758369386731
+    }
+  ],
+  "bd_metrics": {
+    "bd_rate_pct": 138.3393,
+    "bd_psnr_db": -4.704
+  }
+}

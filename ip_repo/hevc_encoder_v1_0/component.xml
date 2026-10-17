@@ -664,7 +664,7 @@
         <spirit:name>xilinx_anylanguagesynthesis</spirit:name>
         <spirit:displayName>Synthesis</spirit:displayName>
         <spirit:envIdentifier>:vivado.xilinx.com:synthesis</spirit:envIdentifier>
-        <spirit:language>Verilog</spirit:language>
+        <spirit:language>SystemVerilog</spirit:language>
         <spirit:modelName>hevc_encoder_axi_top</spirit:modelName>
         <spirit:fileSetRef>
           <spirit:localName>xilinx_anylanguagesynthesis_view_fileset</spirit:localName>
@@ -672,7 +672,7 @@
         <spirit:parameters>
           <spirit:parameter>
             <spirit:name>viewChecksum</spirit:name>
-            <spirit:value>1847206f</spirit:value>
+            <spirit:value>26778d12</spirit:value>
           </spirit:parameter>
         </spirit:parameters>
       </spirit:view>
@@ -680,7 +680,7 @@
         <spirit:name>xilinx_anylanguagebehavioralsimulation</spirit:name>
         <spirit:displayName>Simulation</spirit:displayName>
         <spirit:envIdentifier>:vivado.xilinx.com:simulation</spirit:envIdentifier>
-        <spirit:language>Verilog</spirit:language>
+        <spirit:language>SystemVerilog</spirit:language>
         <spirit:modelName>hevc_encoder_axi_top</spirit:modelName>
         <spirit:fileSetRef>
           <spirit:localName>xilinx_anylanguagebehavioralsimulation_view_fileset</spirit:localName>
@@ -688,7 +688,7 @@
         <spirit:parameters>
           <spirit:parameter>
             <spirit:name>viewChecksum</spirit:name>
-            <spirit:value>9f8877e3</spirit:value>
+            <spirit:value>4fa04dda</spirit:value>
           </spirit:parameter>
         </spirit:parameters>
       </spirit:view>
@@ -1893,13 +1893,13 @@
     <spirit:fileSet>
       <spirit:name>xilinx_anylanguagesynthesis_view_fileset</spirit:name>
       <spirit:file>
-        <spirit:name>src/init_tables.vh</spirit:name>
+        <spirit:name>src/slice_cases.vh</spirit:name>
         <spirit:fileType>verilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
       <spirit:file>
-        <spirit:name>src/slice_cases.vh</spirit:name>
+        <spirit:name>src/init_tables.vh</spirit:name>
         <spirit:fileType>verilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
@@ -1918,272 +1918,272 @@
       </spirit:file>
       <spirit:file>
         <spirit:name>src/address_generator.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/axi_read_arbiter.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/bin_encoder.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/boundary_strength.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/cabac_enc_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/coeff_buffer.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ctu_partitioner.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ctu_raster_scan.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ctx_model_store.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/db_filter_chroma.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/db_filter_luma.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/dct_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/deblock_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/decoder_inloop_filters.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/fme_search.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/frame_store.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/fwd_quant.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/gop_controller.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/hevc_encoder_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/hpel_filter_chroma.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/hpel_filter_luma.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/inter_pred_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_angular.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_dc.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_planar.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_pred_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_rmd.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/inv_quant.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/lambda_calc.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/mc_unit.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/mode_decision.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/nal_writer.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/param_set_writer.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/pu_cu_splitter.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/range_coder.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/rate_controller.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/rate_estimator.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/recon_unit.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ref_frame_buffer.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ref_sample_filter.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/residual_sub.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sad_4x4.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sao_band_offset.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sao_edge_offset.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sao_stats.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sao_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/slice_controller.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/streaming_subpel_filter.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/syntax_coeff.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/syntax_cu.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/syntax_pred.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/transform_1d_core.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/transpose_ram_32x32.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/tz_search.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
@@ -2193,22 +2193,27 @@
       </spirit:file>
       <spirit:file>
         <spirit:name>src/hevc_encoder_axi_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>CHECKSUM_b5a164d6</spirit:userFileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>src/subpel_interpolation_core.v</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:userFileType>CHECKSUM_378ba114</spirit:userFileType>
       </spirit:file>
       <spirit:dependency>d:/UIT_Doc/hevc_hw_encoder/rtl/common</spirit:dependency>
     </spirit:fileSet>
     <spirit:fileSet>
       <spirit:name>xilinx_anylanguagebehavioralsimulation_view_fileset</spirit:name>
       <spirit:file>
-        <spirit:name>src/init_tables.vh</spirit:name>
+        <spirit:name>src/slice_cases.vh</spirit:name>
         <spirit:fileType>verilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
       </spirit:file>
       <spirit:file>
-        <spirit:name>src/slice_cases.vh</spirit:name>
+        <spirit:name>src/init_tables.vh</spirit:name>
         <spirit:fileType>verilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
         <spirit:isIncludeFile>true</spirit:isIncludeFile>
@@ -2227,278 +2232,283 @@
       </spirit:file>
       <spirit:file>
         <spirit:name>src/address_generator.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/axi_read_arbiter.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/bin_encoder.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/boundary_strength.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/cabac_enc_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/coeff_buffer.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ctu_partitioner.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ctu_raster_scan.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ctx_model_store.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/db_filter_chroma.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/db_filter_luma.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/dct_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/deblock_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/decoder_inloop_filters.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/fme_search.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/frame_store.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/fwd_quant.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/gop_controller.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/hevc_encoder_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/hpel_filter_chroma.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/hpel_filter_luma.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/inter_pred_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_angular.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_dc.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_planar.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_pred_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/intra_rmd.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/inv_quant.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/lambda_calc.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/mc_unit.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/mode_decision.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/nal_writer.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/param_set_writer.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/pu_cu_splitter.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/range_coder.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/rate_controller.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/rate_estimator.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/recon_unit.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ref_frame_buffer.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/ref_sample_filter.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/residual_sub.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sad_4x4.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sao_band_offset.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sao_edge_offset.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sao_stats.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/sao_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/slice_controller.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/streaming_subpel_filter.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/syntax_coeff.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/syntax_cu.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/syntax_pred.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/transform_1d_core.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/transpose_ram_32x32.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/tz_search.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
         <spirit:name>src/hevc_encoder_axi_top.v</spirit:name>
-        <spirit:fileType>verilogSource</spirit:fileType>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
+      </spirit:file>
+      <spirit:file>
+        <spirit:name>src/subpel_interpolation_core.v</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:userFileType>USED_IN_ipstatic</spirit:userFileType>
       </spirit:file>
       <spirit:dependency>d:/UIT_Doc/hevc_hw_encoder/rtl/common</spirit:dependency>
     </spirit:fileSet>
@@ -2606,14 +2616,14 @@
       <xilinx:vendorDisplayName>UIT</xilinx:vendorDisplayName>
       <xilinx:vendorURL>https://uit.edu.vn</xilinx:vendorURL>
       <xilinx:coreRevision>1</xilinx:coreRevision>
-      <xilinx:coreCreationDateTime>2026-10-12T18:10:58Z</xilinx:coreCreationDateTime>
+      <xilinx:coreCreationDateTime>2026-10-17T14:34:05Z</xilinx:coreCreationDateTime>
     </xilinx:coreExtensions>
     <xilinx:packagingInfo>
       <xilinx:xilinxVersion>2026.1</xilinx:xilinxVersion>
       <xilinx:checksum xilinx:scope="busInterfaces" xilinx:value="45de688c"/>
       <xilinx:checksum xilinx:scope="addressSpaces" xilinx:value="69bc2842"/>
       <xilinx:checksum xilinx:scope="memoryMaps" xilinx:value="238fe90c"/>
-      <xilinx:checksum xilinx:scope="fileGroups" xilinx:value="833e9a34"/>
+      <xilinx:checksum xilinx:scope="fileGroups" xilinx:value="7f2154da"/>
       <xilinx:checksum xilinx:scope="ports" xilinx:value="5084528c"/>
       <xilinx:checksum xilinx:scope="hdlParameters" xilinx:value="29b0a8c8"/>
       <xilinx:checksum xilinx:scope="parameters" xilinx:value="e6e20369"/>

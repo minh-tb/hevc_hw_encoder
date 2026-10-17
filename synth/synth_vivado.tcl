@@ -86,6 +86,7 @@ set rtl_files [list \
     "rtl/inter/sad_4x4.v" \
     "rtl/inter/sad_8x8.v" \
     "rtl/inter/streaming_subpel_filter.v" \
+    "rtl/inter/subpel_interpolation_core.v" \
     "rtl/inter/tz_search.v" \
     "rtl/intra/intra_angular.v" \
     "rtl/intra/intra_dc.v" \
@@ -126,7 +127,7 @@ read_xdc "synth/hevc_encoder_top.xdc"
 puts "================================================================="
 puts " Running synth_design on $top_module..."
 puts "================================================================="
-synth_design -top $top_module -part $target_part -mode out_of_context -verilog_define {SYNTHESIS=1}
+synth_design -top $top_module -part $target_part -mode out_of_context -verilog_define {SYNTHESIS=1 REMEDIATION=1}
 
 # 5. Export Synthesized Design Checkpoint (.dcp)
 puts "================================================================="

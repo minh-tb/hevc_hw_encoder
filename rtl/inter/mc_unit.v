@@ -328,7 +328,11 @@ module mc_unit #(
                 ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     y_filt_ref      <= ref_resp_y_flat;   // latch extended ref
+                    // synthesis translate_off
+`ifdef DEBUG_MC
                     $display("Time=%0t: [mc_unit] Y response ref_resp_y_flat=%0h", $time, ref_resp_y_flat);
+`endif
+                    // synthesis translate_on
                     y_filt_valid_in <= 1'b1;              // start filter pipeline
                     state           <= S_FILT_Y;
                 end
@@ -372,7 +376,11 @@ module mc_unit #(
                 ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     cb_filt_ref      <= ref_resp_cb_flat;
+                    // synthesis translate_off
+`ifdef DEBUG_MC
                     $display("Time=%0t: [mc_unit] Cb response ref_resp_cb_flat=%0h", $time, ref_resp_cb_flat);
+`endif
+                    // synthesis translate_on
                     cb_filt_valid_in <= 1'b1;
                     state            <= S_FILT_CB;
                 end
@@ -408,7 +416,11 @@ module mc_unit #(
                 ref_req_valid <= 1'b0;
                 if (ref_resp_valid) begin
                     cr_filt_ref      <= ref_resp_cr_flat;
+                    // synthesis translate_off
+`ifdef DEBUG_MC
                     $display("Time=%0t: [mc_unit] Cr response ref_resp_cr_flat=%0h", $time, ref_resp_cr_flat);
+`endif
+                    // synthesis translate_on
                     cr_filt_valid_in <= 1'b1;
                     state            <= S_FILT_CR;
                 end
@@ -432,8 +444,12 @@ module mc_unit #(
             S_DONE: begin
                 mc_done  <= 1'b1;
                 mc_ready <= 1'b1;
+                // synthesis translate_off
+`ifdef DEBUG_MC
                 $display("Time=%0t: [mc_unit] DONE pred_y=%0h pred_cb=%0h pred_cr=%0h",
                          $time, pred_y_flat, pred_cb_flat, pred_cr_flat);
+`endif
+                // synthesis translate_on
                 state    <= S_IDLE;
             end
 

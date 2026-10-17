@@ -36,10 +36,9 @@ if /i "%ACTION%"=="verify" (
 if /i "%ACTION%"=="synth" (
     echo [RUN] Running Out-of-Context Synthesis...
     "%VIVADO_BAT%" -mode batch -source synth/synth_vivado.tcl -log synth/vivado_synth.log -journal synth/vivado_synth.jou
-    set SYNTH_ERR=!ERRORLEVEL!
-    if !SYNTH_ERR! neq 0 (
-        echo [ERROR] Synthesis failed with code !SYNTH_ERR!
-        exit /b !SYNTH_ERR!
+    if errorlevel 1 (
+        echo [ERROR] Synthesis failed.
+        exit /b 1
     )
     python synth/extract_vivado_results.py
     exit /b 0

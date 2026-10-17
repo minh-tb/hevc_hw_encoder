@@ -89,6 +89,7 @@ set rtl_files [list \
     "rtl/inter/sad_4x4.v" \
     "rtl/inter/sad_8x8.v" \
     "rtl/inter/streaming_subpel_filter.v" \
+    "rtl/inter/subpel_interpolation_core.v" \
     "rtl/inter/tz_search.v" \
     "rtl/intra/intra_angular.v" \
     "rtl/intra/intra_dc.v" \
@@ -121,6 +122,7 @@ set rtl_files [list \
     "rtl/top/hevc_encoder_axi_top.v" \
 ]
 add_files -norecurse $rtl_files
+set_property file_type "SystemVerilog" [get_files $rtl_files]
 
 # 5. Add Constraints
 add_files -norecurse "synth/hevc_encoder_top.xdc"
@@ -139,6 +141,19 @@ file mkdir $ip_root_dir
 ipx::package_project -root_dir $ip_root_dir -vendor "uit.edu.vn" -library "video" -taxonomy "/Video_&_Image_Processing" -import_files -set_current true
 
 set core [ipx::current_core]
+
+# Ensure subpel_interpolation_core.v is imported and packaged
+file copy -force "rtl/inter/subpel_interpolation_core.v" "$ip_root_dir/src/subpel_interpolation_core.v"
+foreach fg_name {xilinx_anylanguagesynthesis xilinx_anylanguagebehavioralsimulation} {
+    set fg [ipx::get_file_groups $fg_name -of_objects $core]
+    if {$fg ne ""} {
+        set existing [ipx::get_files "src/subpel_interpolation_core.v" -of_objects $fg]
+        if {$existing eq ""} {
+            set subpel_f [ipx::add_file "src/subpel_interpolation_core.v" $fg]
+            set_property type systemVerilogSource $subpel_f
+        }
+    }
+}
 
 # Clean up any non-relative file references that might have been detected from root working directory
 foreach fg [ipx::get_file_groups -of_objects $core] {

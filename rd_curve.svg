@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" width="800" height="520" style="background-color: #181825; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Title & Subtitle -->
+  <text x="400.0" y="35" fill="#cdd6f4" font-size="18" font-weight="bold" text-anchor="middle">HEVC Hardware Video Encoder vs. HM 18.0 Rate-Distortion</text>
+  <text x="400.0" y="56" fill="#a6adc8" font-size="12" text-anchor="middle">Foreman 128x128 10-bit (Main10 Profile) | BD-Rate: +138.34% | BD-PSNR: -4.70 dB (vs HM 18.0 Anchor)</text>
+
+  <!-- Grid Lines & Axes -->
+  <line x1="80" y1="450" x2="740" y2="450" stroke="#45475a" stroke-width="1.5" />
+  <line x1="80" y1="80" x2="80" y2="450" stroke="#45475a" stroke-width="1.5" />
+  <line x1="80" y1="450.0" x2="740" y2="450.0" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="68" y="454.0" fill="#a6adc8" font-size="11" text-anchor="end">32.1</text>
+  <line x1="80" y1="388.3" x2="740" y2="388.3" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="68" y="392.3" fill="#a6adc8" font-size="11" text-anchor="end">34.2</text>
+  <line x1="80" y1="326.7" x2="740" y2="326.7" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="68" y="330.7" fill="#a6adc8" font-size="11" text-anchor="end">36.2</text>
+  <line x1="80" y1="265.0" x2="740" y2="265.0" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="68" y="269.0" fill="#a6adc8" font-size="11" text-anchor="end">38.2</text>
+  <line x1="80" y1="203.3" x2="740" y2="203.3" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="68" y="207.3" fill="#a6adc8" font-size="11" text-anchor="end">40.3</text>
+  <line x1="80" y1="141.7" x2="740" y2="141.7" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="68" y="145.7" fill="#a6adc8" font-size="11" text-anchor="end">42.3</text>
+  <line x1="80" y1="80.0" x2="740" y2="80.0" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="68" y="84.0" fill="#a6adc8" font-size="11" text-anchor="end">44.3</text>
+  <line x1="80.0" y1="80" x2="80.0" y2="450" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="80.0" y="470" fill="#a6adc8" font-size="11" text-anchor="middle">32.6</text>
+  <line x1="190.0" y1="80" x2="190.0" y2="450" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="190.0" y="470" fill="#a6adc8" font-size="11" text-anchor="middle">106.4</text>
+  <line x1="300.0" y1="80" x2="300.0" y2="450" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="300.0" y="470" fill="#a6adc8" font-size="11" text-anchor="middle">180.1</text>
+  <line x1="410.0" y1="80" x2="410.0" y2="450" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="410.0" y="470" fill="#a6adc8" font-size="11" text-anchor="middle">253.8</text>
+  <line x1="520.0" y1="80" x2="520.0" y2="450" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="520.0" y="470" fill="#a6adc8" font-size="11" text-anchor="middle">327.5</text>
+  <line x1="630.0" y1="80" x2="630.0" y2="450" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="630.0" y="470" fill="#a6adc8" font-size="11" text-anchor="middle">401.3</text>
+  <line x1="740.0" y1="80" x2="740.0" y2="450" stroke="#313244" stroke-dasharray="4,4" stroke-width="1" />
+  <text x="740.0" y="470" fill="#a6adc8" font-size="11" text-anchor="middle">475.0</text>
+
+  <text x="410.0" y="500" fill="#cdd6f4" font-size="13" font-weight="600" text-anchor="middle">Bitrate (kbps)</text>
+  <text x="25" y="265.0" fill="#cdd6f4" font-size="13" font-weight="600" text-anchor="middle" transform="rotate(-90 25 265.0)">Luma PSNR-Y (dB)</text>
+
+  <!-- HM 18.0 Reference Curve -->
+  <polyline points="88.6,404.5 126.8,314.8 186.2,221.9 309.7,125.5" fill="none" stroke="#a6e3a1" stroke-width="2.5" stroke-dasharray="6,4" />
+  <rect x="83.6" y="399.5" width="10" height="10" fill="#a6e3a1" filter="url(#shadow)" />
+  <text x="80.6" y="392.5" fill="#a6e3a1" font-size="11" font-weight="bold" text-anchor="end">HM QP37</text>
+  <rect x="121.8" y="309.8" width="10" height="10" fill="#a6e3a1" filter="url(#shadow)" />
+  <text x="118.8" y="302.8" fill="#a6e3a1" font-size="11" font-weight="bold" text-anchor="end">HM QP32</text>
+  <rect x="181.2" y="216.9" width="10" height="10" fill="#a6e3a1" filter="url(#shadow)" />
+  <text x="178.2" y="209.9" fill="#a6e3a1" font-size="11" font-weight="bold" text-anchor="end">HM QP27</text>
+  <rect x="304.7" y="120.5" width="10" height="10" fill="#a6e3a1" filter="url(#shadow)" />
+  <text x="301.7" y="113.5" fill="#a6e3a1" font-size="11" font-weight="bold" text-anchor="end">HM QP22</text>
+
+  <!-- HW Encoder Curve -->
+  <polyline points="190.5,370.1 271.0,287.0 396.5,236.4 647.6,144.7" fill="none" stroke="#89b4fa" stroke-width="3" />
+  <circle cx="190.5" cy="370.1" r="6" fill="#f38ba8" stroke="#89b4fa" stroke-width="2" filter="url(#shadow)" />
+  <text x="200.5" y="374.1" fill="#fab387" font-size="11" font-weight="bold">HW QP37 (106.7k, 34.76dB)</text>
+  <circle cx="271.0" cy="287.0" r="6" fill="#f38ba8" stroke="#89b4fa" stroke-width="2" filter="url(#shadow)" />
+  <text x="281.0" y="291.0" fill="#fab387" font-size="11" font-weight="bold">HW QP32 (160.6k, 37.50dB)</text>
+  <circle cx="396.5" cy="236.4" r="6" fill="#f38ba8" stroke="#89b4fa" stroke-width="2" filter="url(#shadow)" />
+  <text x="406.5" y="240.4" fill="#fab387" font-size="11" font-weight="bold">HW QP27 (244.8k, 39.17dB)</text>
+  <circle cx="647.6" cy="144.7" r="6" fill="#f38ba8" stroke="#89b4fa" stroke-width="2" filter="url(#shadow)" />
+  <text x="657.6" y="148.7" fill="#fab387" font-size="11" font-weight="bold">HW QP22 (413.0k, 42.19dB)</text>
+
+  <!-- Legend Box -->
+  <rect x="500" y="385" width="230" height="55" rx="6" fill="#1e1e2e" stroke="#45475a" stroke-width="1.5" />
+  <circle cx="518" cy="403" r="5" fill="#f38ba8" stroke="#89b4fa" stroke-width="2" />
+  <line x1="508" y1="403" x2="528" y2="403" stroke="#89b4fa" stroke-width="2" />
+  <text x="536" y="407" fill="#cdd6f4" font-size="11" font-weight="bold">HEVC Hardware Video Encoder</text>
+  <rect x="513" y="418" width="10" height="10" fill="#a6e3a1" />
+  <line x1="508" y1="423" x2="528" y2="423" stroke="#a6e3a1" stroke-width="2" stroke-dasharray="4,2" />
+  <text x="536" y="427" fill="#a6e3a1" font-size="11" font-weight="bold">HM 18.0 Reference Anchor</text>
+</svg>

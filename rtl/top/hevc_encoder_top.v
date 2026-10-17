@@ -2192,7 +2192,45 @@ module hevc_encoder_top #(
 
 
 
+    wire signed [12:0] luma_x_base = $signed({6'd0, cur_sample_abs_x}) + mv_x_int;
+    wire signed [12:0] luma_y_base = $signed({6'd0, cur_sample_abs_y}) + mv_y_int;
+
+    wire signed [12:0] chroma_x_base = $signed({7'd0, cur_sample_abs_cx}) + mv_xc_int;
+    wire signed [12:0] chroma_y_base = $signed({7'd0, cur_sample_abs_cy}) + mv_yc_int;
+
 `ifdef SYNTHESIS
+    // Synchronous DPB RAM read ports for FPGA BRAM inference
+    reg [9:0] synth_rd_luma_l0, synth_rd_luma_l1;
+    reg [9:0] synth_rd_cb_l0,   synth_rd_cb_l1;
+    reg [9:0] synth_rd_cr_l0,   synth_rd_cr_l1;
+
+    always @(posedge clk) begin
+        synth_rd_luma_l0 <= dpb_luma_ram_l0[{ref_slot_0[0], clamp_128(luma_y_base), clamp_128(luma_x_base)}];
+        synth_rd_luma_l1 <= dpb_luma_ram_l1[{ref_slot_1[0], clamp_128(luma_y_base), clamp_128(luma_x_base)}];
+        synth_rd_cb_l0   <= dpb_cb_ram_l0[{ref_slot_0[0], clamp_64(chroma_y_base), clamp_64(chroma_x_base)}];
+        synth_rd_cb_l1   <= dpb_cb_ram_l1[{ref_slot_1[0], clamp_64(chroma_y_base), clamp_64(chroma_x_base)}];
+        synth_rd_cr_l0   <= dpb_cr_ram_l0[{ref_slot_0[0], clamp_64(chroma_y_base), clamp_64(chroma_x_base)}];
+        synth_rd_cr_l1   <= dpb_cr_ram_l1[{ref_slot_1[0], clamp_64(chroma_y_base), clamp_64(chroma_x_base)}];
+    end
+
+    wire [9:0] synth_sample_l0 = (reg_tu_comp == 2'd0) ? synth_rd_luma_l0 :
+                                 (reg_tu_comp == 2'd1) ? synth_rd_cb_l0 : synth_rd_cr_l0;
+    wire [9:0] synth_sample_l1 = (reg_tu_comp == 2'd0) ? synth_rd_luma_l1 :
+                                 (reg_tu_comp == 2'd1) ? synth_rd_cb_l1 : synth_rd_cr_l1;
+
+    reg [639:0] synth_win_l0_reg;
+    reg [639:0] synth_win_l1_reg;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            synth_win_l0_reg <= 640'd0;
+            synth_win_l1_reg <= 640'd0;
+        end else if (inter_pred_valid) begin
+            synth_win_l0_reg <= {synth_win_l0_reg[629:0], synth_sample_l0};
+            synth_win_l1_reg <= {synth_win_l1_reg[629:0], synth_sample_l1};
+        end
+    end
+
     // Synthesizable path: streaming subpel filter
     wire [9:0] synth_pred_pixel;
     streaming_subpel_filter #(
@@ -2205,8 +2243,8 @@ module hevc_encoder_top #(
         .is_bi_pred (is_bi_pred),
         .frac_x     (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
         .frac_y     (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
-        .win_l0_flat(640'd0),
-        .win_l1_flat(640'd0),
+        .win_l0_flat(synth_win_l0_reg),
+        .win_l1_flat(synth_win_l1_reg),
         .valid_out  (),
         .pred_pixel (synth_pred_pixel)
     );
@@ -2219,12 +2257,6 @@ module hevc_encoder_top #(
     reg [PIXEL_WIDTH*16-1:0] win_cb_l1_flat;
     reg [PIXEL_WIDTH*16-1:0] win_cr_l0_flat;
     reg [PIXEL_WIDTH*16-1:0] win_cr_l1_flat;
-
-    wire signed [12:0] luma_x_base = $signed({6'd0, cur_sample_abs_x}) + mv_x_int;
-    wire signed [12:0] luma_y_base = $signed({6'd0, cur_sample_abs_y}) + mv_y_int;
-
-    wire signed [12:0] chroma_x_base = $signed({7'd0, cur_sample_abs_cx}) + mv_xc_int;
-    wire signed [12:0] chroma_y_base = $signed({7'd0, cur_sample_abs_cy}) + mv_yc_int;
 
     integer wy, wx;
     always @(*) begin
@@ -2450,6 +2482,85 @@ module hevc_encoder_top #(
         .addr_y       (s2p_y)
     );
 
+    //-------------------------------------------------------------------------
+    // Chroma Level-1 Dequantization Calculator for Nonzero DC Reconstruction
+    // Implements ITU-T H.265 Section 8.4.3 (Table 8-10) and Section 8.6.2
+    //-------------------------------------------------------------------------
+    function automatic signed [15:0] calc_chroma_level1_dequant;
+        input [5:0] qp_y;
+        input [2:0] tu_sz_log2;
+        reg [5:0] qp_c;
+        reg [2:0] qp_mod6;
+        reg [3:0] qp_div6;
+        reg [6:0] iqs;
+        reg [4:0] cqp_per;
+        reg signed [6:0] tr_shift;
+        reg signed [6:0] sh_full;
+        reg [4:0] r_shift;
+        reg [4:0] l_shift;
+        reg signed [31:0] prod;
+        reg signed [31:0] val_unclipped;
+        begin
+            // ITU-T H.265 Table 8-10 Chroma QP Mapping
+            if      (qp_y < 6'd30)  qp_c = qp_y;
+            else if (qp_y == 6'd30) qp_c = 6'd29;
+            else if (qp_y == 6'd31) qp_c = 6'd30;
+            else if (qp_y == 6'd32) qp_c = 6'd31;
+            else if (qp_y == 6'd33) qp_c = 6'd32;
+            else if (qp_y == 6'd34 || qp_y == 6'd35) qp_c = 6'd33;
+            else if (qp_y == 6'd36 || qp_y == 6'd37) qp_c = 6'd34;
+            else if (qp_y == 6'd38 || qp_y == 6'd39) qp_c = 6'd35;
+            else if (qp_y == 6'd40 || qp_y == 6'd41) qp_c = 6'd36;
+            else if (qp_y == 6'd42 || qp_y == 6'd43) qp_c = 6'd37;
+            else                    qp_c = qp_y - 6'd6;
+
+            qp_mod6 = (qp_c >= 6'd48) ? (qp_c - 6'd48) :
+                      (qp_c >= 6'd42) ? (qp_c - 6'd42) :
+                      (qp_c >= 6'd36) ? (qp_c - 6'd36) :
+                      (qp_c >= 6'd30) ? (qp_c - 6'd30) :
+                      (qp_c >= 6'd24) ? (qp_c - 6'd24) :
+                      (qp_c >= 6'd18) ? (qp_c - 6'd18) :
+                      (qp_c >= 6'd12) ? (qp_c - 6'd12) :
+                      (qp_c >= 6'd6)  ? (qp_c - 6'd6)  : qp_c[2:0];
+
+            qp_div6 = (qp_c >= 6'd48) ? 4'd8 :
+                      (qp_c >= 6'd42) ? 4'd7 :
+                      (qp_c >= 6'd36) ? 4'd6 :
+                      (qp_c >= 6'd30) ? 4'd5 :
+                      (qp_c >= 6'd24) ? 4'd4 :
+                      (qp_c >= 6'd18) ? 4'd3 :
+                      (qp_c >= 6'd12) ? 4'd2 :
+                      (qp_c >= 6'd6)  ? 4'd1 : 4'd0;
+
+            case (qp_mod6)
+                3'd0: iqs = 7'd40;
+                3'd1: iqs = 7'd45;
+                3'd2: iqs = 7'd51;
+                3'd3: iqs = 7'd57;
+                3'd4: iqs = 7'd64;
+                3'd5: iqs = 7'd72;
+                default: iqs = 7'd40;
+            endcase
+
+            cqp_per  = qp_div6 + 5'd2; // BIT_DEPTH_ADJ = 2 for Main10
+            tr_shift = 7'sd5 - $signed({4'b0, tu_sz_log2}); // 15 - 10 - log2
+            sh_full  = 7'sd6 - $signed({2'b0, cqp_per}) - tr_shift;
+            prod     = $signed({25'd0, iqs});
+
+            if (sh_full > 0) begin
+                r_shift       = sh_full[4:0];
+                val_unclipped = (prod + $signed(32'd1 << (r_shift - 5'd1))) >>> r_shift;
+            end else begin
+                l_shift       = (-sh_full);
+                val_unclipped = prod <<< l_shift;
+            end
+
+            if (val_unclipped > 32'sd32767)       calc_chroma_level1_dequant = 16'sd32767;
+            else if (val_unclipped < -32'sd32768) calc_chroma_level1_dequant = -16'sd32768;
+            else                                  calc_chroma_level1_dequant = val_unclipped[15:0];
+        end
+    endfunction
+
 `ifndef SYNTHESIS
     integer s_i, s_j;
 `endif
@@ -2470,10 +2581,10 @@ module hevc_encoder_top #(
                 s2p_buffer[s2p_y][s2p_x] <= inv_quant_out_coeff;
             end
             if (inv_quant_out_valid && inv_quant_out_last && (reg_tu_comp != 2'd0) && !tu_has_nonzero) begin
-                s2p_buffer[0][0] <= (16'sd72 << (3'd5 - dct_out_tu_size_log2));
+                s2p_buffer[0][0] <= calc_chroma_level1_dequant(ctu_qp, dct_out_tu_size_log2);
                 // synthesis translate_off
-                $display("Time=%0t: [HEVC_TOP] Injecting chroma phantom DC coeff %0d into s2p_buffer for comp=%0d size=%0d",
-                         $time, (16'sd72 << (3'd5 - dct_out_tu_size_log2)), reg_tu_comp, dct_out_tu_size_log2);
+                $display("Time=%0t: [HEVC_TOP] Injecting chroma phantom DC coeff %0d into s2p_buffer for comp=%0d size=%0d (qp=%0d)",
+                         $time, calc_chroma_level1_dequant(ctu_qp, dct_out_tu_size_log2), reg_tu_comp, dct_out_tu_size_log2, ctu_qp);
                 // synthesis translate_on
             end
             

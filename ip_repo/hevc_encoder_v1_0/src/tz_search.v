@@ -322,7 +322,9 @@ module tz_search #(
                 ref_req_y     <= ref_y_req;
                 if (ref_req_valid && ref_req_ready) begin
                     // synthesis translate_off
+`ifdef DEBUG_TZ
                     $display("Time=%0t: [tz_search] REQ_REF accepted for x=%0d, y=%0d", $time, ref_x_req, ref_y_req);
+`endif
                     // synthesis translate_on
                     ref_req_valid <= 1'b0;
                     state <= S_WAIT_REF;
@@ -335,7 +337,9 @@ module tz_search #(
             S_WAIT_REF: begin
                 if (ref_resp_valid) begin
                     // synthesis translate_off
+`ifdef DEBUG_TZ
                     $display("Time=%0t: [tz_search] WAIT_REF got resp_valid", $time);
+`endif
                     // synthesis translate_on
                     sad_ref_flat <= ref_resp_data;
                     sad_valid_in <= 1'b1;    // launch SAD computation
