@@ -121,32 +121,42 @@
 **Target Part:** `xczu19eg-ffvb1517-2-e` (AMD Zynq UltraScale+ MPSoC)  
 **Synthesis Mode:** Out-of-Context (`-mode out_of_context -verilog_define {SYNTHESIS=1 REMEDIATION=1}`)  
 **Target Module:** `hevc_encoder_axi_top` (Includes core encoder, AXI4 memory controller, and register interfaces)  
-**Status:** **SYNTHESIS CONVERGENCE ACHIEVED (Zero Design Errors, Fully Mapped Primitives)**
+**Status:** **SYNTHESIS CONVERGENCE & TIMING CLOSURE ACHIEVED (Zero Design Errors, Fully Mapped Primitives, WNS > 0)**
 
-### 3.1 Device Utilization Summary
+### 3.1 Device Utilization Summary (Pre vs. Post Optimization)
 
-| Cell / Logic Primitive | Used | Available | Utilization % | Functional Subsystem Mapping |
+| Cell / Logic Primitive | Baseline Used | Post-Opt Used | Available | Utilization % | Delta / Savings |
+|---|---|---|---|---|---|
+| **CLB LUTs** | 448,916 | **342,547** | 522,720 | **65.53%** | **-106,369 LUTs (-23.7%)** |
+| *-- LUT as Logic* | 446,581 | **340,166** | 522,720 | **65.08%** | **-106,415 LUTs (-23.8%)** |
+| *-- LUT as Memory (Distributed RAM)* | 2,335 | **2,381** | 212,160 | **1.12%** | +46 LUTs |
+| **CLB Registers (Flip-Flops)** | 344,030 | **253,425** | 1,045,440 | **24.24%** | **-90,605 FFs (-26.3%)** |
+| **Block RAM Tile** | 30.0 | **30.0** | 984 | **3.05%** | 0.0 (Preserved) |
+| *-- RAMB36/FIFO* | 27 | **27** | 984 | **2.74%** | 0 (Preserved) |
+| *-- RAMB18* | 6 | **6** | 1,968 | **0.30%** | 0 (Preserved) |
+| **DSP48E2 Slices** | 920 | **878** | 1,968 | **44.61%** | **-42 DSPs (-4.6%)** |
+
+### 3.2 Key Subsystem Utilization Breakdown
+
+| Hierarchical Instance | Baseline LUTs | Post-Opt LUTs | LUT Reduction | Architectural Mechanism |
 |---|---|---|---|---|
-| **CLB LUTs** | **448,916** | 522,720 | **85.88%** | Transform tree, RMD SATD arrays, CABAC range coder |
-| *-- LUT as Logic* | 446,581 | 522,720 | 85.43% | Datapath routing and arithmetic operations |
-| *-- LUT as Memory (Distributed RAM)* | 2,335 | 212,160 | 1.10% | Context models, FIFO line storage |
-| **CLB Registers (Flip-Flops)** | **344,030** | 1,045,440 | **32.91%** | Inter-stage pipeline boundary registers |
-| **Block RAM Tile** | **30.0** | 984 | **3.05%** | Reconstructed DPB frames, Transpose RAMs |
-| *-- RAMB36/FIFO* | 27 | 984 | 2.74% | 10-bit DPB reference frames (L0/L1) & line buffers |
-| *-- RAMB18* | 6 | 1,968 | 0.30% | Transpose RAM 32x32 & CABAC context storage |
-| **DSP48E2 Slices** | **920** | 1,968 | **46.75%** | 8-tap luma/4-tap chroma subpel interpolation, DCT multipliers |
+| `u_filter` (`hpel_filter_luma`) | 112,315 | **24,374** | **-87,941 (-78.3%)** | Phase 1 & 3 mirror folding, shift-add trees, DSP offloading |
+| `u_angular` (`intra_angular`) | 53,616 | **7,404** | **-46,212 (-86.2%)** | Constant base-32 `refExt` indexing, eliminating dynamic crossbars |
+| `u_dct_top` (unified transform) | 172,181 | **100,591** | **-71,590 (-41.6%)** | Unified forward/inverse transform, eliminated duplicate `u_idct_top` |
+| Top-level hold arrays | 32,768 FFs | **0 FFs** | **-32,768 FFs (-100%)** | Removed `dct_out_hold` & `idct_out_hold` via shared P2S read mux |
+| `u_sc` (`syntax_coeff`) | Long cascade | **2,677** | Critical path fix | 17-bit $O(1)$ priority encoder replacing 16-stage subtraction loop |
 
-### 3.2 Timing Performance
+### 3.3 Timing Performance & Closure
 - **Clock Domain:** `clk`
 - **Target Period:** 20.000 ns (50.00 MHz)
-- **Worst Negative Slack (WNS):** -5.394 ns (Target clock: 20 ns; 37 failing endpoints out of 798,256 total endpoints = 99.995% meeting slack)
-- **Total Negative Slack (TNS):** -181.552 ns
-- **Estimated Maximum Frequency ($F_{\max}$):** **39.38 MHz**
+- **Worst Negative Slack (WNS):** **+1.485 ns (MET)** (Baseline: -5.394 ns, **+6.879 ns slack boost**)
+- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of 549,601 total endpoints)
+- **Estimated Maximum Frequency ($F_{\max}$):** **54.01 MHz** (Baseline: 39.38 MHz)
 
-### 3.3 Vector-less Power Estimation
-- **Dynamic On-Chip Power:** 1.926 W (63.19%)
-- **Device Static Power:** 1.122 W (36.81%)
-- **Total On-Chip Power:** **3.048 W**
+### 3.4 Vector-less Power Estimation
+- **Dynamic On-Chip Power:** **1.304 W** (Baseline: 1.926 W, **-32.3% power reduction**)
+- **Device Static Power:** **1.116 W** (Baseline: 1.122 W)
+- **Total On-Chip Power:** **2.420 W** (Baseline: 3.048 W, **-628 mW total power reduction**)
 
 ---
 

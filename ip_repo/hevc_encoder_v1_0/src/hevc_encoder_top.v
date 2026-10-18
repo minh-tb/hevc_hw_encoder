@@ -275,7 +275,6 @@ module hevc_encoder_top #(
 
     wire        dct_out_valid;
     wire signed [15:0] dct_out_data [0:31][0:31];
-    reg  signed [15:0] dct_out_hold [0:31][0:31]; // Latched copy for P2S scanner
     wire [2:0]  dct_out_tu_size_log2;
 
     wire        quant_out_valid;
@@ -288,8 +287,10 @@ module hevc_encoder_top #(
     wire [15:0] inv_quant_out_coeff;
 
     wire        idct_out_valid;
-    wire signed [15:0] idct_out_data [0:31][0:31];
-    reg  signed [15:0] idct_out_hold [0:31][0:31]; // Latched copy for recon P2S scanner
+    wire [2:0]  idct_out_tu_size_log2;
+    wire [16383:0] idct_in_data_flat;
+    wire [4:0]  idct_p2s_x_next;
+    wire [4:0]  idct_p2s_y_next;
     wire [9:0]  idct_out_x;
     wire [9:0]  idct_out_y;
 
@@ -2348,25 +2349,34 @@ module hevc_encoder_top #(
     assign intra_pred_pixel = intra_out_pixel;
 
     //-------------------------------------------------------------------------
-    // Transform & Quantization
+    // Transform & Quantization (Unified Forward & Inverse Transform Engine)
     //-------------------------------------------------------------------------
+    wire shared_xform_out_valid;
+    wire shared_xform_out_fwd_inv_n;
+    wire use_idct_bus = idct_start || (!shared_xform_out_fwd_inv_n && !dct_in_valid);
+
     dct_top u_dct_top (
         .clk              (clk),
         .rst_n            (rst_n),
-        .fwd_inv_n        (1'b1), // Forward DCT
-        .tu_size_log2     (reg_tu_size_log2),
+        .fwd_inv_n        (!idct_start),
+        .tu_size_log2     (idct_start ? dct_out_tu_size_log2 : reg_tu_size_log2),
 `ifdef REMEDIATION
-        .is_dst7          ((reg_tu_size_log2 == 3'd2) && latched_cu_is_intra && (reg_tu_comp == 2'd0)),
+        .is_dst7          (idct_start ? ((dct_out_tu_size_log2 == 3'd2) && latched_cu_is_intra && (reg_tu_comp == 2'd0))
+                                      : ((reg_tu_size_log2 == 3'd2)     && latched_cu_is_intra && (reg_tu_comp == 2'd0))),
 `endif
-        .in_valid         (dct_in_valid),
+        .in_valid         (dct_in_valid | idct_start),
         .in_ready         (),  // streaming pipeline, never stalls
-        .in_data          (dct_in_data_flat),
-        .out_valid        (dct_out_valid),
-        .out_ready        (1'b1),  // fwd_quant always ready (streaming)
+        .in_data          (use_idct_bus ? idct_in_data_flat : dct_in_data_flat),
+        .out_valid        (shared_xform_out_valid),
+        .out_ready        (1'b1),  // downstream scanner always ready (streaming)
         .out_data         (dct_out_data_flat),
         .out_tu_size_log2 (dct_out_tu_size_log2),
-        .out_fwd_inv_n    ()
+        .out_fwd_inv_n    (shared_xform_out_fwd_inv_n)
     );
+
+    assign dct_out_valid         = shared_xform_out_valid &&  shared_xform_out_fwd_inv_n;
+    assign idct_out_valid        = shared_xform_out_valid && !shared_xform_out_fwd_inv_n;
+    assign idct_out_tu_size_log2 = dct_out_tu_size_log2;
 
     //-------------------------------------------------------------------------
       // Parallel to Serial (P2S) Scanner via address_generator
@@ -2377,6 +2387,11 @@ module hevc_encoder_top #(
       reg signed [15:0] p2s_coeff;
       
       wire [4:0] p2s_x, p2s_y;
+
+      // Shared 1,024:1 read multiplexer across Forward and Reconstruction P2S scanners
+      wire [4:0] shared_xform_rd_y = idct_p2s_active ? idct_p2s_y_next : p2s_y;
+      wire [4:0] shared_xform_rd_x = idct_p2s_active ? idct_p2s_x_next : p2s_x;
+      wire signed [15:0] shared_xform_rd_sample = dct_out_data[shared_xform_rd_y][shared_xform_rd_x];
       
       // Derive scan_mode from intra mode per HEVC spec (diagonal=0, horiz=1, vert=2)
       // HEVC Clause 6.5.3: Only 4x4 and 8x8 Intra TUs can use horizontal/vertical scan. 16x16 and 32x32 are always Diagonal (0).
@@ -2417,7 +2432,7 @@ module hevc_encoder_top #(
                       p2s_active <= 1'b0;
                   end else begin
                       p2s_idx <= p2s_idx + 10'd1;
-                      p2s_coeff <= dct_out_hold[p2s_y][p2s_x];
+                      p2s_coeff <= shared_xform_rd_sample;
                   end
               end
           end
@@ -2606,56 +2621,16 @@ module hevc_encoder_top #(
         end
     end
 
-    wire [16383:0] idct_in_data_flat;
-    wire [16383:0] idct_out_data_flat;
-
-    // Latch DCT/IDCT outputs: combinational output is only valid 1 cycle
-    // P2S scanners read on subsequent cycles, so we capture into hold buffers
-    integer h_i, h_j;
-    always @(posedge clk) begin
-        if (dct_out_valid) begin
-            for (h_i = 0; h_i < 32; h_i = h_i + 1)
-                for (h_j = 0; h_j < 32; h_j = h_j + 1)
-                    dct_out_hold[h_i][h_j] <= dct_out_data[h_i][h_j];
-        end
-        if (idct_out_valid) begin
-            for (h_i = 0; h_i < 32; h_i = h_i + 1)
-                for (h_j = 0; h_j < 32; h_j = h_j + 1)
-                    idct_out_hold[h_i][h_j] <= idct_out_data[h_i][h_j];
-        end
-    end
-
     wire signed [15:0] idct_in_data [0:31][0:31];
     generate
         for (gi = 0; gi < 32; gi = gi + 1) begin : gen_idct_in_row
             for (gj = 0; gj < 32; gj = gj + 1) begin : gen_idct_in_col
                 assign idct_in_data[gi][gj] = s2p_buffer[gi][gj];
                 assign idct_in_data_flat[(gi*32+gj)*16 +: 16] = idct_in_data[gi][gj];
-                assign idct_out_data[gi][gj] = idct_out_data_flat[(gi*32+gj)*16 +: 16];
             end
         end
     endgenerate
 
-
-    wire [2:0] idct_out_tu_size_log2;
-
-    dct_top u_idct_top (
-        .clk              (clk),
-        .rst_n            (rst_n),
-        .fwd_inv_n        (1'b0), // Inverse DCT
-        .tu_size_log2     (dct_out_tu_size_log2),
-`ifdef REMEDIATION
-        .is_dst7          ((dct_out_tu_size_log2 == 3'd2) && latched_cu_is_intra && (reg_tu_comp == 2'd0)),
-`endif
-        .in_valid         (idct_start),
-        .in_ready         (),  // streaming pipeline, never stalls
-        .in_data          (idct_in_data_flat),
-        .out_valid        (idct_out_valid),
-        .out_ready        (1'b1), // IDCT output is always consumed by recon P2S scanner
-        .out_data         (idct_out_data_flat),
-        .out_tu_size_log2 (idct_out_tu_size_log2),
-        .out_fwd_inv_n    ()
-    );
     //-------------------------------------------------------------------------
     // Parallel to Serial (P2S) Raster Scanner for Recon
     //-------------------------------------------------------------------------
@@ -2677,14 +2652,14 @@ module hevc_encoder_top #(
                             idct_p2s_idx[9:5];
 
     wire [9:0] idct_p2s_idx_next = idct_p2s_idx + 1;
-    wire [4:0] idct_p2s_x_next = (idct_p2s_log2 == 2) ? idct_p2s_idx_next[1:0] :
-                                 (idct_p2s_log2 == 3) ? idct_p2s_idx_next[2:0] :
-                                 (idct_p2s_log2 == 4) ? idct_p2s_idx_next[3:0] :
-                                 idct_p2s_idx_next[4:0];
-    wire [4:0] idct_p2s_y_next = (idct_p2s_log2 == 2) ? idct_p2s_idx_next[3:2] :
-                                 (idct_p2s_log2 == 3) ? idct_p2s_idx_next[5:3] :
-                                 (idct_p2s_log2 == 4) ? idct_p2s_idx_next[7:4] :
-                                 idct_p2s_idx_next[9:5];
+    assign idct_p2s_x_next = (idct_p2s_log2 == 2) ? idct_p2s_idx_next[1:0] :
+                             (idct_p2s_log2 == 3) ? idct_p2s_idx_next[2:0] :
+                             (idct_p2s_log2 == 4) ? idct_p2s_idx_next[3:0] :
+                             idct_p2s_idx_next[4:0];
+    assign idct_p2s_y_next = (idct_p2s_log2 == 2) ? idct_p2s_idx_next[3:2] :
+                             (idct_p2s_log2 == 3) ? idct_p2s_idx_next[5:3] :
+                             (idct_p2s_log2 == 4) ? idct_p2s_idx_next[7:4] :
+                             idct_p2s_idx_next[9:5];
 
     wire       idct_p2s_ready;
 
@@ -2701,13 +2676,13 @@ module hevc_encoder_top #(
                 idct_p2s_idx <= 10'd0;
                 idct_p2s_max <= (10'd1 << (idct_out_tu_size_log2 * 2)) - 10'd1;
                 idct_p2s_log2 <= idct_out_tu_size_log2;
-                idct_p2s_coeff <= idct_out_data[0][0];
+                idct_p2s_coeff <= dct_out_data[0][0];
             end else if (idct_p2s_active && idct_p2s_ready) begin
                 if (idct_p2s_idx == idct_p2s_max) begin
                     idct_p2s_active <= 1'b0;
                 end else begin
                     idct_p2s_idx <= idct_p2s_idx + 10'd1;
-                    idct_p2s_coeff <= idct_out_hold[idct_p2s_y_next][idct_p2s_x_next];
+                    idct_p2s_coeff <= shared_xform_rd_sample;
                 end
             end
         end

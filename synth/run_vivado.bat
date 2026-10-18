@@ -29,13 +29,13 @@ if /i "%ACTION%"=="package" (
 
 if /i "%ACTION%"=="verify" (
     echo [RUN] Verifying IP Catalog instantiation...
-    "%VIVADO_BAT%" -mode batch -source synth/verify_ip_catalog.tcl -log synth/vivado_verify.log -journal synth/vivado_verify.jou
+    call "%VIVADO_BAT%" -mode batch -source synth/verify_ip_catalog.tcl -log synth/vivado_verify.log -journal synth/vivado_verify.jou
     exit /b !ERRORLEVEL!
 )
 
 if /i "%ACTION%"=="synth" (
     echo [RUN] Running Out-of-Context Synthesis...
-    "%VIVADO_BAT%" -mode batch -source synth/synth_vivado.tcl -log synth/vivado_synth.log -journal synth/vivado_synth.jou
+    call "%VIVADO_BAT%" -mode batch -source synth/synth_vivado.tcl -log synth/vivado_synth.log -journal synth/vivado_synth.jou
     if errorlevel 1 (
         echo [ERROR] Synthesis failed.
         exit /b 1
@@ -50,11 +50,11 @@ if /i "%ACTION%"=="all" (
     if !ERRORLEVEL! neq 0 exit /b !ERRORLEVEL!
 
     echo [STEP 2/3] Verifying IP Catalog...
-    "%VIVADO_BAT%" -mode batch -source synth/verify_ip_catalog.tcl -log synth/vivado_verify.log -journal synth/vivado_verify.jou
+    call "%VIVADO_BAT%" -mode batch -source synth/verify_ip_catalog.tcl -log synth/vivado_verify.log -journal synth/vivado_verify.jou
     if !ERRORLEVEL! neq 0 exit /b !ERRORLEVEL!
 
     echo [STEP 3/3] Running Out-of-Context Synthesis...
-    "%VIVADO_BAT%" -mode batch -source synth/synth_vivado.tcl -log synth/vivado_synth.log -journal synth/vivado_synth.jou
+    call "%VIVADO_BAT%" -mode batch -source synth/synth_vivado.tcl -log synth/vivado_synth.log -journal synth/vivado_synth.jou
     if !ERRORLEVEL! neq 0 exit /b !ERRORLEVEL!
 
     python synth/extract_vivado_results.py

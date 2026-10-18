@@ -119,13 +119,18 @@ module intra_planar (
     wire fire_in = in_valid && in_ready;
 
     integer i;
+`ifndef SYNTHESIS
+    integer init_i;
+    initial begin
+        for (init_i = 0; init_i <= 32; init_i = init_i + 1) begin
+            refT[init_i] = {`PIXEL_WIDTH{1'b0}};
+            refL[init_i] = {`PIXEL_WIDTH{1'b0}};
+        end
+    end
+`endif
     always @(posedge clk) begin
         if (!rst_n) begin
             state <= S_REF_BUF;
-            for (i = 0; i <= 32; i = i + 1) begin
-                refT[i] <= {`PIXEL_WIDTH{1'b0}};
-                refL[i] <= {`PIXEL_WIDTH{1'b0}};
-            end
         end else begin
             case (state)
                 S_REF_BUF: begin

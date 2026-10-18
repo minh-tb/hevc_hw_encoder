@@ -751,6 +751,11 @@ module syntax_coeff #(
         input [15:0] symbol;
         input [2:0]  rParam;
         reg [15:0] codeNumber;
+        reg [15:0] diff;
+        reg [16:0] norm;
+        reg [5:0]  k;
+        reg [5:0]  max_k;
+        reg [31:0] sub_base;
         reg [5:0]  length;
         reg [5:0]  prefix_len;
         reg [5:0]  suffix_len;
@@ -758,7 +763,6 @@ module syntax_coeff #(
         reg [31:0] out_bits;
         reg [31:0] prefix_val;
         reg [15:0] suffix_val;
-        integer i;
         begin
             codeNumber = symbol;
             if (codeNumber < (16'd3 << rParam)) begin
@@ -770,14 +774,36 @@ module syntax_coeff #(
                 suffix_val = codeNumber & ((16'd1 << rParam) - 16'd1);
                 out_bits = (prefix_val << suffix_len) | {{16{1'b0}}, suffix_val};
             end else begin
-                length = {3'd0, rParam};
-                codeNumber = codeNumber - (16'd3 << rParam);
-                for (i = 0; i < 16; i = i + 1) begin
-                    if (codeNumber >= (16'd1 << length) && length < 6'd16) begin
-                        codeNumber = codeNumber - (16'd1 << length);
-                        length = length + 6'd1;
-                    end
-                end
+                diff = symbol - (16'd3 << rParam);
+                norm = {1'b0, (diff >> rParam)} + 17'd1;
+
+                // Priority encoder: find floor(log2(norm)) in [0..16]
+                if      (norm[16]) k = 6'd16;
+                else if (norm[15]) k = 6'd15;
+                else if (norm[14]) k = 6'd14;
+                else if (norm[13]) k = 6'd13;
+                else if (norm[12]) k = 6'd12;
+                else if (norm[11]) k = 6'd11;
+                else if (norm[10]) k = 6'd10;
+                else if (norm[9])  k = 6'd9;
+                else if (norm[8])  k = 6'd8;
+                else if (norm[7])  k = 6'd7;
+                else if (norm[6])  k = 6'd6;
+                else if (norm[5])  k = 6'd5;
+                else if (norm[4])  k = 6'd4;
+                else if (norm[3])  k = 6'd3;
+                else if (norm[2])  k = 6'd2;
+                else if (norm[1])  k = 6'd1;
+                else               k = 6'd0;
+
+                max_k = 6'd16 - {3'd0, rParam};
+                if (k > max_k)
+                    k = max_k;
+
+                length     = {3'd0, rParam} + k;
+                sub_base   = (((32'd1 << k) - 32'd1) << rParam);
+                codeNumber = diff - sub_base[15:0];
+
                 prefix_len = 6'd3 + length + 6'd1 - {3'd0, rParam};
                 suffix_len = length;
                 total_len  = prefix_len + suffix_len;

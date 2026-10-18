@@ -8,7 +8,8 @@ An RTL implementation of a high-throughput, pipelined **HEVC (ITU-T H.265 / ISO/
 
 - **Bit-Exact Conformance:** **100.00% sample-by-sample match (`max_diff == 0`)** across all frames ($Y, Cb, Cr$) against Fraunhofer **HM 18.0** reference decoder across multi-QP sweeps ($QP \in \{22, 27, 32, 37\}$).
 - **Entropy Coding Conformance:** Standard-compliant CABAC bitstream output verified symbol-by-symbol against the normative HM decoder without a single syntax desynchronization.
-- **Physical Synthesis Convergence:** Fully synthesized in **AMD Vivado 2026.1** on **Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`** with complete retention of all Block RAMs (30 BRAM tiles), DSP slices (920 DSP48E2), and sub-pel interpolation datapaths without logic pruning.
+- **Physical Synthesis Convergence & Timing Closure:** Fully synthesized in **AMD Vivado 2026.1 Enterprise** on **Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`** with complete timing closure (**WNS = +1.485 ns, Fmax = 54.01 MHz @ 50 MHz target**, 0 failing endpoints out of 549,601).
+- **PPA Optimization:** Area reduced by **106,369 LUTs (-23.7%)** and **90,605 FFs (-26.3%)**, with dynamic power reduced by **32.3%** through architectural sharing and $O(1)$ priority encoding.
 - **Regression Suite:** **100% Convergence (14/14 passing)** on self-checking unit- and system-level testbenches.
 
 ---
@@ -19,16 +20,16 @@ Out-of-context synthesis executed with `SYNTHESIS=1 REMEDIATION=1` on top-level 
 
 | Resource Type | Used | Available | Utilization % |
 |---|---|---|---|
-| **CLB LUTs** | **448,916** | 522,720 | **85.88%** |
-| *-- Logic LUTs* | 446,581 | 522,720 | 85.43% |
-| *-- Memory LUTs (Distributed RAM)* | 2,335 | 212,160 | 1.10% |
-| **CLB Registers (FF)** | **344,030** | 1,045,440 | **32.91%** |
+| **CLB LUTs** | **342,547** | 522,720 | **65.53%** (-106,369 LUTs / -23.7% vs. baseline) |
+| *-- Logic LUTs* | 340,166 | 522,720 | 65.08% |
+| *-- Memory LUTs (Distributed RAM)* | 2,381 | 212,160 | 1.12% |
+| **CLB Registers (FF)** | **253,425** | 1,045,440 | **24.24%** (-90,605 FFs / -26.3% vs. baseline) |
 | **Block RAM Tiles** | **30.0** | 984 | **3.05%** |
 | *-- RAMB36/FIFO* | 27 | 984 | 2.74% |
 | *-- RAMB18* | 6 | 1,968 | 0.30% |
-| **DSP48E2 Slices** | **920** | 1,968 | **46.75%** |
-| **Estimated $F_{\max}$** | **39.38 MHz** | (Target Period: 20.0 ns, WNS: -5.394 ns on 37/798k endpoints) |
-| **Total On-Chip Power** | **3.048 W** | (Dynamic: 1.926 W, Device Static: 1.122 W) |
+| **DSP48E2 Slices** | **878** | 1,968 | **44.61%** (-42 DSPs vs. baseline) |
+| **Estimated $F_{\max}$** | **54.01 MHz** | (Target Period: 20.0 ns, **WNS: +1.485 ns (MET)**, TNS: 0.000 ns, 0 failing endpoints) |
+| **Total On-Chip Power** | **2.420 W** | (Dynamic: 1.304 W [-32.3%], Device Static: 1.116 W) |
 
 ---
 

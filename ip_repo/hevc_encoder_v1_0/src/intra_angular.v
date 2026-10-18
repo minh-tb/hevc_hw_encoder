@@ -199,15 +199,20 @@ module intra_angular (
     wire fire_in = in_valid && in_ready;
 
     integer k;
+`ifndef SYNTHESIS
+    integer init_k;
+    initial begin
+        for (init_k = 0; init_k <= 64; init_k = init_k + 1) begin
+            refMain[init_k] = {`PIXEL_WIDTH{1'b0}};
+            refSide[init_k] = {`PIXEL_WIDTH{1'b0}};
+        end
+        for (init_k = 0; init_k <= 127; init_k = init_k + 1)
+            refExt[init_k] = {`PIXEL_WIDTH{1'b0}};
+    end
+`endif
     always @(posedge clk) begin
         if (!rst_n) begin
             state <= S_BUF;
-            for (k = 0; k <= 64; k = k + 1) begin
-                refMain[k] <= {`PIXEL_WIDTH{1'b0}};
-                refSide[k] <= {`PIXEL_WIDTH{1'b0}};
-            end
-            for (k = 0; k <= 127; k = k + 1)
-                refExt[k] <= {`PIXEL_WIDTH{1'b0}};
         end else begin
             case (state)
                 //--------------------------------------------------------------
@@ -249,7 +254,7 @@ module intra_angular (
                             if (needs_ext)
                                 state <= S_EXTEND;
                             else begin
-                                // Copy refMain to refExt with offset N
+                                // Copy refMain to refExt with offset 32
                                 state <= S_EXTEND; // always go through extend to copy
                             end
                         end
@@ -257,21 +262,20 @@ module intra_angular (
                 end
 
                 //--------------------------------------------------------------
-                // Build extended reference into refExt
-                // refExt[N + i] = refMain[i]  for i = 0..2N
-                // For negative angle modes, also fill refExt[N-1..0]
-                // using: refExt[N-1-i] = refSide[((i+1)*invAngle+128)>>8]
+                // Build extended reference into refExt anchored at constant 32
+                // refExt[32 + i] = refMain[i]  for i = 0..64
+                // For negative angle modes, also fill refExt[31..32-N]
+                // using: refExt[31-i] = refSide[((i+1)*invAngle+128)>>8]
                 //                                              for i=0..N-1
                 //--------------------------------------------------------------
                 S_EXTEND: begin
                     for (k = 0; k <= 64; k = k + 1) begin
-                        if (k <= N2_w)
-                            refExt[N_w + k[7:0]] <= refMain[k];
+                        refExt[32 + k] <= refMain[k];
                     end
                     if (needs_ext) begin
                         for (k = 0; k < 32; k = k + 1) begin
                             if (k < N) begin
-                                refExt[N_w - 8'd1 - k[7:0]] <= refSide[ ((((k + 1) * cur_inv_angle + 128) >> 8) > N2_w) ? N2_w : (((k + 1) * cur_inv_angle + 128) >> 8) ];
+                                refExt[31 - k] <= refSide[ ((((k + 1) * cur_inv_angle + 128) >> 8) > N2_w) ? N2_w : (((k + 1) * cur_inv_angle + 128) >> 8) ];
                             end
                         end
                     end
@@ -294,7 +298,7 @@ module intra_angular (
     //     deltaPos = (py+1) * angle                 [signed multiply]
     //     iIdx     = px + (deltaPos >> 5)           [integer part of projection]
     //     frac     = deltaPos & 31                  [fractional part, 0..31]
-    //     refAccess= refExt[N + 1 + iIdx]           [apply N offset + 1 for pSrc[1]]
+    //     refAccess= refExt[32 + 1 + iIdx]          [apply 32 offset + 1 for pSrc[1]]
     //
     //   pred = frac==0 ? ref[refAccess]
     //              : ((32-frac)*ref[refAccess] + frac*ref[refAccess+1] + 16) >> 5
@@ -328,12 +332,12 @@ module intra_angular (
     wire        is_int   = (frac == 5'd0);            // no interpolation needed
 
     // Reference index into refExt
-    // refExt is centered at N (refMain[0] = refExt[N])
-    // pSrc[0] = refMain[0] = refExt[N] = corner
-    // pSrc[1] = refMain[1] = refExt[N+1] = first active sample
+    // refExt is centered at 32 (refMain[0] = refExt[32])
+    // pSrc[0] = refMain[0] = refExt[32] = corner
+    // pSrc[1] = refMain[1] = refExt[33] = first active sample
     // For vertical mode: access pSrc[x + iDeltaInt + 1]
-    //   = refExt[N + 1 + x + iDeltaInt]
-    wire signed [9:0] base_idx  = $signed({2'b0, N_w}) + 10'sd1 +
+    //   = refExt[32 + 1 + x + iDeltaInt]
+    wire signed [9:0] base_idx  = 10'sd33 +
                                    $signed({4'b0, ref_selector}) +
                                    $signed({{1{iDeltaInt[8]}}, iDeltaInt});
     wire [7:0]  ref_idx0 = base_idx[7:0];

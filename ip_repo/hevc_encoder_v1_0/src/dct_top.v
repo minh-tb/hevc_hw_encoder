@@ -81,11 +81,17 @@ module dct_top (
 `endif
     wire [5:0] tu_size = (6'd1 << latched_tu_size_log2); // 4, 8, 16, or 32
 
-    // Input holding buffer: 32x32 signed 16-bit
-    reg signed [15:0] in_buf [0:31][0:31];
-
     // Output buffer: 32x32 signed 16-bit
     reg signed [15:0] out_data_reg [0:31][0:31];
+
+`ifndef SYNTHESIS
+    integer init_r, init_c;
+    initial begin
+        for (init_r = 0; init_r < 32; init_r = init_r + 1)
+            for (init_c = 0; init_c < 32; init_c = init_c + 1)
+                out_data_reg[init_r][init_c] = 16'sd0;
+    end
+`endif
 
     // Connect output array to flattened out_data
     genvar gi, gj;
@@ -161,7 +167,7 @@ module dct_top (
     // Helper functions / variables
     integer r, c, k;
 
-    // Combinational multiplexing for Pass 1 input vector
+    // Combinational multiplexing for Pass 1 input vector directly from in_data
     reg [511:0] pass1_vec;
     always @(*) begin
         pass1_vec = 512'd0;
@@ -169,10 +175,10 @@ module dct_top (
             if (c < tu_size) begin
                 if (latched_fwd_inv_n) begin
                     // Forward Pass 1: row feed_cnt
-                    pass1_vec[c*16 +: 16] = in_buf[feed_cnt[4:0]][c];
+                    pass1_vec[c*16 +: 16] = in_data[(feed_cnt[4:0]*32 + c)*16 +: 16];
                 end else begin
                     // Inverse Pass 1: col feed_cnt
-                    pass1_vec[c*16 +: 16] = in_buf[c][feed_cnt[4:0]];
+                    pass1_vec[c*16 +: 16] = in_data[(c*32 + feed_cnt[4:0])*16 +: 16];
                 end
             end
         end
@@ -201,13 +207,6 @@ module dct_top (
             ram_wr_row           <= 5'd0;
             ram_wr_vec           <= 512'd0;
             ram_rd_col           <= 5'd0;
-
-            for (r = 0; r < 32; r = r + 1) begin
-                for (c = 0; c < 32; c = c + 1) begin
-                    in_buf[r][c]       <= 16'sd0;
-                    out_data_reg[r][c] <= 16'sd0;
-                end
-            end
         end else begin
             // Default non-sticky pulse signals
             ram_wr_en     <= 1'b0;
@@ -227,16 +226,7 @@ module dct_top (
                         feed_cnt             <= 6'd0;
                         wr_cnt               <= 6'd0;
                         out_cnt              <= 6'd0;
-
-                        // Latch and unpack input array
-                        for (r = 0; r < 32; r = r + 1) begin
-                            for (c = 0; c < 32; c = c + 1) begin
-                                in_buf[r][c]       <= in_data[(r*32+c)*16 +: 16];
-                                out_data_reg[r][c] <= 16'sd0;
-                            end
-                        end
-
-                        state <= S_ROW_FEED;
+                        state                <= S_ROW_FEED;
                     end
                 end
 

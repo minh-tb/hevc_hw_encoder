@@ -70,6 +70,7 @@
 
 `include "parameter_pkg.vh"
 
+(* use_dsp = "no", keep_hierarchy = "yes" *)
 module hpel_filter_luma #(
     parameter PIXEL_WIDTH = `PIXEL_WIDTH,         // 10
     parameter BLK_SIZE    = 4,                    // output block (NxN)
@@ -108,30 +109,74 @@ module hpel_filter_luma #(
     function automatic signed [H_INT_W-1:0] fir8;
         input [1:0] frac;
         input [PIXEL_WIDTH-1:0] p0, p1, p2, p3, p4, p5, p6, p7;
-        reg signed [H_INT_W-1:0] sum;
+        reg signed [H_INT_W-1:0] t0, t1, t2, t3, t4, t5, t6;
+        reg signed [H_INT_W-1:0] s0, s1, s2, s3;
         begin
-            case (frac)
-                2'd1: sum = -1*$signed({1'b0,p0}) + 4*$signed({1'b0,p1}) - 10*$signed({1'b0,p2}) + 58*$signed({1'b0,p3}) + 17*$signed({1'b0,p4}) - 5*$signed({1'b0,p5}) + 1*$signed({1'b0,p6});
-                2'd2: sum = -1*$signed({1'b0,p0}) + 4*$signed({1'b0,p1}) - 11*$signed({1'b0,p2}) + 40*$signed({1'b0,p3}) + 40*$signed({1'b0,p4}) - 11*$signed({1'b0,p5}) + 4*$signed({1'b0,p6}) - 1*$signed({1'b0,p7});
-                2'd3: sum =  1*$signed({1'b0,p1}) - 5*$signed({1'b0,p2}) + 17*$signed({1'b0,p3}) + 58*$signed({1'b0,p4}) - 10*$signed({1'b0,p5}) + 4*$signed({1'b0,p6}) - 1*$signed({1'b0,p7});
-                default: sum = 64*$signed({1'b0,p3}); // Should not be reached for integer
-            endcase
-            fir8 = sum;
+            if (frac[0]) begin
+                // Quarter-pel: frac==1 uses (p0..p6), frac==3 uses reversed (p7..p1)
+                t0 = $signed({1'b0, frac[1] ? p7 : p0});
+                t1 = $signed({1'b0, frac[1] ? p6 : p1});
+                t2 = $signed({1'b0, frac[1] ? p5 : p2});
+                t3 = $signed({1'b0, frac[1] ? p4 : p3});
+                t4 = $signed({1'b0, frac[1] ? p3 : p4});
+                t5 = $signed({1'b0, frac[1] ? p2 : p5});
+                t6 = $signed({1'b0, frac[1] ? p1 : p6});
+                // Coeffs: {-1, +4, -10, +58, +17, -5, +1}
+                // 58 = 64 - 4 - 2; 17 = 16 + 1; 10 = 8 + 2; 5 = 4 + 1
+                fir8 = ((t3 <<< 6) - (t3 <<< 2) - (t3 <<< 1))
+                     + ((t4 <<< 4) + t4)
+                     - ((t2 <<< 3) + (t2 <<< 1))
+                     - ((t5 <<< 2) + t5)
+                     + (t1 <<< 2)
+                     + (t6 - t0);
+            end else if (frac == 2'd2) begin
+                // Half-pel symmetric: {-1, 4, -11, 40, 40, -11, 4, -1}
+                s0 = $signed({1'b0, p0}) + $signed({1'b0, p7});
+                s1 = $signed({1'b0, p1}) + $signed({1'b0, p6});
+                s2 = $signed({1'b0, p2}) + $signed({1'b0, p5});
+                s3 = $signed({1'b0, p3}) + $signed({1'b0, p4});
+                fir8 = ((s3 <<< 5) + (s3 <<< 3))
+                     - ((s2 <<< 3) + (s2 <<< 1) + s2)
+                     + (s1 <<< 2)
+                     - s0;
+            end else begin
+                fir8 = $signed({1'b0, p3}) <<< 6;
+            end
         end
     endfunction
 
     function automatic signed [HV_SUM_W-1:0] fir8_hint;
         input [1:0] frac;
         input signed [H_INT_W-1:0] p0, p1, p2, p3, p4, p5, p6, p7;
-        reg signed [HV_SUM_W-1:0] sum;
+        reg signed [HV_SUM_W-1:0] t0, t1, t2, t3, t4, t5, t6;
+        reg signed [HV_SUM_W-1:0] s0, s1, s2, s3;
         begin
-            case (frac)
-                2'd1: sum = -1*p0 + 4*p1 - 10*p2 + 58*p3 + 17*p4 - 5*p5 + 1*p6;
-                2'd2: sum = -1*p0 + 4*p1 - 11*p2 + 40*p3 + 40*p4 - 11*p5 + 4*p6 - 1*p7;
-                2'd3: sum =  1*p1 - 5*p2 + 17*p3 + 58*p4 - 10*p5 + 4*p6 - 1*p7;
-                default: sum = 64*p3;
-            endcase
-            fir8_hint = sum;
+            if (frac[0]) begin
+                t0 = frac[1] ? p7 : p0;
+                t1 = frac[1] ? p6 : p1;
+                t2 = frac[1] ? p5 : p2;
+                t3 = frac[1] ? p4 : p3;
+                t4 = frac[1] ? p3 : p4;
+                t5 = frac[1] ? p2 : p5;
+                t6 = frac[1] ? p1 : p6;
+                fir8_hint = ((t3 <<< 6) - (t3 <<< 2) - (t3 <<< 1))
+                          + ((t4 <<< 4) + t4)
+                          - ((t2 <<< 3) + (t2 <<< 1))
+                          - ((t5 <<< 2) + t5)
+                          + (t1 <<< 2)
+                          + (t6 - t0);
+            end else if (frac == 2'd2) begin
+                s0 = p0 + p7;
+                s1 = p1 + p6;
+                s2 = p2 + p5;
+                s3 = p3 + p4;
+                fir8_hint = ((s3 <<< 5) + (s3 <<< 3))
+                          - ((s2 <<< 3) + (s2 <<< 1) + s2)
+                          + (s1 <<< 2)
+                          - s0;
+            end else begin
+                fir8_hint = $signed(p3) <<< 6;
+            end
         end
     endfunction
 
@@ -189,42 +234,44 @@ module hpel_filter_luma #(
             s1_frac_y <= 2'd0;
         end else begin
             s1_valid <= valid_in;
-            s1_frac_y <= frac_y;
+            if (valid_in) begin
+                s1_frac_y <= frac_y;
 
-            // ---- H intermediate: BLK_EXT rows × BLK_SIZE cols ----
-            for (i = 0; i < BLK_EXT; i = i + 1) begin   // row 0..10
-                for (j = 0; j < BLK_SIZE; j = j + 1) begin  // out col 0..3
-                    // 8 taps: ref_ext[i][j+0..j+7], pairs for symmetry
-                    begin : h_compute
-                        s1_hint[i][j] <= fir8(frac_x,
-                            ref_px(ref_ext_flat, i, j+0),
-                            ref_px(ref_ext_flat, i, j+1),
-                            ref_px(ref_ext_flat, i, j+2),
-                            ref_px(ref_ext_flat, i, j+3),
-                            ref_px(ref_ext_flat, i, j+4),
-                            ref_px(ref_ext_flat, i, j+5),
-                            ref_px(ref_ext_flat, i, j+6),
-                            ref_px(ref_ext_flat, i, j+7)
-                        ) >>> 2; // Plain truncation per ITU-T H.265 Clause 8.5.3.3.3 (NO +2 offset)
+                // ---- H intermediate: BLK_EXT rows × BLK_SIZE cols ----
+                for (i = 0; i < BLK_EXT; i = i + 1) begin   // row 0..10
+                    for (j = 0; j < BLK_SIZE; j = j + 1) begin  // out col 0..3
+                        // 8 taps: ref_ext[i][j+0..j+7], pairs for symmetry
+                        begin : h_compute
+                            s1_hint[i][j] <= fir8(frac_x,
+                                ref_px(ref_ext_flat, i, j+0),
+                                ref_px(ref_ext_flat, i, j+1),
+                                ref_px(ref_ext_flat, i, j+2),
+                                ref_px(ref_ext_flat, i, j+3),
+                                ref_px(ref_ext_flat, i, j+4),
+                                ref_px(ref_ext_flat, i, j+5),
+                                ref_px(ref_ext_flat, i, j+6),
+                                ref_px(ref_ext_flat, i, j+7)
+                            ) >>> 2; // Plain truncation per ITU-T H.265 Clause 8.5.3.3.3 (NO +2 offset)
+                        end
                     end
                 end
-            end
 
-            // ---- V sum on integer pixels: BLK_SIZE × BLK_SIZE ----
-            for (i = 0; i < BLK_SIZE; i = i + 1) begin   // block row 0..3
-                for (j = 0; j < BLK_SIZE; j = j + 1) begin  // block col 0..3
-                    // V tap at col j+3, rows i..i+7  (integer pixels)
-                    begin : v_compute
-                        s1_vsum[i][j] <= fir8(frac_y,
-                            ref_px(ref_ext_flat, i+0, j+3),
-                            ref_px(ref_ext_flat, i+1, j+3),
-                            ref_px(ref_ext_flat, i+2, j+3),
-                            ref_px(ref_ext_flat, i+3, j+3),
-                            ref_px(ref_ext_flat, i+4, j+3),
-                            ref_px(ref_ext_flat, i+5, j+3),
-                            ref_px(ref_ext_flat, i+6, j+3),
-                            ref_px(ref_ext_flat, i+7, j+3)
-                        );
+                // ---- V sum on integer pixels: BLK_SIZE × BLK_SIZE ----
+                for (i = 0; i < BLK_SIZE; i = i + 1) begin   // block row 0..3
+                    for (j = 0; j < BLK_SIZE; j = j + 1) begin  // block col 0..3
+                        // V tap at col j+3, rows i..i+7  (integer pixels)
+                        begin : v_compute
+                            s1_vsum[i][j] <= fir8(frac_y,
+                                ref_px(ref_ext_flat, i+0, j+3),
+                                ref_px(ref_ext_flat, i+1, j+3),
+                                ref_px(ref_ext_flat, i+2, j+3),
+                                ref_px(ref_ext_flat, i+3, j+3),
+                                ref_px(ref_ext_flat, i+4, j+3),
+                                ref_px(ref_ext_flat, i+5, j+3),
+                                ref_px(ref_ext_flat, i+6, j+3),
+                                ref_px(ref_ext_flat, i+7, j+3)
+                            );
+                        end
                     end
                 end
             end
@@ -254,34 +301,36 @@ module hpel_filter_luma #(
         end else begin
             s2_valid <= s1_valid;
 
-            for (i = 0; i < BLK_SIZE; i = i + 1) begin
-                for (j = 0; j < BLK_SIZE; j = j + 1) begin
+            if (s1_valid) begin
+                for (i = 0; i < BLK_SIZE; i = i + 1) begin
+                    for (j = 0; j < BLK_SIZE; j = j + 1) begin
 
-                    // ---- H output: normalize h_int at block row i+3 ----
-                    // HM: out = ClipBD((h_int + 8) >> 4, bitDepth)
-                    begin : h_norm
-                        reg signed [HV_SUM_W-1:0] shifted_h;
-                        shifted_h = (s1_hint[i+3][j] + 32'sd8) >>> 4;
-                        s2_hout[i][j] <= clip_px(shifted_h);
-                        s2_hint_hold[i][j] <= s1_hint[i+3][j];
+                        // ---- H output: normalize h_int at block row i+3 ----
+                        // HM: out = ClipBD((h_int + 8) >> 4, bitDepth)
+                        begin : h_norm
+                            reg signed [HV_SUM_W-1:0] shifted_h;
+                            shifted_h = (s1_hint[i+3][j] + 32'sd8) >>> 4;
+                            s2_hout[i][j] <= clip_px(shifted_h);
+                            s2_hint_hold[i][j] <= s1_hint[i+3][j];
+                        end
+
+                        // ---- HV sum: V filter on H intermediates (col j, rows i..i+7) ----
+                        begin : hv_sum_calc
+                            s2_hvsum[i][j] <= fir8_hint(s1_frac_y,
+                                s1_hint[i+0][j],
+                                s1_hint[i+1][j],
+                                s1_hint[i+2][j],
+                                s1_hint[i+3][j],
+                                s1_hint[i+4][j],
+                                s1_hint[i+5][j],
+                                s1_hint[i+6][j],
+                                s1_hint[i+7][j]
+                            );
+                        end
+
+                        // Pass-through V sum for normalization in Stage 3
+                        s2_vsum[i][j] <= s1_vsum[i][j];
                     end
-
-                    // ---- HV sum: V filter on H intermediates (col j, rows i..i+7) ----
-                    begin : hv_sum_calc
-                        s2_hvsum[i][j] <= fir8_hint(s1_frac_y,
-                            s1_hint[i+0][j],
-                            s1_hint[i+1][j],
-                            s1_hint[i+2][j],
-                            s1_hint[i+3][j],
-                            s1_hint[i+4][j],
-                            s1_hint[i+5][j],
-                            s1_hint[i+6][j],
-                            s1_hint[i+7][j]
-                        );
-                    end
-
-                    // Pass-through V sum for normalization in Stage 3
-                    s2_vsum[i][j] <= s1_vsum[i][j];
                 end
             end
         end
@@ -306,36 +355,38 @@ module hpel_filter_luma #(
         end else begin
             valid_out <= s2_valid;
 
-            for (i = 0; i < BLK_SIZE; i = i + 1) begin
-                for (j = 0; j < BLK_SIZE; j = j + 1) begin
+            if (s2_valid) begin
+                for (i = 0; i < BLK_SIZE; i = i + 1) begin
+                    for (j = 0; j < BLK_SIZE; j = j + 1) begin
 
-                    // H output — pass s2_hout directly
-                    h_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
-                        <= s2_hout[i][j];
-                    h_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
-                        <= s2_hint_hold[i][j][INTERM_WIDTH-1:0];
+                        // H output — pass s2_hout directly
+                        h_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
+                            <= s2_hout[i][j];
+                        h_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                            <= s2_hint_hold[i][j][INTERM_WIDTH-1:0];
 
-                    // V output — normalize s2_vsum
-                    // HM: ClipBD((v_sum + 32) >> 6, bitDepth)
-                    begin : v_norm
-                        reg signed [HV_SUM_W-1:0] shifted_v;
-                        shifted_v = (s2_vsum[i][j] + 32'sd32) >>> 6;
-                        v_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
-                            <= clip_px(shifted_v);
+                        // V output — normalize s2_vsum
+                        // HM: ClipBD((v_sum + 32) >> 6, bitDepth)
+                        begin : v_norm
+                            reg signed [HV_SUM_W-1:0] shifted_v;
+                            shifted_v = (s2_vsum[i][j] + 32'sd32) >>> 6;
+                            v_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
+                                <= clip_px(shifted_v);
+                        end
+                        v_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                            <= (s2_vsum[i][j] >>> 2);
+
+                        // HV output — normalize s2_hvsum
+                        // HM / ITU-T 8.5.3.3.3: ClipBD((hv_sum + 512) >> 10, bitDepth)
+                        begin : hv_norm
+                            reg signed [HV_SUM_W-1:0] shifted_hv;
+                            shifted_hv = (s2_hvsum[i][j] + 32'sd512) >>> 10;
+                            hv_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
+                                <= clip_px(shifted_hv);
+                        end
+                        hv_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
+                            <= (s2_hvsum[i][j] >>> 6);
                     end
-                    v_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
-                        <= (s2_vsum[i][j] >>> 2);
-
-                    // HV output — normalize s2_hvsum
-                    // HM / ITU-T 8.5.3.3.3: ClipBD((hv_sum + 512) >> 10, bitDepth)
-                    begin : hv_norm
-                        reg signed [HV_SUM_W-1:0] shifted_hv;
-                        shifted_hv = (s2_hvsum[i][j] + 32'sd512) >>> 10;
-                        hv_out_flat[PIXEL_WIDTH*(BLK_SIZE*i+j) +: PIXEL_WIDTH]
-                            <= clip_px(shifted_hv);
-                    end
-                    hv_interm_flat[INTERM_WIDTH*(BLK_SIZE*i+j) +: INTERM_WIDTH]
-                        <= (s2_hvsum[i][j] >>> 6);
                 end
             end
         end

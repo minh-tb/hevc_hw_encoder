@@ -105,7 +105,7 @@ module fme_search #(
     // =========================================================================
     // Window Multiplexer (Extract 11x11 from 12x12)
     // =========================================================================
-    reg [PIXEL_WIDTH*121-1:0] ext_11x11;
+    (* keep = "true" *) reg [PIXEL_WIDTH*121-1:0] ext_11x11;
     integer r, c;
     always @(*) begin
         for (r = 0; r < 11; r = r + 1) begin
