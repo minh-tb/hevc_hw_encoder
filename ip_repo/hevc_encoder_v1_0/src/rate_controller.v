@@ -64,22 +64,81 @@ module rate_controller (
 
 `ifdef REMEDIATION
     wire [47:0] kbps_x100_div3 = ({32'd0, target_bitrate_kbps} * 48'd2184600) >> 16;
-    reg signed [31:0] abs_b;
-    reg signed [31:0] rem_b;
-    reg [5:0]         d_pct;
+
+    // Synthesizable shift-threshold comparison tree computes [0..100] without dividers
+    function automatic [15:0] calc_fullness_pct;
+        input signed [31:0] b_bits;
+        input signed [31:0] b_max;
+        reg signed [31:0] abs_b;
+        reg signed [31:0] rem_b;
+        reg [5:0]         d_pct;
+        reg signed [31:0] calc;
+        begin
+            if (b_bits >= b_max) begin
+                calc_fullness_pct = 16'd100;
+            end else if (b_bits <= -b_max) begin
+                calc_fullness_pct = 16'd0;
+            end else begin
+                abs_b = (b_bits >= 32'sd0) ? b_bits : -b_bits;
+                rem_b = abs_b;
+                d_pct = 6'd0;
+                if (rem_b >= (b_max >>> 1)) begin
+                    d_pct = d_pct + 6'd25;
+                    rem_b = rem_b - (b_max >>> 1);
+                end
+                if (rem_b >= (b_max >>> 2)) begin
+                    d_pct = d_pct + 6'd12;
+                    rem_b = rem_b - (b_max >>> 2);
+                end
+                if (rem_b >= (b_max >>> 3)) begin
+                    d_pct = d_pct + 6'd6;
+                    rem_b = rem_b - (b_max >>> 3);
+                end
+                if (rem_b >= (b_max >>> 4)) begin
+                    d_pct = d_pct + 6'd3;
+                    rem_b = rem_b - (b_max >>> 4);
+                end
+                if (rem_b >= (b_max >>> 5)) begin
+                    d_pct = d_pct + 6'd2;
+                    rem_b = rem_b - (b_max >>> 5);
+                end
+                if (rem_b >= (b_max >>> 6)) begin
+                    d_pct = d_pct + 6'd1;
+                    rem_b = rem_b - (b_max >>> 6);
+                end
+                if (b_bits >= 32'sd0)
+                    calc = 32'sd50 + $signed({26'd0, d_pct});
+                else
+                    calc = 32'sd50 - $signed({26'd0, d_pct});
+
+                if (calc < 32'sd0)
+                    calc_fullness_pct = 16'd0;
+                else if (calc > 32'sd100)
+                    calc_fullness_pct = 16'd100;
+                else
+                    calc_fullness_pct = calc[15:0];
+            end
+        end
+    endfunction
 `endif
+
+    reg rc_active_d;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            current_qp_r     <= base_qp;
+            current_qp_r     <= 6'd26;
+            rc_active_d      <= 1'b0;
             vbv_buffer_bits  <= 32'sd0;
             vbv_buffer_max   <= 32'sd5000000;
             vbv_fullness_pct <= 16'd50;
             target_bits_p    <= 32'sd166666;
             target_bits_i    <= 32'sd500000;
             target_bits_frame<= 32'sd500000;
-            fullness_calc    <= 32'sd50;
         end else begin
+            rc_active_d <= rc_enable;
+            if (!rc_enable || (!rc_active_d && rc_enable)) begin
+                current_qp_r <= base_qp;
+            end
 `ifdef REMEDIATION
             // Calculate buffer targets using reciprocal shift-multiply arithmetic (no divider)
             vbv_buffer_max <= $signed({16'd0, target_bitrate_kbps}) * 32'sd1000;
@@ -127,44 +186,7 @@ module rate_controller (
                     if (current_qp_r > 6'd11) current_qp_r <= current_qp_r - 6'd1;
                 end
 
-                // Synthesizable shift-threshold comparison tree computes [0..100] without dividers
-                if (vbv_buffer_bits >= vbv_buffer_max) begin
-                    fullness_calc = 32'sd100;
-                end else if (vbv_buffer_bits <= -vbv_buffer_max) begin
-                    fullness_calc = 32'sd0;
-                end else begin
-                    abs_b = (vbv_buffer_bits >= 32'sd0) ? vbv_buffer_bits : -vbv_buffer_bits;
-                    rem_b = abs_b;
-                    d_pct = 6'd0;
-                    if (rem_b >= (vbv_buffer_max >>> 1)) begin
-                        d_pct = d_pct + 6'd25;
-                        rem_b = rem_b - (vbv_buffer_max >>> 1);
-                    end
-                    if (rem_b >= (vbv_buffer_max >>> 2)) begin
-                        d_pct = d_pct + 6'd12;
-                        rem_b = rem_b - (vbv_buffer_max >>> 2);
-                    end
-                    if (rem_b >= (vbv_buffer_max >>> 3)) begin
-                        d_pct = d_pct + 6'd6;
-                        rem_b = rem_b - (vbv_buffer_max >>> 3);
-                    end
-                    if (rem_b >= (vbv_buffer_max >>> 4)) begin
-                        d_pct = d_pct + 6'd3;
-                        rem_b = rem_b - (vbv_buffer_max >>> 4);
-                    end
-                    if (rem_b >= (vbv_buffer_max >>> 5)) begin
-                        d_pct = d_pct + 6'd2;
-                        rem_b = rem_b - (vbv_buffer_max >>> 5);
-                    end
-                    if (rem_b >= (vbv_buffer_max >>> 6)) begin
-                        d_pct = d_pct + 6'd1;
-                        rem_b = rem_b - (vbv_buffer_max >>> 6);
-                    end
-                    if (vbv_buffer_bits >= 32'sd0)
-                        fullness_calc = 32'sd50 + $signed({26'd0, d_pct});
-                    else
-                        fullness_calc = 32'sd50 - $signed({26'd0, d_pct});
-                end
+                vbv_fullness_pct <= calc_fullness_pct(vbv_buffer_bits, vbv_buffer_max);
 `else
                 if (actual_frame_bits > (target_bits_frame + (target_bits_frame >> 2))) begin
                     // Exceeded by > 25%
@@ -182,13 +204,13 @@ module rate_controller (
 
                 // Percentage status with strictly signed arithmetic & saturation clamp [0%, 100%]
                 fullness_calc = 32'sd50 + ((vbv_buffer_bits * 32'sd50) / vbv_buffer_max);
-`endif
                 if (fullness_calc < 32'sd0)
                     vbv_fullness_pct <= 16'd0;
                 else if (fullness_calc > 32'sd100)
                     vbv_fullness_pct <= 16'd100;
                 else
                     vbv_fullness_pct <= fullness_calc[15:0];
+`endif
             end
         end
     end

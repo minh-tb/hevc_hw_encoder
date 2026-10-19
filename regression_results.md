@@ -127,10 +127,10 @@
 
 | Cell / Logic Primitive | Baseline Used | Phase 1 Used | **Phase 2 (Final) Used** | Available | Utilization % | Total Delta / Savings vs Baseline |
 |---|---|---|---|---|---|---|
-| **CLB LUTs** | 448,916 | 342,547 | **226,092** | 522,720 | **43.25%** | **-222,824 LUTs (-49.6%)** |
-| *-- Logic LUTs* | 446,581 | 340,166 | **223,709** | 522,720 | **42.80%** | **-222,872 LUTs (-49.9%)** |
+| **CLB LUTs** | 448,916 | 342,547 | **225,933** | 522,720 | **43.22%** | **-222,983 LUTs (-49.7%)** |
+| *-- Logic LUTs* | 446,581 | 340,166 | **223,550** | 522,720 | **42.77%** | **-223,031 LUTs (-49.9%)** |
 | *-- LUT as Memory (Distributed RAM)* | 2,335 | 2,381 | **2,383** | 212,160 | **1.12%** | +48 LUTs |
-| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | **249,973** | 1,045,440 | **23.91%** | **-94,057 FFs (-27.3%)** |
+| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | **249,980** | 1,045,440 | **23.91%** | **-94,050 FFs (-27.3%)** |
 | **Block RAM Tile** | 30.0 | 30.0 | **30.0** | 984 | **3.05%** | 0.0 (Preserved) |
 | *-- RAMB36/FIFO* | 27 | 27 | **27** | 984 | **2.74%** | 0 (Preserved) |
 | *-- RAMB18* | 6 | 6 | **6** | 1,968 | **0.30%** | 0 (Preserved) |
@@ -140,25 +140,25 @@
 
 | Hierarchical Instance | Submodule | LUTs | FFs | DSPs | Implementation Note |
 |---|---|---|---|---|---|
-| `u_rate_controller` | `rate_controller` | **1,145** | **162** | **3** | Dynamic reciprocal-multiplier arithmetic, 6-stage VBV threshold tree |
-| `u_gop_controller` | `gop_controller` | **244** | **135** | **0** | Dynamic runtime `cfg_gop_structure` control |
+| `u_rate_controller` | `rate_controller` | **1,113** | **149** | **3** | Dynamic reciprocal-multiplier arithmetic, 6-stage VBV threshold tree, 0 LDCE latches |
+| `u_gop_controller` | `gop_controller` | **243** | **135** | **0** | Dynamic runtime `cfg_gop_structure` control |
 | `u_inloop_filters.u_sao` | `sao_top` | **1,736** | **99** | **0** | Synthesizable Sample Adaptive Offset filter |
 | `u_inloop_filters.u_sao_stats` | `sao_stats` | **158** | **21** | **0** | 52-cycle pixel-scanning EO/BO statistics engine |
-| `u_cabac_enc_top` | `cabac_enc_top` | **5,308** | **2,321** | **0** | Fully unified CABAC engine with integrated `syntax_sao` |
-| `u_1d_core` in `u_dct_top` | `transform_1d_core` | **49,938** | **513** | **1** | Consolidated symmetric odd DCT-II and DST-VII basis multiplier trees |
-| `u_fme_search` | `fme_search` | **4,184** | **1,280** | **0** | Constant-indexed 4:1 pixel mux replacing variable multiply index |
+| `u_cabac_enc_top` | `cabac_enc_top` | **5,281** | **2,321** | **0** | Fully unified CABAC engine with integrated `syntax_sao` |
+| `u_1d_core` in `u_dct_top` | `transform_1d_core` | **50,024** | **513** | **1** | Consolidated symmetric odd DCT-II and DST-VII basis multiplier trees |
+| `u_fme_search` | `fme_search` | **4,193** | **1,595** | **0** | Constant-indexed 4:1 pixel mux replacing variable multiply index |
 
 ### 3.3 Timing Performance & Closure
 - **Clock Domain:** `clk`
 - **Target Period:** 20.000 ns (50.00 MHz)
 - **Worst Negative Slack (WNS):** **+10.497 ns (MET)** (Target: > +5.0 ns)
-- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of 543,027 total endpoints)
+- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of 543,058 total endpoints)
 - **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz**
 
 ### 3.4 Vector-less Power Estimation
-- **Dynamic On-Chip Power:** **0.824 W**
+- **Dynamic On-Chip Power:** **0.831 W**
 - **Device Static Power:** **1.113 W**
-- **Total On-Chip Power:** **1.936 W**
+- **Total On-Chip Power:** **1.943 W**
 
 ---
 
