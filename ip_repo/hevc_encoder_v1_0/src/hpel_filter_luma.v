@@ -70,7 +70,7 @@
 
 `include "parameter_pkg.vh"
 
-(* use_dsp = "no", keep_hierarchy = "yes" *)
+(* use_dsp = "no" *)
 module hpel_filter_luma #(
     parameter PIXEL_WIDTH = `PIXEL_WIDTH,         // 10
     parameter BLK_SIZE    = 4,                    // output block (NxN)

@@ -95,26 +95,32 @@ module fme_search #(
     wire signed [MV_W-1:0] t_int_x = target_mv_x >>> 2;
     wire signed [MV_W-1:0] t_int_y = target_mv_y >>> 2;
     
-    wire signed [2:0] w_off_x = t_int_x - (base_mv_x - 1);
-    wire signed [2:0] w_off_y = t_int_y - (base_mv_y - 1);
+    // Since target_mv is within [-3, +3] qpel of {base_mv, 2'b00},
+    // t_int = target_mv >>> 2 is strictly either (base_mv - 1) [offset 0] or base_mv [offset 1].
+    wire off_x = (t_int_x == base_mv_x);
+    wire off_y = (t_int_y == base_mv_y);
     
     // Filter selection
     wire [1:0] t_sel = (t_frac_x != 0 && t_frac_y != 0) ? 2'd2 :
                        (t_frac_x == 0 && t_frac_y != 0) ? 2'd1 : 2'd0; // H=0, V=1, HV=2
     
     // =========================================================================
-    // Window Multiplexer (Extract 11x11 from 12x12)
+    // Window Multiplexer (Extract 11x11 from 12x12 via Constant-Indexed 4:1 Mux)
     // =========================================================================
-    (* keep = "true" *) reg [PIXEL_WIDTH*121-1:0] ext_11x11;
-    integer r, c;
-    always @(*) begin
-        for (r = 0; r < 11; r = r + 1) begin
-            for (c = 0; c < 11; c = c + 1) begin
-                ext_11x11[PIXEL_WIDTH*(r*11 + c) +: PIXEL_WIDTH] = 
-                    ref_12x12[PIXEL_WIDTH*((r + w_off_y)*12 + (c + w_off_x)) +: PIXEL_WIDTH];
+    (* keep = "true" *) wire [PIXEL_WIDTH*121-1:0] ext_11x11;
+    genvar gr, gc;
+    generate
+        for (gr = 0; gr < 11; gr = gr + 1) begin : gen_ext_r
+            for (gc = 0; gc < 11; gc = gc + 1) begin : gen_ext_c
+                wire [PIXEL_WIDTH-1:0] px00 = ref_12x12[PIXEL_WIDTH*( gr   *12 +  gc   ) +: PIXEL_WIDTH];
+                wire [PIXEL_WIDTH-1:0] px01 = ref_12x12[PIXEL_WIDTH*( gr   *12 + (gc+1)) +: PIXEL_WIDTH];
+                wire [PIXEL_WIDTH-1:0] px10 = ref_12x12[PIXEL_WIDTH*((gr+1)*12 +  gc   ) +: PIXEL_WIDTH];
+                wire [PIXEL_WIDTH-1:0] px11 = ref_12x12[PIXEL_WIDTH*((gr+1)*12 + (gc+1)) +: PIXEL_WIDTH];
+                assign ext_11x11[PIXEL_WIDTH*(gr*11 + gc) +: PIXEL_WIDTH] = 
+                    off_y ? (off_x ? px11 : px10) : (off_x ? px01 : px00);
             end
         end
-    end
+    endgenerate
     
     // =========================================================================
     // Interpolation Filter

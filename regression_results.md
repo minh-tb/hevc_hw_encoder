@@ -123,40 +123,39 @@
 **Target Module:** `hevc_encoder_axi_top` (Includes core encoder, AXI4 memory controller, and register interfaces)  
 **Status:** **SYNTHESIS CONVERGENCE & TIMING CLOSURE ACHIEVED (Zero Design Errors, Fully Mapped Primitives, WNS > 0)**
 
-### 3.1 Device Utilization Summary (Pre vs. Post Optimization)
+### 3.1 Device Utilization Summary (Baseline vs. Phase 1 vs. Phase 2)
 
-| Cell / Logic Primitive | Baseline Used | Post-Opt Used | Available | Utilization % | Delta / Savings |
+| Cell / Logic Primitive | Baseline Used | Phase 1 Used | **Phase 2 (Final) Used** | Available | Utilization % | Total Delta / Savings vs Baseline |
+|---|---|---|---|---|---|---|
+| **CLB LUTs** | 448,916 | 342,547 | **224,721** | 522,720 | **42.99%** | **-224,195 LUTs (-49.9%)** |
+| *-- Logic LUTs* | 446,581 | 340,166 | **222,338** | 522,720 | **42.53%** | **-224,243 LUTs (-50.2%)** |
+| *-- LUT as Memory (Distributed RAM)* | 2,335 | 2,381 | **2,383** | 212,160 | **1.12%** | +48 LUTs |
+| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | **247,449** | 1,045,440 | **23.67%** | **-96,581 FFs (-28.1%)** |
+| **Block RAM Tile** | 30.0 | 30.0 | **30.0** | 984 | **3.05%** | 0.0 (Preserved) |
+| *-- RAMB36/FIFO* | 27 | 27 | **27** | 984 | **2.74%** | 0 (Preserved) |
+| *-- RAMB18* | 6 | 6 | **6** | 1,968 | **0.30%** | 0 (Preserved) |
+| **DSP48E2 Slices** | 920 | 878 | **206** | 1,968 | **10.47%** | **-714 DSPs (-77.6%)** |
+
+### 3.2 Key Subsystem Utilization Breakdown (Phase 2 Impacts)
+
+| Hierarchical Instance | Phase 1 LUTs | Phase 2 LUTs | LUT Reduction | DSP Delta | Architectural Mechanism |
 |---|---|---|---|---|---|
-| **CLB LUTs** | 448,916 | **342,547** | 522,720 | **65.53%** | **-106,369 LUTs (-23.7%)** |
-| *-- LUT as Logic* | 446,581 | **340,166** | 522,720 | **65.08%** | **-106,415 LUTs (-23.8%)** |
-| *-- LUT as Memory (Distributed RAM)* | 2,335 | **2,381** | 212,160 | **1.12%** | +46 LUTs |
-| **CLB Registers (Flip-Flops)** | 344,030 | **253,425** | 1,045,440 | **24.24%** | **-90,605 FFs (-26.3%)** |
-| **Block RAM Tile** | 30.0 | **30.0** | 984 | **3.05%** | 0.0 (Preserved) |
-| *-- RAMB36/FIFO* | 27 | **27** | 984 | **2.74%** | 0 (Preserved) |
-| *-- RAMB18* | 6 | **6** | 1,968 | **0.30%** | 0 (Preserved) |
-| **DSP48E2 Slices** | 920 | **878** | 1,968 | **44.61%** | **-42 DSPs (-4.6%)** |
-
-### 3.2 Key Subsystem Utilization Breakdown
-
-| Hierarchical Instance | Baseline LUTs | Post-Opt LUTs | LUT Reduction | Architectural Mechanism |
-|---|---|---|---|---|
-| `u_filter` (`hpel_filter_luma`) | 112,315 | **24,374** | **-87,941 (-78.3%)** | Phase 1 & 3 mirror folding, shift-add trees, DSP offloading |
-| `u_angular` (`intra_angular`) | 53,616 | **7,404** | **-46,212 (-86.2%)** | Constant base-32 `refExt` indexing, eliminating dynamic crossbars |
-| `u_dct_top` (unified transform) | 172,181 | **100,591** | **-71,590 (-41.6%)** | Unified forward/inverse transform, eliminated duplicate `u_idct_top` |
-| Top-level hold arrays | 32,768 FFs | **0 FFs** | **-32,768 FFs (-100%)** | Removed `dct_out_hold` & `idct_out_hold` via shared P2S read mux |
-| `u_sc` (`syntax_coeff`) | Long cascade | **2,677** | Critical path fix | 17-bit $O(1)$ priority encoder replacing 16-stage subtraction loop |
+| `u_fme_search` wrapper logic | 81,799 | **4,184** | **-77,615 (-94.9%)** | 0 | 1-bit `off_x`/`off_y` constant-indexed 4:1 pixel mux replacing variable multiply index |
+| `u_mc_unit` (dead datapath) | 24,501 | **112** | **-24,389 (-99.5%)** | 0 | Removed `keep_hierarchy = "yes"` from `hpel_filter_luma`, pruning dead `u_filt_y` (-4,446 FFs) |
+| `u_1d_core` in `u_dct_top` | 62,918 | **49,930** | **-12,988 (-20.6%)** | **-672 DSPs (-99.8%)** | Consolidated symmetric odd DCT-II and DST-VII basis multiplier trees ($M=M^T$) |
+| `u_filter` (`hpel_filter_luma`) | 24,374 | **22,929** | **-1,445 (-5.9%)** | 0 | Dead intermediate register pruning via constant propagation |
 
 ### 3.3 Timing Performance & Closure
 - **Clock Domain:** `clk`
 - **Target Period:** 20.000 ns (50.00 MHz)
-- **Worst Negative Slack (WNS):** **+1.485 ns (MET)** (Baseline: -5.394 ns, **+6.879 ns slack boost**)
-- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of 549,601 total endpoints)
-- **Estimated Maximum Frequency ($F_{\max}$):** **54.01 MHz** (Baseline: 39.38 MHz)
+- **Worst Negative Slack (WNS):** **+10.497 ns (MET)** (Baseline: -5.394 ns, Phase 1: +1.485 ns, **+15.891 ns total boost**)
+- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of 535,495 total endpoints)
+- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz** (Baseline: 39.38 MHz, Phase 1: 54.01 MHz)
 
 ### 3.4 Vector-less Power Estimation
-- **Dynamic On-Chip Power:** **1.304 W** (Baseline: 1.926 W, **-32.3% power reduction**)
-- **Device Static Power:** **1.116 W** (Baseline: 1.122 W)
-- **Total On-Chip Power:** **2.420 W** (Baseline: 3.048 W, **-628 mW total power reduction**)
+- **Dynamic On-Chip Power:** **0.808 W** (Baseline: 1.926 W, Phase 1: 1.304 W, **-58.0% total power reduction**)
+- **Device Static Power:** **1.112 W** (Baseline: 1.122 W)
+- **Total On-Chip Power:** **1.920 W** (Baseline: 3.048 W, Phase 1: 2.420 W, **-1.128 W total power reduction**)
 
 ---
 
