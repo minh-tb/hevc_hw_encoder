@@ -199,6 +199,9 @@ module hevc_encoder_axi_top #(
     reg [5:0]  reg_base_qp;
     reg [1:0]  reg_gop_structure;
     reg [15:0] reg_target_bitrate_kbps;
+    reg        reg_rc_enable;
+    reg        reg_sao_enable;
+    wire [15:0] status_vbv_fullness_pct;
 
     // Active-low soft reset combined with hardware pin reset
     assign core_rst_n = rst_n & (~reg_soft_rst);
@@ -250,6 +253,8 @@ module hevc_encoder_axi_top #(
             reg_base_qp             <= BASE_QP;
             reg_gop_structure       <= GOP_STRUCTURE;
             reg_target_bitrate_kbps <= TARGET_BITRATE_KBPS;
+            reg_rc_enable           <= RC_ENABLE[0];
+            reg_sao_enable          <= 1'b0;
         end else begin
             // Single-cycle pulse on start
             encode_start_pulse <= 1'b0;
@@ -276,6 +281,12 @@ module hevc_encoder_axi_top #(
                     4'h6: begin // 0x18: Target Bitrate
                         if (s_axi_lite_wstrb[0]) reg_target_bitrate_kbps[7:0]  <= s_axi_lite_wdata[7:0];
                         if (s_axi_lite_wstrb[1]) reg_target_bitrate_kbps[15:8] <= s_axi_lite_wdata[15:8];
+                    end
+                    4'h7: begin // 0x1C: Feature Enable (write), Magic ID (read)
+                        if (s_axi_lite_wstrb[0]) begin
+                            reg_rc_enable  <= s_axi_lite_wdata[0];
+                            reg_sao_enable <= s_axi_lite_wdata[1];
+                        end
                     end
                     default: ;
                 endcase
@@ -345,6 +356,7 @@ module hevc_encoder_axi_top #(
                     4'h6: axi_rdata <= {16'd0, reg_target_bitrate_kbps};
                     4'h7: axi_rdata <= 32'h48455643; // Magic ID: "HEVC"
                     4'h8: axi_rdata <= {FRAME_WIDTH[15:0], FRAME_HEIGHT[15:0]};
+                    4'h9: axi_rdata <= {16'd0, status_vbv_fullness_pct}; // 0x24: VBV Fullness Pct
                     default: axi_rdata <= 32'h0;
                 endcase
             end else begin
@@ -516,7 +528,15 @@ module hevc_encoder_axi_top #(
         .axi_rvalid   (m_axi_mem_rvalid),
         .axi_rready   (m_axi_mem_rready),
         .axi_rdata    (m_axi_mem_rdata),
-        .axi_rlast    (m_axi_mem_rlast)
+        .axi_rlast    (m_axi_mem_rlast),
+
+        // Runtime Dynamic Configuration & Status Interface
+        .cfg_base_qp             (reg_base_qp),
+        .cfg_gop_structure       (reg_gop_structure),
+        .cfg_rc_enable           (reg_rc_enable),
+        .cfg_target_bitrate_kbps (reg_target_bitrate_kbps),
+        .cfg_sao_enable          (reg_sao_enable),
+        .status_vbv_fullness_pct (status_vbv_fullness_pct)
     );
 
 endmodule

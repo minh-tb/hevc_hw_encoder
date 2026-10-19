@@ -127,35 +127,38 @@
 
 | Cell / Logic Primitive | Baseline Used | Phase 1 Used | **Phase 2 (Final) Used** | Available | Utilization % | Total Delta / Savings vs Baseline |
 |---|---|---|---|---|---|---|
-| **CLB LUTs** | 448,916 | 342,547 | **224,721** | 522,720 | **42.99%** | **-224,195 LUTs (-49.9%)** |
-| *-- Logic LUTs* | 446,581 | 340,166 | **222,338** | 522,720 | **42.53%** | **-224,243 LUTs (-50.2%)** |
+| **CLB LUTs** | 448,916 | 342,547 | **226,092** | 522,720 | **43.25%** | **-222,824 LUTs (-49.6%)** |
+| *-- Logic LUTs* | 446,581 | 340,166 | **223,709** | 522,720 | **42.80%** | **-222,872 LUTs (-49.9%)** |
 | *-- LUT as Memory (Distributed RAM)* | 2,335 | 2,381 | **2,383** | 212,160 | **1.12%** | +48 LUTs |
-| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | **247,449** | 1,045,440 | **23.67%** | **-96,581 FFs (-28.1%)** |
+| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | **249,973** | 1,045,440 | **23.91%** | **-94,057 FFs (-27.3%)** |
 | **Block RAM Tile** | 30.0 | 30.0 | **30.0** | 984 | **3.05%** | 0.0 (Preserved) |
 | *-- RAMB36/FIFO* | 27 | 27 | **27** | 984 | **2.74%** | 0 (Preserved) |
 | *-- RAMB18* | 6 | 6 | **6** | 1,968 | **0.30%** | 0 (Preserved) |
-| **DSP48E2 Slices** | 920 | 878 | **206** | 1,968 | **10.47%** | **-714 DSPs (-77.6%)** |
+| **DSP48E2 Slices** | 920 | 878 | **209** | 1,968 | **10.62%** | **-711 DSPs (-77.3%)** |
 
-### 3.2 Key Subsystem Utilization Breakdown (Phase 2 Impacts)
+### 3.2 Key Subsystem Utilization Breakdown (Part 2 Un-bypassed Modules)
 
-| Hierarchical Instance | Phase 1 LUTs | Phase 2 LUTs | LUT Reduction | DSP Delta | Architectural Mechanism |
+| Hierarchical Instance | Submodule | LUTs | FFs | DSPs | Implementation Note |
 |---|---|---|---|---|---|
-| `u_fme_search` wrapper logic | 81,799 | **4,184** | **-77,615 (-94.9%)** | 0 | 1-bit `off_x`/`off_y` constant-indexed 4:1 pixel mux replacing variable multiply index |
-| `u_mc_unit` (dead datapath) | 24,501 | **112** | **-24,389 (-99.5%)** | 0 | Removed `keep_hierarchy = "yes"` from `hpel_filter_luma`, pruning dead `u_filt_y` (-4,446 FFs) |
-| `u_1d_core` in `u_dct_top` | 62,918 | **49,930** | **-12,988 (-20.6%)** | **-672 DSPs (-99.8%)** | Consolidated symmetric odd DCT-II and DST-VII basis multiplier trees ($M=M^T$) |
-| `u_filter` (`hpel_filter_luma`) | 24,374 | **22,929** | **-1,445 (-5.9%)** | 0 | Dead intermediate register pruning via constant propagation |
+| `u_rate_controller` | `rate_controller` | **1,145** | **162** | **3** | Dynamic reciprocal-multiplier arithmetic, 6-stage VBV threshold tree |
+| `u_gop_controller` | `gop_controller` | **244** | **135** | **0** | Dynamic runtime `cfg_gop_structure` control |
+| `u_inloop_filters.u_sao` | `sao_top` | **1,736** | **99** | **0** | Synthesizable Sample Adaptive Offset filter |
+| `u_inloop_filters.u_sao_stats` | `sao_stats` | **158** | **21** | **0** | 52-cycle pixel-scanning EO/BO statistics engine |
+| `u_cabac_enc_top` | `cabac_enc_top` | **5,308** | **2,321** | **0** | Fully unified CABAC engine with integrated `syntax_sao` |
+| `u_1d_core` in `u_dct_top` | `transform_1d_core` | **49,938** | **513** | **1** | Consolidated symmetric odd DCT-II and DST-VII basis multiplier trees |
+| `u_fme_search` | `fme_search` | **4,184** | **1,280** | **0** | Constant-indexed 4:1 pixel mux replacing variable multiply index |
 
 ### 3.3 Timing Performance & Closure
 - **Clock Domain:** `clk`
 - **Target Period:** 20.000 ns (50.00 MHz)
-- **Worst Negative Slack (WNS):** **+10.497 ns (MET)** (Baseline: -5.394 ns, Phase 1: +1.485 ns, **+15.891 ns total boost**)
-- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of 535,495 total endpoints)
-- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz** (Baseline: 39.38 MHz, Phase 1: 54.01 MHz)
+- **Worst Negative Slack (WNS):** **+10.497 ns (MET)** (Target: > +5.0 ns)
+- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of 543,027 total endpoints)
+- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz**
 
 ### 3.4 Vector-less Power Estimation
-- **Dynamic On-Chip Power:** **0.808 W** (Baseline: 1.926 W, Phase 1: 1.304 W, **-58.0% total power reduction**)
-- **Device Static Power:** **1.112 W** (Baseline: 1.122 W)
-- **Total On-Chip Power:** **1.920 W** (Baseline: 3.048 W, Phase 1: 2.420 W, **-1.128 W total power reduction**)
+- **Dynamic On-Chip Power:** **0.824 W**
+- **Device Static Power:** **1.113 W**
+- **Total On-Chip Power:** **1.936 W**
 
 ---
 

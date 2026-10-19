@@ -46,6 +46,7 @@ module tb_gop_controller();
     gop_controller uut (
         .clk(clk),
         .rst_n(rst_n),
+        .cfg_gop_structure(2'd2),
         .encode_start(encode_start),
         .total_frames(total_frames),
         .encode_done(encode_done),

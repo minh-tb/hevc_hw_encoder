@@ -63,6 +63,7 @@ set rtl_files [list \
     "rtl/entropy/syntax_dec_cu.v" \
     "rtl/entropy/syntax_dec_pred.v" \
     "rtl/entropy/syntax_pred.v" \
+    "rtl/entropy/syntax_sao.v" \
     "rtl/inloop_filters/boundary_strength.v" \
     "rtl/inloop_filters/db_filter_chroma.v" \
     "rtl/inloop_filters/db_filter_luma.v" \

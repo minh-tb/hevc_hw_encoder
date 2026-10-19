@@ -107,7 +107,14 @@ module tb_multi_ctu_encoder;
         .axi_rvalid(axi_rvalid),
         .axi_rready(axi_rready),
         .axi_rdata(axi_rdata),
-        .axi_rlast(axi_rlast)
+        .axi_rlast(axi_rlast),
+        .frame_done(),
+        .cfg_base_qp(6'd32),
+        .cfg_gop_structure(2'd0),
+        .cfg_rc_enable(1'b0),
+        .cfg_target_bitrate_kbps(16'd5000),
+        .cfg_sao_enable(1'b0),
+        .status_vbv_fullness_pct()
     );
 
     // Mock DRAM Memory (4MB)

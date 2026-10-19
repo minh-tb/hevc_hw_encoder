@@ -62,6 +62,13 @@ module rate_controller (
     // K_buf scaling: Delta QP per 10% buffer deviation
     wire [7:0] safe_fps = (fps > 0) ? fps : 8'd30;
 
+`ifdef REMEDIATION
+    wire [47:0] kbps_x100_div3 = ({32'd0, target_bitrate_kbps} * 48'd2184600) >> 16;
+    reg signed [31:0] abs_b;
+    reg signed [31:0] rem_b;
+    reg [5:0]         d_pct;
+`endif
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             current_qp_r     <= base_qp;
@@ -73,10 +80,17 @@ module rate_controller (
             target_bits_frame<= 32'sd500000;
             fullness_calc    <= 32'sd50;
         end else begin
+`ifdef REMEDIATION
+            // Calculate buffer targets using reciprocal shift-multiply arithmetic (no divider)
+            vbv_buffer_max <= $signed({16'd0, target_bitrate_kbps}) * 32'sd1000;
+            target_bits_p  <= $signed(kbps_x100_div3[31:0]);
+            target_bits_i  <= $signed({16'd0, target_bitrate_kbps}) * 32'sd100; // 3x target_bits_p
+`else
             // Calculate buffer targets using strictly signed arithmetic
             vbv_buffer_max <= $signed({16'd0, target_bitrate_kbps}) * 32'sd1000;
             target_bits_p  <= ($signed({16'd0, target_bitrate_kbps}) * 32'sd1000) / $signed({24'd0, safe_fps});
             target_bits_i  <= (($signed({16'd0, target_bitrate_kbps}) * 32'sd1000) / $signed({24'd0, safe_fps})) * 32'sd3; // 3x weight for I-frames
+`endif
 
             if (frame_start) begin
                 if (rc_enable) begin
@@ -101,20 +115,56 @@ module rate_controller (
                 // If actual bits < target bits, decrease QP (-1 or -2)
 `ifdef REMEDIATION
                 // Closed-loop VBV feedback integrated with frame error
-                if (vbv_buffer_bits > (vbv_buffer_max / 4) ||
+                if (vbv_buffer_bits > (vbv_buffer_max >>> 2) ||
                     actual_frame_bits > (target_bits_frame + (target_bits_frame >> 2))) begin
                     if (current_qp_r < 6'd49) current_qp_r <= current_qp_r + 6'd3;
                 end else if (actual_frame_bits > (target_bits_frame + (target_bits_frame >> 4))) begin
                     if (current_qp_r < 6'd51) current_qp_r <= current_qp_r + 6'd1;
-                end else if (vbv_buffer_bits < -(vbv_buffer_max / 4) ||
+                end else if (vbv_buffer_bits < -(vbv_buffer_max >>> 2) ||
                              actual_frame_bits < (target_bits_frame - (target_bits_frame >> 2))) begin
                     if (current_qp_r > 6'd14) current_qp_r <= current_qp_r - 6'd3;
                 end else if (actual_frame_bits < (target_bits_frame - (target_bits_frame >> 4))) begin
                     if (current_qp_r > 6'd11) current_qp_r <= current_qp_r - 6'd1;
                 end
 
-                // Safe 64-bit intermediate calculation prevents 32-bit overflow >= 43 Mbps
-                fullness_calc = 32'sd50 + (($signed({32'sd0, vbv_buffer_bits}) * 64'sd50) / $signed({32'sd0, vbv_buffer_max}));
+                // Synthesizable shift-threshold comparison tree computes [0..100] without dividers
+                if (vbv_buffer_bits >= vbv_buffer_max) begin
+                    fullness_calc = 32'sd100;
+                end else if (vbv_buffer_bits <= -vbv_buffer_max) begin
+                    fullness_calc = 32'sd0;
+                end else begin
+                    abs_b = (vbv_buffer_bits >= 32'sd0) ? vbv_buffer_bits : -vbv_buffer_bits;
+                    rem_b = abs_b;
+                    d_pct = 6'd0;
+                    if (rem_b >= (vbv_buffer_max >>> 1)) begin
+                        d_pct = d_pct + 6'd25;
+                        rem_b = rem_b - (vbv_buffer_max >>> 1);
+                    end
+                    if (rem_b >= (vbv_buffer_max >>> 2)) begin
+                        d_pct = d_pct + 6'd12;
+                        rem_b = rem_b - (vbv_buffer_max >>> 2);
+                    end
+                    if (rem_b >= (vbv_buffer_max >>> 3)) begin
+                        d_pct = d_pct + 6'd6;
+                        rem_b = rem_b - (vbv_buffer_max >>> 3);
+                    end
+                    if (rem_b >= (vbv_buffer_max >>> 4)) begin
+                        d_pct = d_pct + 6'd3;
+                        rem_b = rem_b - (vbv_buffer_max >>> 4);
+                    end
+                    if (rem_b >= (vbv_buffer_max >>> 5)) begin
+                        d_pct = d_pct + 6'd2;
+                        rem_b = rem_b - (vbv_buffer_max >>> 5);
+                    end
+                    if (rem_b >= (vbv_buffer_max >>> 6)) begin
+                        d_pct = d_pct + 6'd1;
+                        rem_b = rem_b - (vbv_buffer_max >>> 6);
+                    end
+                    if (vbv_buffer_bits >= 32'sd0)
+                        fullness_calc = 32'sd50 + $signed({26'd0, d_pct});
+                    else
+                        fullness_calc = 32'sd50 - $signed({26'd0, d_pct});
+                end
 `else
                 if (actual_frame_bits > (target_bits_frame + (target_bits_frame >> 2))) begin
                     // Exceeded by > 25%

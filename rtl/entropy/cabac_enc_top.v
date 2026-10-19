@@ -102,6 +102,15 @@ module cabac_enc_top #(
     output wire [11:0] coeff_rd_addr,
     input  wire signed [COEFF_W-1:0] coeff_rd_data,
 
+    // ── SAO syntax request ───────────────────────────────────────────────
+    input  wire        sao_req,
+    output wire        sao_done,
+    input  wire [5:0]  sao_type,
+    input  wire [5:0]  sao_eo_class,
+    input  wire [74:0] sao_eo_offset,
+    input  wire [14:0] sao_band_pos,
+    input  wire [59:0] sao_bo_offset,
+
     // ── Terminating bin + flush ──────────────────────────────────────────
     input  wire        trm_req,        // encode terminating bin (end of slice)
     input  wire        trm_bin_val,    // 1 for end_of_slice, 0 otherwise
@@ -360,17 +369,43 @@ module cabac_enc_top #(
     );
 
     // =========================================================================
+    // syntax_sao
+    // =========================================================================
+    wire ss_bin_valid, ss_bin_value, ss_is_ep;
+    wire [CTX_ID_W-1:0] ss_ctx_id;
+
+    syntax_sao #(.CTX_ID_W(CTX_ID_W)) u_ssao (
+        .clk        (clk),
+        .rst_n      (rst_n),
+        .sao_req    (sao_req),
+        .sao_done   (sao_done),
+        .sao_type   (sao_type),
+        .eo_class   (sao_eo_class),
+        .eo_offset  (sao_eo_offset),
+        .band_pos   (sao_band_pos),
+        .bo_offset  (sao_bo_offset),
+        .bin_valid  (ss_bin_valid),
+        .bin_value  (ss_bin_value),
+        .bin_ctx_id (ss_ctx_id),
+        .bin_is_ep  (ss_is_ep),
+        .bin_rdy    (be_bin_rdy)
+    );
+
+    // =========================================================================
     // Bin arbitration mux — one source active at a time
-    // Priority: syntax_cu > syntax_pred > syntax_coeff
+    // Priority: syntax_cu > syntax_pred > syntax_coeff > syntax_sao
     // In normal operation the CTU controller only asserts one req at a time
     // =========================================================================
-    assign be_bin_valid = sc_bin_valid | sp_bin_valid | sf_bin_valid;
+    assign be_bin_valid = sc_bin_valid | sp_bin_valid | sf_bin_valid | ss_bin_valid;
     assign be_bin_value = sc_bin_valid ? sc_bin_value :
-                          sp_bin_valid ? sp_bin_value : sf_bin_value;
+                          sp_bin_valid ? sp_bin_value :
+                          sf_bin_valid ? sf_bin_value : ss_bin_value;
     assign be_ctx_id    = sc_bin_valid ? sc_ctx_id    :
-                          sp_bin_valid ? sp_ctx_id    : sf_ctx_id;
+                          sp_bin_valid ? sp_ctx_id    :
+                          sf_bin_valid ? sf_ctx_id    : ss_ctx_id;
     assign be_is_ep     = sc_bin_valid ? sc_is_ep     :
-                          sp_bin_valid ? sp_is_ep     : sf_is_ep;
+                          sp_bin_valid ? sp_is_ep     :
+                          sf_bin_valid ? sf_is_ep     : ss_is_ep;
 
     // Mux bin value and context into range_coder
     assign rc_muxed_bin_value = trm_req ? trm_bin_val : rc_bin_value;
@@ -378,7 +413,7 @@ module cabac_enc_top #(
     // =========================================================================
     // Busy signal
     // =========================================================================
-    assign enc_busy = sc_bin_valid | sp_bin_valid | sf_bin_valid
+    assign enc_busy = sc_bin_valid | sp_bin_valid | sf_bin_valid | ss_bin_valid
                     | ctx_init_busy | rc_coder_busy;
 
     // =========================================================================
@@ -387,12 +422,13 @@ module cabac_enc_top #(
     // synthesis translate_off
     always @(posedge clk) begin
         // Warn if multiple sources asserted simultaneously
-        if ({sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b001 &&
-            {sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b010 &&
-            {sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b100 &&
-            {sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b000)
+        if ({sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0001 &&
+            {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0010 &&
+            {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0100 &&
+            {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b1000 &&
+            {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0000)
             $display("WARN [cabac_enc_top] multiple bin sources active: %b at t=%0t",
-                     {sc_bin_valid, sp_bin_valid, sf_bin_valid}, $time);
+                     {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid}, $time);
         if (flush_done)
             $display("INFO [cabac_enc_top] flush done — slice bitstream complete");
             

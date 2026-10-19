@@ -67,6 +67,10 @@ module decoder_inloop_filters (
     output wire [14:0]  out_band_pos,
     output wire [59:0]  out_bo_offset,
 
+    // SAO Control & Status
+    input  wire         sao_enable,
+    output wire         sao_stats_done,
+
     // Done
     output reg          inloop_ctu_done,
     output wire         inloop_ready
@@ -370,16 +374,31 @@ module decoder_inloop_filters (
         end
     end
 
+    // 1-cycle pipeline delay for input coordinates to match orig_in_valid (1-cycle SRAM read)
+    reg [5:0] in_x_d, in_y_d;
+    reg [1:0] in_comp_d;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            in_x_d    <= 6'd0;
+            in_y_d    <= 6'd0;
+            in_comp_d <= 2'd0;
+        end else begin
+            in_x_d    <= in_x;
+            in_y_d    <= in_y;
+            in_comp_d <= in_comp;
+        end
+    end
+
     //=========================================================================
     // Fill Logic (Original Pixels for SAO stats)
     //=========================================================================
     always @(posedge clk) begin
         // Store original pixels for SAO stats
         if (orig_in_valid && filter_state == S_FILL) begin
-            case (in_comp)
-                2'd0: orig_y_ram[{in_y[5:0], in_x[5:0]}] <= orig_in_y;
-                2'd1: orig_u_ram[{in_y[4:0], in_x[4:0]}] <= orig_in_u;
-                2'd2: orig_v_ram[{in_y[4:0], in_x[4:0]}] <= orig_in_v;
+            case (in_comp_d)
+                2'd0: orig_y_ram[{in_y_d[5:0], in_x_d[5:0]}] <= orig_in_y;
+                2'd1: orig_u_ram[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_u;
+                2'd2: orig_v_ram[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_v;
                 default: ;
             endcase
         end
@@ -480,6 +499,7 @@ module decoder_inloop_filters (
     // SAO Stats Interface
     //=========================================================================
     wire        stats_ctu_done;
+    assign sao_stats_done = stats_ctu_done;
     wire        stats_rec_rd_valid;
     wire [5:0]  stats_rec_rd_x, stats_rec_rd_y;
     wire [1:0]  stats_rec_rd_comp;
@@ -945,11 +965,18 @@ module decoder_inloop_filters (
                     end
                 end
                 S_DB: if (db_ctu_done) begin
-                    // synthesis translate_off
-                    $display("Time=%0t: [INLOOP_FILTERS] Deblock complete. Bypassing SAO (slice_sao=0)...", $time);
-                    // synthesis translate_on
-                    filter_state <= S_DUMP;
-                    dump_count   <= 13'd0;
+                    if (sao_enable) begin
+                        // synthesis translate_off
+                        $display("Time=%0t: [INLOOP_FILTERS] Deblock complete. Starting SAO stats (sao_enable=1)...", $time);
+                        // synthesis translate_on
+                        filter_state <= S_STATS;
+                    end else begin
+                        // synthesis translate_off
+                        $display("Time=%0t: [INLOOP_FILTERS] Deblock complete. Bypassing SAO (sao_enable=0)...", $time);
+                        // synthesis translate_on
+                        filter_state <= S_DUMP;
+                        dump_count   <= 13'd0;
+                    end
                 end
                 S_STATS: if (stats_ctu_done) begin
                     // synthesis translate_off

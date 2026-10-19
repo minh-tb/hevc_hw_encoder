@@ -195,7 +195,14 @@ module tb_b_frame_encoder;
         .axi_rvalid(axi_rvalid),
         .axi_rready(axi_rready),
         .axi_rdata(axi_rdata),
-        .axi_rlast(axi_rlast)
+        .axi_rlast(axi_rlast),
+        .frame_done(),
+        .cfg_base_qp(CFG_QP),
+        .cfg_gop_structure(`DEFAULT_GOP_STRUCTURE),
+        .cfg_rc_enable(CFG_RC[0]),
+        .cfg_target_bitrate_kbps(CFG_BITRATE),
+        .cfg_sao_enable(1'b0),
+        .status_vbv_fullness_pct()
     );
 
     // Mock DRAM Memory (4MB)

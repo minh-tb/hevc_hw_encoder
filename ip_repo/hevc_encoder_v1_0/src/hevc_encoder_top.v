@@ -74,7 +74,17 @@ module hevc_encoder_top #(
     input  wire         axi_rvalid,
     output wire         axi_rready,
     input  wire [255:0] axi_rdata,
-    input  wire         axi_rlast
+    input  wire         axi_rlast,
+
+    //=========================================================================
+    // Runtime Dynamic Configuration & Status Interface
+    //=========================================================================
+    input  wire [5:0]   cfg_base_qp,
+    input  wire [1:0]   cfg_gop_structure,
+    input  wire         cfg_rc_enable,
+    input  wire [15:0]  cfg_target_bitrate_kbps,
+    input  wire         cfg_sao_enable,
+    output wire [15:0]  status_vbv_fullness_pct
 );
 
     localparam SLICE_B = 2'd0;
@@ -259,6 +269,7 @@ module hevc_encoder_top #(
     localparam [3:0] CABAC_WAIT_COEFF_DONE  = 4'd6;
     localparam [3:0] CABAC_TRM_SLICE        = 4'd7;
     localparam [3:0] CABAC_FLUSH            = 4'd8;
+    localparam [3:0] CABAC_WAIT_SAO_DONE    = 4'd9;
     
     reg [3:0] cabac_state;
     wire cabac_ctx_init_busy;
@@ -266,6 +277,8 @@ module hevc_encoder_top #(
 
     wire        cabac_pred_done;
     wire        cabac_enc_busy;
+    reg         cabac_sao_req_r;
+    wire        cabac_sao_done;
 
     //-------------------------------------------------------------------------
     // 4. Transform & Quantization
@@ -384,6 +397,7 @@ module hevc_encoder_top #(
     ) u_gop_controller (
         .clk              (clk),
         .rst_n            (rst_n),
+        .cfg_gop_structure(cfg_gop_structure),
         .encode_start     (encode_start),
         .total_frames     (total_frames),
         .encode_done      (encode_done),
@@ -410,6 +424,7 @@ module hevc_encoder_top #(
     wire [5:0]        rc_frame_qp;
     wire signed [6:0] rc_slice_qp_delta;
     wire [15:0]       rc_vbv_fullness;
+    assign status_vbv_fullness_pct = rc_vbv_fullness;
 
     slice_controller #(
         .FRAME_WIDTH      (FRAME_WIDTH),
@@ -455,14 +470,14 @@ module hevc_encoder_top #(
     rate_controller u_rate_controller (
         .clk                 (clk),
         .rst_n               (rst_n),
-        .rc_enable           (RC_ENABLE),
+        .rc_enable           (cfg_rc_enable),
         .frame_start         (gop_frame_start),
         .frame_done          (sync_frame_done_pulse),
         .slice_type          (gop_frame_slice_type),
         .actual_frame_bits   (frame_bit_counter),
-        .target_bitrate_kbps (TARGET_BITRATE_KBPS),
+        .target_bitrate_kbps (cfg_target_bitrate_kbps),
         .fps                 (8'd30),
-        .base_qp             (BASE_QP),
+        .base_qp             (cfg_base_qp),
         .frame_qp            (rc_frame_qp),
         .slice_qp_delta      (rc_slice_qp_delta),
         .vbv_fullness_pct    (rc_vbv_fullness)
@@ -1072,19 +1087,52 @@ module hevc_encoder_top #(
     //-------------------------------------------------------------------------
     // To make tz_search and residual structurally correct, we need access to the 
     // full original 64x64 block for Luma and 32x32 for Chroma.
-`ifdef SYNTHESIS
     (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] orig_y_ram     [0:`CTU_LUMA_SAMPLES-1];
     (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] orig_y_ram_rmd [0:`CTU_LUMA_SAMPLES-1];
     (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] orig_u_ram     [0:`CTU_CB_SAMPLES-1];
     (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] orig_v_ram     [0:`CTU_CR_SAMPLES-1];
     reg [11:0] orig_write_ptr;
 
-    // Synchronous read from orig_y_ram_rmd for RMD (1-cycle latency)
+    // Synchronous 17-cycle pre-fetcher for search_orig_flat using orig_y_ram_rmd
+    reg         me_load_active;
+    reg  [4:0]  me_load_cnt;
+    reg         me_load_done_pulse;
+    reg [159:0] search_orig_flat;
+
+    wire [5:0] me_rd_x = pu_x[5:0] + {4'd0, me_load_cnt[1:0]};
+    wire [5:0] me_rd_y = pu_y[5:0] + {4'd0, me_load_cnt[3:2]};
+    wire [11:0] rmd_ram_rd_addr = me_load_active ? {me_rd_y, me_rd_x} : rmd_orig_rd_addr;
+
     reg [`PIXEL_WIDTH-1:0] rmd_orig_data;
     always @(posedge clk) begin
-        rmd_orig_data <= orig_y_ram_rmd[rmd_orig_rd_addr];
+        rmd_orig_data <= orig_y_ram_rmd[rmd_ram_rd_addr];
     end
-    
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            me_load_active     <= 1'b0;
+            me_load_cnt        <= 5'd0;
+            me_load_done_pulse <= 1'b0;
+            search_orig_flat   <= 160'd0;
+        end else begin
+            me_load_done_pulse <= 1'b0;
+            if (eval_inter_start) begin
+                me_load_active <= 1'b1;
+                me_load_cnt    <= 5'd0;
+            end else if (me_load_active) begin
+                if (me_load_cnt >= 5'd1) begin
+                    search_orig_flat[(me_load_cnt - 5'd1)*10 +: 10] <= rmd_orig_data;
+                end
+                if (me_load_cnt == 5'd16) begin
+                    me_load_active     <= 1'b0;
+                    me_load_done_pulse <= 1'b1;
+                end else begin
+                    me_load_cnt <= me_load_cnt + 5'd1;
+                end
+            end
+        end
+    end
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) orig_write_ptr <= 12'd0;
         else if (in_valid && in_ready) begin
@@ -1097,30 +1145,6 @@ module hevc_encoder_top #(
             orig_write_ptr <= 12'd0;
         end
     end
-`else
-    reg [`PIXEL_WIDTH-1:0] orig_y_ram [0:`CTU_LUMA_SAMPLES-1];
-    reg [`PIXEL_WIDTH-1:0] orig_u_ram [0:`CTU_CB_SAMPLES-1];
-    reg [`PIXEL_WIDTH-1:0] orig_v_ram [0:`CTU_CR_SAMPLES-1];
-    reg [11:0] orig_write_ptr;
-
-    // Synchronous read from orig_y_ram for RMD (1-cycle latency)
-    reg [`PIXEL_WIDTH-1:0] rmd_orig_data;
-    always @(posedge clk) begin
-        rmd_orig_data <= orig_y_ram[rmd_orig_rd_addr];
-    end
-    
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) orig_write_ptr <= 12'd0;
-        else if (in_valid && in_ready) begin
-            orig_y_ram[orig_write_ptr] <= in_pixel_y;
-            orig_u_ram[{orig_write_ptr[11:7], orig_write_ptr[5:1]}] <= in_pixel_u;
-            orig_v_ram[{orig_write_ptr[11:7], orig_write_ptr[5:1]}] <= in_pixel_v;
-            orig_write_ptr <= orig_write_ptr + 12'd1;
-        end else if (ctu_done_pulse || ctu_frame_done) begin
-            orig_write_ptr <= 12'd0;
-        end
-    end
-`endif
 
     // Gate: CTU processing can only begin after all pixels are loaded
     always @(posedge clk or negedge rst_n) begin
@@ -1176,8 +1200,6 @@ module hevc_encoder_top #(
     reg [5:0]   reg_pu_x;
     reg [5:0]   reg_pu_y;
 
-    // FIX: Synchronous SRAM read for orig_ram to prevent combinational synthesis failure
-    reg [9:0] orig_pixel_q;
     reg       pred_valid_q;
     reg [9:0] pred_pixel_q;
     reg [5:0] active_pred_x_q;
@@ -1189,26 +1211,20 @@ module hevc_encoder_top #(
     wire [5:0] orig_res_rd_x = reg_tu_x + active_pred_x[5:0];
     wire [5:0] orig_res_rd_y = reg_tu_y + active_pred_y[5:0];
 
-`ifdef SYNTHESIS
+    // Multiplex read address between recon_out_valid (for SAO / in-loop filters) and orig_res_rd_x/y (for residual)
+    wire [5:0] orig_ram_rd_x = recon_out_valid ? recon_out_x[5:0] : orig_res_rd_x;
+    wire [5:0] orig_ram_rd_y = recon_out_valid ? recon_out_y[5:0] : orig_res_rd_y;
+
     reg [9:0] orig_y_data_q, orig_u_data_q, orig_v_data_q;
     always @(posedge clk) begin
-        orig_y_data_q <= orig_y_ram[{orig_res_rd_y[5:0], orig_res_rd_x[5:0]}];
-        orig_u_data_q <= orig_u_ram[{orig_res_rd_y[4:0], orig_res_rd_x[4:0]}];
-        orig_v_data_q <= orig_v_ram[{orig_res_rd_y[4:0], orig_res_rd_x[4:0]}];
-        orig_pixel_q  <= (reg_tu_comp == 2'd0) ? orig_y_data_q :
-                         (reg_tu_comp == 2'd1) ? orig_u_data_q :
-                                                 orig_v_data_q;
+        orig_y_data_q <= orig_y_ram[{orig_ram_rd_y[5:0], orig_ram_rd_x[5:0]}];
+        orig_u_data_q <= orig_u_ram[{orig_ram_rd_y[4:0], orig_ram_rd_x[4:0]}];
+        orig_v_data_q <= orig_v_ram[{orig_ram_rd_y[4:0], orig_ram_rd_x[4:0]}];
     end
-`else
-    always @(posedge clk) begin
-        if (reg_tu_comp == 2'd0)
-            orig_pixel_q <= orig_y_ram[{orig_res_rd_y[5:0], orig_res_rd_x[5:0]}];
-        else if (reg_tu_comp == 2'd1)
-            orig_pixel_q <= orig_u_ram[{orig_res_rd_y[4:0], orig_res_rd_x[4:0]}];
-        else
-            orig_pixel_q <= orig_v_ram[{orig_res_rd_y[4:0], orig_res_rd_x[4:0]}];
-    end
-`endif
+
+    wire [9:0] orig_pixel_q = (reg_tu_comp == 2'd0) ? orig_y_data_q :
+                             (reg_tu_comp == 2'd1) ? orig_u_data_q :
+                                                     orig_v_data_q;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -1968,25 +1984,6 @@ module hevc_encoder_top #(
     wire         ip_rlast;
 
 
-    // Fetch 4x4 block for TZ search based on pu_x and pu_y
-`ifdef SYNTHESIS
-    reg [159:0] search_orig_flat;
-    always @(posedge clk) begin
-        if (eval_inter_start)
-            search_orig_flat <= {16{orig_pixel_q}};
-    end
-`else
-    wire [159:0] search_orig_flat;
-    genvar sy, sx;
-    generate
-        for (sy = 0; sy < 4; sy = sy + 1) begin : gen_s_y
-            for (sx = 0; sx < 4; sx = sx + 1) begin : gen_s_x
-                assign search_orig_flat[(sy*4+sx)*10 +: 10] = orig_y_ram[{pu_y[5:0] + sy[5:0], pu_x[5:0] + sx[5:0]}];
-            end
-        end
-    endgenerate
-`endif
-
     wire [39:0] mc_pred_cb_flat;
     wire [39:0] mc_pred_cr_flat;
 
@@ -2001,7 +1998,7 @@ module hevc_encoder_top #(
         .ref_slot_in      (ref_l0[2:0]),   // DPB slot for ref frame L0[0]
         .ref_slot_l1      (ref_l1[2:0]),   // DPB slot for ref frame L1[0]
         .inter_pred_idc   (ctu_slice_type == 2'd0 ? 2'd2 : 2'd0), // B-slice: Bi-prediction
-        .search_start     (eval_inter_start),
+        .search_start     (me_load_done_pulse),
         .search_ready     (),
         .cu_orig_flat     (search_orig_flat),
         .cu_x             (({6'd0, rmd_latched_ctu_x} << 6) + {6'd0, rmd_latched_pu_x}),
@@ -2788,22 +2785,6 @@ module hevc_encoder_top #(
     end
     // synthesis translate_on
 
-    // ---- Read original pixels for SAO stats (1-cycle SRAM read) ----
-`ifdef SYNTHESIS
-    reg [9:0] orig_rd_y, orig_rd_u, orig_rd_v;
-    always @(posedge clk) begin
-        orig_rd_y <= orig_pixel_q;
-        orig_rd_u <= orig_pixel_q;
-        orig_rd_v <= orig_pixel_q;
-    end
-`else
-    reg [9:0] orig_rd_y, orig_rd_u, orig_rd_v;
-    always @(posedge clk) begin
-        orig_rd_y <= orig_y_ram[{recon_out_y[5:0], recon_out_x[5:0]}];
-        orig_rd_u <= orig_u_ram[{recon_out_y[4:0], recon_out_x[4:0]}];
-        orig_rd_v <= orig_v_ram[{recon_out_y[4:0], recon_out_x[4:0]}];
-    end
-`endif
     reg recon_out_valid_d;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) recon_out_valid_d <= 1'b0;
@@ -2830,9 +2811,11 @@ module hevc_encoder_top #(
         .in_y             (recon_out_y),
         .in_comp          (recon_out_comp),
         .orig_in_valid    (recon_out_valid_d),
-        .orig_in_y        (orig_rd_y),
-        .orig_in_u        (orig_rd_u),
-        .orig_in_v        (orig_rd_v),
+        .orig_in_y        (orig_y_data_q),
+        .orig_in_u        (orig_u_data_q),
+        .orig_in_v        (orig_v_data_q),
+        .sao_enable       (cfg_sao_enable),
+        .sao_stats_done   (),
         .map_update_valid (map_update_valid_r),
         .map_update_cbf_only(map_update_cbf_only_r),
         .map_update_x     (map_update_x_r),
@@ -3053,8 +3036,10 @@ module hevc_encoder_top #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            cabac_state <= CABAC_IDLE;
+            cabac_state     <= CABAC_IDLE;
+            cabac_sao_req_r <= 1'b0;
         end else begin
+            cabac_sao_req_r <= 1'b0;
             case (cabac_state)
                 CABAC_IDLE: begin
                     if (trigger_cu) begin
@@ -3067,8 +3052,14 @@ module hevc_encoder_top #(
                         if (latched_cu_is_split) begin
                             cabac_state <= CABAC_IDLE;
                         end else if (current_cu_skip) begin
-                            if (cabac_cu_is_last_in_ctu) cabac_state <= CABAC_TRM_CTU;
-                            else cabac_state <= CABAC_IDLE;
+                            if (cabac_cu_is_last_in_ctu) begin
+                                if (cfg_sao_enable) begin
+                                    cabac_state <= CABAC_WAIT_SAO_DONE;
+                                    cabac_sao_req_r <= 1'b1;
+                                end else begin
+                                    cabac_state <= CABAC_TRM_CTU;
+                                end
+                            end else cabac_state <= CABAC_IDLE;
                         end else if (latched_cu_merge) begin
                             cabac_state <= CABAC_WAIT_COEFF;
                         end else begin
@@ -3096,14 +3087,32 @@ module hevc_encoder_top #(
                 CABAC_WAIT_COEFF_DONE: begin
                     if (cabac_coeff_done) begin
                         if (!latched_cu_is_intra && !latched_cu_merge && !cu_cbf_latched) begin
-                            if (cabac_cu_is_last_in_ctu) cabac_state <= CABAC_TRM_CTU;
-                            else cabac_state <= CABAC_IDLE;
+                            if (cabac_cu_is_last_in_ctu) begin
+                                if (cfg_sao_enable) begin
+                                    cabac_state <= CABAC_WAIT_SAO_DONE;
+                                    cabac_sao_req_r <= 1'b1;
+                                end else begin
+                                    cabac_state <= CABAC_TRM_CTU;
+                                end
+                            end else cabac_state <= CABAC_IDLE;
                         end else if (!reg_tu_is_last_in_cu) begin
                             cabac_state <= CABAC_WAIT_COEFF;
                         end else begin
-                            if (cabac_cu_is_last_in_ctu) cabac_state <= CABAC_TRM_CTU;
-                            else cabac_state <= CABAC_IDLE;
+                            if (cabac_cu_is_last_in_ctu) begin
+                                if (cfg_sao_enable) begin
+                                    cabac_state <= CABAC_WAIT_SAO_DONE;
+                                    cabac_sao_req_r <= 1'b1;
+                                end else begin
+                                    cabac_state <= CABAC_TRM_CTU;
+                                end
+                            end else cabac_state <= CABAC_IDLE;
                         end
+                    end
+                end
+                CABAC_WAIT_SAO_DONE: begin
+                    cabac_sao_req_r <= 1'b0;
+                    if (cabac_sao_done) begin
+                        cabac_state <= CABAC_TRM_CTU;
                     end
                 end
                 CABAC_TRM_CTU: begin
@@ -3439,6 +3448,15 @@ module hevc_encoder_top #(
         .coeff_rd_en         (coeff_buf_re),
         .coeff_rd_addr       (coeff_buf_raddr),
         .coeff_rd_data       (coeff_buf_rdata),
+
+        // SAO syntax
+        .sao_req             (cabac_sao_req_r),
+        .sao_done            (cabac_sao_done),
+        .sao_type            (sao_type_out),
+        .sao_eo_class        (sao_eo_class_out),
+        .sao_eo_offset       (sao_eo_offset_out),
+        .sao_band_pos        (sao_band_pos_out),
+        .sao_bo_offset       (sao_bo_offset_out),
 
         // Flush
         .trm_req          (top_trm_req),

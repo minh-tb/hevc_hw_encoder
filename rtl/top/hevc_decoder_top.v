@@ -293,6 +293,8 @@ module hevc_decoder_top (
         .out_eo_offset       (),
         .out_band_pos        (),
         .out_bo_offset       (),
+        .sao_enable          (1'b0),
+        .sao_stats_done      (),
         .inloop_ctu_done     ()
     );
 

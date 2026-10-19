@@ -19,6 +19,9 @@ module gop_controller #(
     input  wire                     clk,
     input  wire                     rst_n,
 
+    // Runtime configuration
+    input  wire [1:0]               cfg_gop_structure, // 0: IPP, 1: IPBB, 2: Hierarchical B
+
     // Global control
     input  wire                     encode_start,
     input  wire [15:0]              total_frames,
@@ -324,7 +327,7 @@ module gop_controller #(
 
                 S_ALLOC: begin
                     if (!is_intra) begin
-                        if (GOP_STRUCTURE == 1 && frames_encoded >= 16'd2) begin
+                        if (cfg_gop_structure == 2'd1 && frames_encoded >= 16'd2) begin
                             // B-Slice for IPBB pattern
                             frame_slice_type <= SLICE_B;
                             frame_poc        <= base_poc;
