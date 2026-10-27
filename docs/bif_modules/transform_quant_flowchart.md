@@ -6,8 +6,8 @@ The **Transform & Quantization Subsystem** ([`rtl/transform/dct_top.v`](file:///
 
 Key architectural features:
 1. **Row-Serial 2D Transform Architecture**:
-   - Replaces the naive fully unrolled 2D matrix multiplication (~57,411 DSP multipliers) with a pipelined 2-pass 1D core (~949 multipliers) and an on-chip dual-port Transpose RAM (`transpose_ram_32x32.v`).
-   - Achieves a **98.3% silicon area reduction**.
+   - Replaces the naive fully unrolled 2D matrix multiplication (~57,411 multipliers) with a pipelined 2-pass 1D core (348 shared symmetric multipliers) and an on-chip dual-port Transpose RAM (`transpose_ram_32x32.v`).
+   - Achieves a **99.4% silicon area reduction**.
 2. **HEVC Compliant Kernels**:
    - **$4\times 4$ DST-VII**: Clause 8.6.3 integer sine transform for $4\times 4$ Intra Luma blocks.
    - **$4\times 4, 8\times 8, 16\times 16, 32\times 32$ DCT-II**: Even-symmetric cosine transforms.

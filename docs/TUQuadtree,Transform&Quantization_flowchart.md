@@ -14,8 +14,8 @@ This hardware implementation supports:
    - Scalar uniform deadzone quantization indexed by $\text{QP} \in [0..51]$.
    - Coded Block Flag (CBF) generation: indicates whether any non-zero coefficient remains in the transform unit.
 4. **Row-Serial 2D Architecture**:
-   - Implements a 2-pass 1D transform engine with an on-chip $32\times 32$ dual-port Transpose RAM (`transpose_ram_32x32.v`).
-   - Achieves a **98.3% multiplier reduction** (~949 multipliers vs ~57,411 in a fully unrolled 2D implementation) while meeting real-time throughput budgets ($4\times 4$ in 12 cycles, $8\times 8$ in 20 cycles, $16\times 16$ in 36 cycles, $32\times 32$ in 68 cycles).
+   - Implements a 2-pass 1D transform engine with an on-chip $32\times 32$ dual-port Transpose RAM (`transpose_ram_32x32.v`) and shared odd-matrix symmetry ($M = M^T$).
+   - Achieves a **99.4% multiplier reduction** (348 shared constant multipliers vs ~57,411 in a fully unrolled 2D implementation) while meeting real-time throughput budgets ($4\times 4$ in 12 cycles, $8\times 8$ in 20 cycles, $16\times 16$ in 36 cycles, $32\times 32$ in 68 cycles).
 
 ---
 
@@ -149,6 +149,6 @@ graph LR
 ```
 
 ### Synthesis Verification & Resource Metrics
-- **Multipliers**: 949 DSP units total (98.3% reduction over 57,411).
+- **Multipliers**: 348 shared constant multipliers in `transform_1d_core.v` (50,024 LUTs, 1 DSP48E2; 99.4% reduction over 57,411 unrolled 2D multipliers).
 - **Tested Block Types**: $4\times 4$ DST-VII, $4\times 4$ DCT-II, $8\times 8$ DCT-II, $16\times 16$ DCT-II, $32\times 32$ DCT-II.
 - **Verification**: Verified bit-exact against HM 18.0 `TComTrQuant::xTrMxN()` and `TComTrQuant::xITrMxN()`.

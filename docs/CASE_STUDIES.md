@@ -24,24 +24,24 @@ This document compiles the complete technical case studies, root-cause analyses,
 
 All metrics extracted from post-synthesis Vivado 2026.1 reports targeting `xczu19eg-ffvb1517-2-e` at 50 MHz:
 
-| Metric | Initial Baseline | Phase 1 Post-Optimization | Phase 2 Post-Optimization | Total Reduction vs. Baseline |
+| Metric | Initial Baseline | Phase 1 Post-Optimization | Phase 2 (Final Un-bypassed) | Total Reduction vs. Baseline |
 |---|---|---|---|---|
-| **CLB LUTs** | 448,916 (85.88%) | 342,547 (65.53%) | **224,721 (42.99%)** | **-224,195 LUTs (-49.94%)** |
-| *-- LUT as Logic* | 446,581 (85.43%) | 340,166 (65.08%) | **222,338 (42.53%)** | **-224,243 LUTs (-50.21%)** |
+| **CLB LUTs** | 448,916 (85.88%) | 342,547 (65.53%) | **225,933 (43.22%)** | **-222,983 LUTs (-49.67%)** |
+| *-- LUT as Logic* | 446,581 (85.43%) | 340,166 (65.08%) | **223,550 (42.77%)** | **-223,031 LUTs (-49.94%)** |
 | *-- LUTRAM* | 2,335 (1.10%) | 2,381 (1.12%) | **2,383 (1.12%)** | Preserved |
-| **CLB Registers (FFs)** | 344,030 (32.91%) | 253,425 (24.24%) | **247,449 (23.67%)** | **-96,581 FFs (-28.07%)** |
-| **DSP48E2 Slices** | 920 (46.75%) | 878 (44.61%) | **206 (10.47%)** | **-714 DSPs (-77.61%)** |
+| **CLB Registers (FFs)** | 344,030 (32.91%) | 253,425 (24.24%) | **249,980 (23.91%)** | **-94,050 FFs (-27.34%)** |
+| **DSP48E2 Slices** | 920 (46.75%) | 878 (44.61%) | **209 (10.62%)** | **-711 DSPs (-77.28%)** |
 | **Block RAM Tiles** | 30.0 (3.05%) | 30.0 (3.05%) | **30.0 (3.05%)** | 100% Preserved |
 | **Setup Slack (WNS)** | -5.394 ns (VIOLATED) | +1.485 ns (MET) | **+10.497 ns (MET)** | **+15.891 ns timing slack** |
-| **Failing Endpoints** | 37 failing endpoints | 0 failing endpoints | **0 failing endpoints** (0 / 535,495) | **100% Timing Closure** |
+| **Failing Endpoints** | 37 failing endpoints | 0 failing endpoints | **0 failing endpoints** (0 / 543,058) | **100% Timing Closure** |
 | **Estimated $F_{\max}$** | 39.38 MHz | 54.01 MHz | **105.23 MHz** | **+167.2% Clock Speedup** |
-| **Dynamic Power** | 1.926 W | 1.304 W | **0.808 W** | **-58.0% Dynamic Power** |
-| **Total On-Chip Power** | 3.048 W | 2.420 W | **1.920 W** | **-37.0% Total Power** |
+| **Dynamic Power** | 1.926 W | 1.304 W | **0.831 W** | **-56.9% Dynamic Power** |
+| **Total On-Chip Power** | 3.048 W | 2.420 W | **1.943 W** | **-36.3% Total Power** |
 
 ```
 Initial Baseline: 448,916 LUTs (85.88%) | 920 DSPs (46.75%) | WNS = -5.394 ns (39.38 MHz)
 Phase 1:          342,547 LUTs (65.53%) | 878 DSPs (44.61%) | WNS = +1.485 ns (54.01 MHz)
-Phase 2:          224,721 LUTs (42.99%) | 206 DSPs (10.47%) | WNS = +10.497 ns (105.23 MHz)
+Phase 2 (Final):  225,933 LUTs (43.22%) | 209 DSPs (10.62%) | WNS = +10.497 ns (105.23 MHz)
 ```
 
 ---
@@ -321,10 +321,17 @@ To ensure academic and industrial transparency, this case study documents all ar
 4. **Chroma Intra Prediction**: Tied to `DM_CHROMA` (`3'd4`), deriving the chroma intra prediction direction directly from luma.
 5. **Reference Frame Index**: `ref_idx_l0 = 0`, `ref_idx_l1 = 0`, candidate 0 chosen for AMVP.
 
-### Synthesis Bypasses & Trimmed Subsystems (`0 LUTs` in Netlist)
-1. **Sample Adaptive Offset (SAO)**:
-   In `decoder_inloop_filters.v`, `filter_state` transitions from `S_DB` directly to `S_DUMP`. `sao_top.v` is trimmed to 0 LUTs; `sample_adaptive_offset_enabled_flag` is set to `0` in SPS.
-2. **Rate Controller (`rate_controller.v`)**:
-   `RC_ENABLE` parameter is set to `0` by default; frame QP is fixed to `BASE_QP = 29`.
-3. **External DRAM Read Path in `frame_store.v`**:
-   `rd_req_valid` is tied to `0`. Reconstructed frames are written out to AXI DRAM, but inter prediction reads reference frames from internal DPB BRAMs.
+### Runtime-Configurable Subsystems (Un-bypassed in Final Netlist)
+1. **Sample Adaptive Offset (SAO — `1,894 LUTs, 120 FFs`)**:
+   Controlled dynamically via `cfg_sao_enable`. `sao_top.v` (`1,736 LUTs`), `sao_stats.v` (`158 LUTs`), and `syntax_sao.v` inside `cabac_enc_top.v` are fully synthesized and active when enabled.
+2. **Rate Controller (`rate_controller.v` — `1,113 LUTs, 149 FFs, 3 DSPs, 0 Latches`)**:
+   Controlled dynamically via `cfg_rc_enable`, `cfg_base_qp`, and `cfg_target_bitrate_kbps`. Uses reciprocal multiplication and a 6-stage binary shift-threshold tree for dividerless VBV fullness estimation.
+3. **GOP Controller (`gop_controller.v` — `243 LUTs, 135 FFs`)**:
+   Controlled dynamically via `cfg_gop_structure` supporting IPP, Low-Delay B (IPBB), and Hierarchical B structures.
+4. **On-Chip DPB vs. External AXI4 DRAM (`frame_store.v`)**:
+   Reconstructed frames are written out over the 256-bit AXI4 Master interface (`axi_aw*`, `axi_w*`), while inter motion estimation reads reference frames from low-latency on-chip DPB BRAMs (`30 BRAM tiles`).
+
+### Post-Synthesis Vivado Methodology Advisories (Verified Benign)
+- **Zero Latches (`0 LDCE`) & Zero Failing Endpoints (`WNS = +10.497 ns`)**: All sequential elements are edge-triggered Flip-Flops (`249,980 FFs`).
+- **`LUTAR-1` (1 Advisory)**: In `hevc_encoder_axi_top.v`, `core_rst_n = rst_n & ~soft_reset` drives async clear pins via a 2-input LUT; safe as `soft_reset` is only asserted from host CSRs while the core is idle.
+- **`DPIR-2` & `SYNTH-6`**: Pipeline registers feeding DSP48E2 slices use async `rst_n` (kept in fabric FFs), and 15 BRAMs operate in 1-cycle non-DOA-registered mode to preserve single-cycle FSM read handshakes; both have >10.4 ns timing margin.
