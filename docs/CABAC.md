@@ -135,7 +135,7 @@ graph TD
 | [`syntax_cu`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_cu.v) | `rtl/entropy/syntax_cu.v` | Encodes `split_cu_flag`, `cu_skip_flag`, `cu_merge_flag`, `merge_idx`, `pred_mode_flag`, `part_mode`, and intra prediction directions. |
 | [`syntax_pred`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_pred.v) | `rtl/entropy/syntax_pred.v` | Encodes inter prediction syntax (`inter_pred_idc`, `ref_idx_l0/l1`, `mvp_l0/l1_flag`) and binarizes Motion Vector Differences (MVD) using 9-bit prefix/suffix. |
 | [`syntax_coeff`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v) | `rtl/entropy/syntax_coeff.v` | Encodes $4\times 4$ sub-block coded block flags, reverse scan significance maps (`sig_coeff_flag`), `coeff_abs_level_greater1_flag`, `coeff_abs_level_greater2_flag`, signs, and Truncated Rice levels. |
-| [`syntax_sao`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_sao.v) | `rtl/entropy/syntax_sao.v` | Encodes CTU SAO merge flags (`sao_merge_left_flag`, `sao_merge_up_flag`), SAO type index (EO / BO), band offsets, and edge categories. |
+| [`syntax_sao`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_sao.v) | `rtl/entropy/syntax_sao.v` | Encodes CTU-start `sao(rx, ry)` syntax (Clause 7.3.8.3): coordinate-gated merge flags (`ctu_x > 0`, `ctu_y > 0`), shared chroma type (`sao_type_idx_chroma`), 4x abs offsets, non-zero signs, and 5-bit band positions. |
 
 ---
 

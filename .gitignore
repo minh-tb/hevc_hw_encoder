@@ -60,7 +60,7 @@ greybox_tmp/
 tonghop/
 *.qpf
 *.qsf
-cabac_enc_top.*
+/cabac_enc_top.*
 synth/synth_log.txt
 
 # Raw video, stream dumps & generated artifacts

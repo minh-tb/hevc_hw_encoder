@@ -106,9 +106,15 @@ module tb_b_frame_encoder;
     localparam RECON_PRE_OUT = "hw_recon_pre_high_motion.yuv";
 `elsif ENABLE_RC
     localparam CFG_QP = 6'd29;
+`ifdef CFG_SAO_ENABLE
+    localparam BITSTREAM_OUT = "str_b_frame.bin";
+    localparam RECON_OUT = "hw_recon.yuv";
+    localparam RECON_PRE_OUT = "hw_recon_pre.yuv";
+`else
     localparam BITSTREAM_OUT = "str_b_frame_rc.bin";
     localparam RECON_OUT = "hw_recon_rc.yuv";
     localparam RECON_PRE_OUT = "hw_recon_pre_rc.yuv";
+`endif
 `else
     localparam CFG_QP = 6'd29;
     localparam BITSTREAM_OUT = "str_b_frame.bin";

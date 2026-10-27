@@ -54,10 +54,10 @@ flowchart TD
         DoneCoeff["Khẳng định coeff_done"]
     end
 
-    subgraph SAO_Stage ["5. Mã hóa Cú pháp SAO (syntax_sao.v)"]
-        ReqSAO["Nhận sao_req từ SAO Unit"]
-        EncodeSAO["Mã hóa sao_type, offsets, band_pos"]
-        DoneSAO["Khẳng định sao_done"]
+    subgraph SAO_Stage ["Mã hóa Cú pháp SAO (syntax_sao.v) — Đầu CTU (Clause 7.3.8.1)"]
+        ReqSAO["Nhận sao_req tại đầu mỗi CTU trước Coding Tree"]
+        EncodeSAO["Mã hóa merge_flags (gated ctu_x/y) &rarr; sao_type &rarr; offsets &rarr; band_pos"]
+        DoneSAO["Khẳng định sao_done &rarr; Kích hoạt Root CU"]
     end
 
     subgraph Term_Stage ["6. Terminating & Flush (range_coder.v)"]

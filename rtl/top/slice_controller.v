@@ -20,6 +20,7 @@ module slice_controller #(
     input  wire [5:0]   frame_qp,
     input  wire [2:0]   temporal_id,
     input  wire [5:0]   nal_type,
+    input  wire         sao_enable,
     output reg          frame_done,
 
     output reg          ctu_frame_start,
@@ -68,6 +69,7 @@ module slice_controller #(
     reg  [5:0]  latched_nal_type;
     reg  [2:0]  latched_temporal_id;
     reg  [9:0]  latched_poc;
+    reg         latched_sao_enable;
 
     reg         psw_vps_req;
     reg         psw_sps_req;
@@ -190,6 +192,7 @@ module slice_controller #(
             psw_sps_req      <= 1'b0;
             psw_pps_req      <= 1'b0;
             wait_cnt         <= 3'd0;
+            latched_sao_enable <= 1'b0;
         end else begin
             frame_done       <= 1'b0;
             ctu_frame_start  <= 1'b0;
@@ -209,6 +212,7 @@ module slice_controller #(
                         latched_nal_type    <= nal_type;
                         latched_temporal_id <= temporal_id;
                         latched_poc         <= frame_poc;
+                        latched_sao_enable  <= (sao_enable === 1'b1);
                     end
                 end
                 

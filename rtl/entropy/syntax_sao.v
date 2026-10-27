@@ -1,6 +1,6 @@
 //=============================================================================
 // syntax_sao.v
-// SAO CABAC Syntax Element Encoder
+// SAO CABAC Syntax Element Encoder (ITU-T H.265 Clause 7.3.8.3)
 //=============================================================================
 
 `include "parameter_pkg.vh"
@@ -10,6 +10,9 @@ module syntax_sao #(
 )(
     input  wire        clk,
     input  wire        rst_n,
+
+    input  wire [5:0]  ctu_x,       // CTU column index
+    input  wire [5:0]  ctu_y,       // CTU row index
 
     input  wire        sao_req,
     output reg         sao_done,
@@ -42,6 +45,10 @@ module syntax_sao #(
     reg [1:0] cur_comp; // 0=Luma, 1=Cb, 2=Cr
     reg [2:0] cur_cat;  // 0..3 (4 categories)
 
+    // X/Z safe neighbor availability detection (handles unconnected ports in unit testbenches)
+    wire has_left = (|ctu_x === 1'b1);
+    wire has_up   = (|ctu_y === 1'b1);
+
     wire [1:0] cur_type = (cur_comp == 0) ? sao_type[1:0] :
                           (cur_comp == 1) ? sao_type[3:2] : sao_type[5:4];
 
@@ -55,10 +62,6 @@ module syntax_sao #(
     reg signed [4:0] sel_offset;
     always @(*) begin
         if (cur_type == 1) begin // EO
-            // For EO, category is 1..4 (which we map to 0..3 here).
-            // Actually, in SAO stats, eo_offset is packed as: cat4, cat3, cat2 (always 0), cat1, cat0.
-            // Wait, for signaling, we only signal 4 offsets: cat0, cat1, cat3, cat4.
-            // And in SAO stats, they were stored at indices [0], [1], [3], [4].
             if (cur_comp == 0) begin
                 if (cur_cat == 0) sel_offset = eo_offset[4:0];
                 else if (cur_cat == 1) sel_offset = eo_offset[9:5];
@@ -103,156 +106,198 @@ module syntax_sao #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state <= S_IDLE;
-            sao_done <= 0;
-            bin_valid <= 0;
-            bin_value <= 0;
-            bin_ctx_id <= 0;
-            bin_is_ep <= 0;
-            cur_comp <= 0; cur_cat <= 0;
-            tr_count <= 0; fl_count <= 0;
+            state      <= S_IDLE;
+            sao_done   <= 1'b0;
+            bin_valid  <= 1'b0;
+            bin_value  <= 1'b0;
+            bin_ctx_id <= {CTX_ID_W{1'b0}};
+            bin_is_ep  <= 1'b0;
+            cur_comp   <= 2'd0;
+            cur_cat    <= 3'd0;
+            tr_count   <= 5'd0;
+            fl_count   <= 3'd0;
         end else begin
-            sao_done <= 0;
+            sao_done <= 1'b0;
             if (bin_valid && !bin_rdy) begin
                 // stall
             end else begin
-                bin_valid <= 0;
+                bin_valid <= 1'b0;
                 case (state)
                     S_IDLE: begin
                         if (sao_req) begin
-                            state <= S_MERGE_LEFT;
-                            cur_comp <= 0;
+                            cur_comp <= 2'd0;
+                            cur_cat  <= 3'd0;
+                            tr_count <= 5'd0;
+                            fl_count <= 3'd0;
+                            if (has_left) begin
+                                state <= S_MERGE_LEFT;
+                            end else if (has_up) begin
+                                state <= S_MERGE_UP;
+                            end else begin
+                                state <= S_TYPE;
+                            end
                         end
                     end
+
                     S_MERGE_LEFT: begin
-                        bin_valid <= 1; bin_value <= 0; bin_ctx_id <= 181; bin_is_ep <= 0; // Hardcoded merge_left = 0
-                        state <= S_MERGE_UP;
+                        bin_valid  <= 1'b1;
+                        bin_value  <= 1'b0;
+                        bin_ctx_id <= 8'd181;
+                        bin_is_ep  <= 1'b0; // Hardcoded merge_left = 0
+                        if (has_up) state <= S_MERGE_UP;
+                        else        state <= S_TYPE;
                     end
+
                     S_MERGE_UP: begin
-                        bin_valid <= 1; bin_value <= 0; bin_ctx_id <= 181; bin_is_ep <= 0; // Hardcoded merge_up = 0
-                        state <= S_TYPE;
+                        bin_valid  <= 1'b1;
+                        bin_value  <= 1'b0;
+                        bin_ctx_id <= 8'd181;
+                        bin_is_ep  <= 1'b0; // Hardcoded merge_up = 0
+                        state      <= S_TYPE;
                     end
+
                     S_TYPE: begin
-                        // sao_type_idx_luma / chroma
-                        // TR cMax=2. 0=OFF(0), 1=BO(10), 2=EO(11)
-                        // Actually HM SAO type encoding: 
-                        // cMax=2. cRiceParam=0.
-                        // OFF (0): 0
-                        // BO (2): 10
-                        // EO (1): 11 (Wait! In HEVC spec, BO is 1, EO is 2!)
-                        // Let's remap my types: My types: 1=EO, 2=BO.
-                        // Spec types: 0=OFF, 1=BO, 2=EO.
-                        // So my type 1 (EO) -> spec 2.
-                        // My type 2 (BO) -> spec 1.
-                        // Spec TR: 
-                        // 0 -> bin=0 (ctx 182)
-                        // 1 (BO) -> bin0=1 (ctx 182), bin1=0 (bypass)
-                        // 2 (EO) -> bin0=1 (ctx 182), bin1=1 (bypass)
-                        
-                        if (tr_count == 0) begin
-                            bin_valid <= 1; 
-                            bin_value <= (cur_type == 0) ? 0 : 1; 
-                            bin_ctx_id <= 182; 
-                            bin_is_ep <= 0;
-                            if (cur_type == 0) begin
-                                // Done with this component
-                                if (cur_comp == 0) begin cur_comp <= 1; tr_count <= 0; end // Next comp
-                                else if (cur_comp == 1) begin cur_comp <= 2; tr_count <= 0; end
-                                else state <= S_DONE;
+                        // ITU-T H.265 Clause 7.3.8.3 / HM parseSaoTypeIdx:
+                        // 0 (OFF): bin=0 (ctx 182)
+                        // 1 (BO):  bin0=1 (ctx 182), bin1=0 (bypass)
+                        // 2 (EO):  bin0=1 (ctx 182), bin1=1 (bypass)
+                        if (tr_count == 5'd0) begin
+                            bin_valid  <= 1'b1;
+                            bin_value  <= (cur_type == 2'd0) ? 1'b0 : 1'b1;
+                            bin_ctx_id <= 8'd182;
+                            bin_is_ep  <= 1'b0;
+                            if (cur_type == 2'd0) begin
+                                if (cur_comp == 2'd0) begin
+                                    // Luma is OFF -> next is Cb
+                                    cur_comp <= 2'd1;
+                                    tr_count <= 5'd0;
+                                end else begin
+                                    // Cb is OFF -> Cr inherits OFF, entire CTU SAO is done
+                                    state <= S_DONE;
+                                end
                             end else begin
-                                tr_count <= 1;
+                                tr_count <= 5'd1;
                             end
                         end else begin
-                            bin_valid <= 1;
-                            bin_value <= (cur_type == 1) ? 1 : 0; // My EO=1 -> Spec EO=2 -> bin1=1. My BO=2 -> Spec BO=1 -> bin1=0.
-                            bin_is_ep <= 1;
-                            
-                            cur_cat <= 0;
-                            tr_count <= 0;
-                            state <= S_OFFSET_ABS;
+                            bin_valid  <= 1'b1;
+                            bin_value  <= (cur_type == 2'd1) ? 1'b1 : 1'b0; // EO=1, BO=0
+                            bin_is_ep  <= 1'b1;
+                            cur_cat    <= 3'd0;
+                            tr_count   <= 5'd0;
+                            state      <= S_OFFSET_ABS;
                         end
                     end
+
                     S_OFFSET_ABS: begin
-                        bin_valid <= 1;
-                        bin_is_ep <= 1;
+                        // Emit all 4 truncated unary absolute offsets first
+                        bin_valid <= 1'b1;
+                        bin_is_ep <= 1'b1;
                         if (tr_count < abs_offset) begin
-                            bin_value <= 1;
-                            tr_count <= tr_count + 1;
+                            bin_value <= 1'b1;
+                            tr_count  <= tr_count + 5'd1;
                         end else begin
-                            if (tr_count < 31) bin_value <= 0;
-                            else bin_value <= 1; // Unary ends with 1 if max
-                            tr_count <= 0;
-                            state <= S_OFFSET_SIGN;
-                        end
-                    end
-                    S_OFFSET_SIGN: begin
-                        if (abs_offset == 0) begin
-                            // No sign if offset is 0
-                            if (cur_cat == 3) begin
-                                if (cur_type == 1) begin state <= S_EO_CLASS; fl_count <= 0; end
-                                else begin state <= S_BAND_POS; fl_count <= 0; end
+                            if (tr_count < 5'd31) bin_value <= 1'b0;
+                            else                  bin_value <= 1'b1; // maxSymbol reached
+                            tr_count  <= 5'd0;
+                            if (cur_cat == 3'd3) begin
+                                cur_cat <= 3'd0;
+                                if (cur_type == 2'd1) begin // EO has no signs
+                                    if (cur_comp != 2'd2) begin
+                                        state    <= S_EO_CLASS;
+                                        fl_count <= 3'd0;
+                                    end else begin
+                                        // Cr inherits Cb eo_class
+                                        state <= S_DONE;
+                                    end
+                                end else begin // BO
+                                    state <= S_OFFSET_SIGN;
+                                end
                             end else begin
-                                cur_cat <= cur_cat + 1;
-                                state <= S_OFFSET_ABS;
-                            end
-                        end else begin
-                            // Wait, EO offset sign is NOT encoded!
-                            // Spec 7.3.8.3: "if( sao_type_idx == 1 ) { sao_offset_sign }" (which means BO!)
-                            // For EO, the sign is implicitly defined by the category!
-                            if (cur_type == 1) begin // EO
-                                // Skip sign
-                                if (cur_cat == 3) begin
-                                    state <= S_EO_CLASS; fl_count <= 0;
-                                end else begin
-                                    cur_cat <= cur_cat + 1;
-                                    state <= S_OFFSET_ABS;
-                                end
-                            end else begin // BO
-                                bin_valid <= 1;
-                                bin_is_ep <= 1;
-                                bin_value <= sign_offset;
-                                if (cur_cat == 3) begin
-                                    state <= S_BAND_POS; fl_count <= 0;
-                                end else begin
-                                    cur_cat <= cur_cat + 1;
-                                    state <= S_OFFSET_ABS;
-                                end
+                                cur_cat <= cur_cat + 3'd1;
                             end
                         end
                     end
+
+                    S_OFFSET_SIGN: begin
+                        // For BO, loop through signs for non-zero offsets
+                        if (abs_offset == 5'd0) begin
+                            // Skip sign bin for zero offset
+                            bin_valid <= 1'b0;
+                            if (cur_cat == 3'd3) begin
+                                state    <= S_BAND_POS;
+                                fl_count <= 3'd0;
+                            end else begin
+                                cur_cat  <= cur_cat + 3'd1;
+                            end
+                        end else begin
+                            bin_valid <= 1'b1;
+                            bin_is_ep <= 1'b1;
+                            bin_value <= sign_offset;
+                            if (cur_cat == 3'd3) begin
+                                state    <= S_BAND_POS;
+                                fl_count <= 3'd0;
+                            end else begin
+                                cur_cat  <= cur_cat + 3'd1;
+                            end
+                        end
+                    end
+
                     S_BAND_POS: begin
-                        // 5 bits FL
-                        bin_valid <= 1;
-                        bin_is_ep <= 1;
+                        // 5-bit fixed length band_position
+                        bin_valid <= 1'b1;
+                        bin_is_ep <= 1'b1;
                         bin_value <= cur_band_pos[4 - fl_count];
-                        if (fl_count == 4) begin
-                            // Component done
-                            if (cur_comp == 0) begin cur_comp <= 1; state <= S_TYPE; tr_count <= 0; end
-                            else if (cur_comp == 1) begin cur_comp <= 2; state <= S_TYPE; tr_count <= 0; end
-                            else state <= S_DONE;
-                        end else fl_count <= fl_count + 1;
-                    end
-                    S_EO_CLASS: begin
-                        // Wait, for Chroma, eo_class is NOT coded for Cr! It is shared with Cb!
-                        // Spec: if( cIdx != 2 ) { sao_eo_class }
-                        if (cur_comp == 2) begin
-                            state <= S_DONE;
+                        if (fl_count == 3'd4) begin
+                            if (cur_comp == 2'd0) begin
+                                // Luma done -> Cb codes sao_type_idx_chroma
+                                cur_comp <= 2'd1;
+                                state    <= S_TYPE;
+                                tr_count <= 5'd0;
+                            end else if (cur_comp == 2'd1) begin
+                                // Cb done -> Cr inherits sao_type_idx_chroma, bypasses S_TYPE directly to S_OFFSET_ABS
+                                cur_comp <= 2'd2;
+                                cur_cat  <= 3'd0;
+                                tr_count <= 5'd0;
+                                state    <= S_OFFSET_ABS;
+                            end else begin
+                                // Cr done -> CTU SAO complete
+                                state    <= S_DONE;
+                            end
                         end else begin
-                            // 2 bits FL
-                            bin_valid <= 1;
-                            bin_is_ep <= 1;
-                            bin_value <= cur_eo_class[1 - fl_count];
-                            if (fl_count == 1) begin
-                                if (cur_comp == 0) begin cur_comp <= 1; state <= S_TYPE; tr_count <= 0; end
-                                else if (cur_comp == 1) begin cur_comp <= 2; state <= S_TYPE; tr_count <= 0; end
-                                else state <= S_DONE; // Should not happen since comp 2 skips
-                            end else fl_count <= fl_count + 1;
+                            fl_count <= fl_count + 3'd1;
                         end
                     end
-                    S_DONE: begin
-                        sao_done <= 1;
-                        state <= S_IDLE;
+
+                    S_EO_CLASS: begin
+                        // 2-bit fixed length eo_class (coded for Luma and Cb; Cr inherits Cb)
+                        bin_valid <= 1'b1;
+                        bin_is_ep <= 1'b1;
+                        bin_value <= cur_eo_class[1 - fl_count];
+                        if (fl_count == 3'd1) begin
+                            if (cur_comp == 2'd0) begin
+                                cur_comp <= 2'd1;
+                                state    <= S_TYPE;
+                                tr_count <= 5'd0;
+                            end else if (cur_comp == 2'd1) begin
+                                // Cb done -> Cr inherits sao_type and sao_class, goes directly to S_OFFSET_ABS
+                                cur_comp <= 2'd2;
+                                cur_cat  <= 3'd0;
+                                tr_count <= 5'd0;
+                                state    <= S_OFFSET_ABS;
+                            end else begin
+                                state    <= S_DONE;
+                            end
+                        end else begin
+                            fl_count <= fl_count + 3'd1;
+                        end
                     end
+
+                    S_DONE: begin
+                        sao_done <= 1'b1;
+                        state    <= S_IDLE;
+                    end
+
+                    default: state <= S_IDLE;
                 endcase
             end
         end

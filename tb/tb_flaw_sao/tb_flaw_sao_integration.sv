@@ -155,6 +155,8 @@ module tb_flaw_sao_integration;
     //=========================================================================
     // 4. SAO Syntax Encoder DUT Instantiation
     //=========================================================================
+    logic [5:0]  syntax_ctu_x;
+    logic [5:0]  syntax_ctu_y;
     logic        syntax_req;
     logic        syntax_done;
     logic [5:0]  syntax_sao_type;
@@ -171,6 +173,8 @@ module tb_flaw_sao_integration;
     syntax_sao #(.CTX_ID_W(8)) u_syntax_sao (
         .clk(clk),
         .rst_n(rst_n),
+        .ctu_x(syntax_ctu_x),
+        .ctu_y(syntax_ctu_y),
         .sao_req(syntax_req),
         .sao_done(syntax_done),
         .sao_type(syntax_sao_type),
@@ -352,8 +356,9 @@ module tb_flaw_sao_integration;
         // PART 4: Verify syntax_sao.v Standalone Binarization
         //---------------------------------------------------------------------
         $display("\n--- Part 4: Verifying syntax_sao.v Binarization Execution ---");
-        // Trigger SAO EO syntax encoding:
-        // Luma type = 1 (EO), eo_class = 0, offsets = {3, 1, -1, -3}
+        // 4A: Boundary CTU (0,0) - No merge flags
+        syntax_ctu_x     = 6'd0;
+        syntax_ctu_y     = 6'd0;
         syntax_req       = 1'b1;
         syntax_sao_type  = 6'b00_00_01; // Luma EO, Chroma OFF
         syntax_eo_class  = 6'd0;
@@ -365,20 +370,86 @@ module tb_flaw_sao_integration;
         syntax_req = 1'b0;
 
         begin
-            automatic int bin_count = 0;
+            automatic int bin_count_boundary = 0;
             automatic int timeout = 0;
             while (!syntax_done && (timeout < 200)) begin
                 @(posedge clk);
                 if (syntax_bin_valid && syntax_bin_rdy) begin
-                    bin_count++;
+                    bin_count_boundary++;
                 end
                 timeout++;
             end
-            $display("syntax_sao generated %0d CABAC bins in %0d cycles.", bin_count, timeout);
-            if (bin_count > 0 && syntax_done) begin
-                $display("[PASS] syntax_sao.v successfully generated CABAC bins.");
+            $display("syntax_sao (CTU 0,0 EO) generated %0d CABAC bins in %0d cycles.", bin_count_boundary, timeout);
+            if (bin_count_boundary > 0 && syntax_done) begin
+                $display("[PASS] syntax_sao.v successfully generated boundary CABAC bins (no merge flags).");
             end else begin
-                $display("ERROR syntax_sao failed to encode bins!");
+                $display("ERROR syntax_sao failed to encode boundary bins!");
+                total_errors++;
+            end
+        end
+
+        // 4B: Interior CTU (1,1) - Merge flags emitted
+        @(posedge clk);
+        syntax_ctu_x     = 6'd1;
+        syntax_ctu_y     = 6'd1;
+        syntax_req       = 1'b1;
+        syntax_sao_type  = 6'b00_00_01; // Luma EO, Chroma OFF
+        syntax_eo_class  = 6'd0;
+        syntax_eo_offset = {70'd0, 5'd3};
+        syntax_band_pos  = 15'd0;
+        syntax_bo_offset = 60'd0;
+
+        @(posedge clk);
+        syntax_req = 1'b0;
+
+        begin
+            automatic int bin_count_interior = 0;
+            automatic int timeout = 0;
+            while (!syntax_done && (timeout < 200)) begin
+                @(posedge clk);
+                if (syntax_bin_valid && syntax_bin_rdy) begin
+                    bin_count_interior++;
+                end
+                timeout++;
+            end
+            $display("syntax_sao (CTU 1,1 EO) generated %0d CABAC bins in %0d cycles.", bin_count_interior, timeout);
+            if (bin_count_interior > 0 && syntax_done) begin
+                $display("[PASS] syntax_sao.v successfully generated interior CABAC bins (including merge flags).");
+            end else begin
+                $display("ERROR syntax_sao failed to encode interior bins!");
+                total_errors++;
+            end
+        end
+
+        // 4C: Band Offset (BO) syntax binarization
+        @(posedge clk);
+        syntax_ctu_x     = 6'd1;
+        syntax_ctu_y     = 6'd1;
+        syntax_req       = 1'b1;
+        syntax_sao_type  = 6'b10_10_10; // BO for Y, Cb, Cr
+        syntax_eo_class  = 6'd0;
+        syntax_eo_offset = 75'd0;
+        syntax_band_pos  = {3{5'd31}};
+        syntax_bo_offset = {3{15'd0, 5'sd1}};
+
+        @(posedge clk);
+        syntax_req = 1'b0;
+
+        begin
+            automatic int bin_count_bo = 0;
+            automatic int timeout = 0;
+            while (!syntax_done && (timeout < 500)) begin
+                @(posedge clk);
+                if (syntax_bin_valid && syntax_bin_rdy) begin
+                    bin_count_bo++;
+                end
+                timeout++;
+            end
+            $display("syntax_sao (CTU 1,1 BO) generated %0d CABAC bins in %0d cycles.", bin_count_bo, timeout);
+            if (bin_count_bo > 0 && syntax_done) begin
+                $display("[PASS] syntax_sao.v successfully generated Band Offset CABAC bins.");
+            end else begin
+                $display("ERROR syntax_sao failed to encode Band Offset bins!");
                 total_errors++;
             end
         end

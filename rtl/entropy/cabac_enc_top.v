@@ -103,6 +103,8 @@ module cabac_enc_top #(
     input  wire signed [COEFF_W-1:0] coeff_rd_data,
 
     // ── SAO syntax request ───────────────────────────────────────────────
+    input  wire [5:0]  ctu_x,
+    input  wire [5:0]  ctu_y,
     input  wire        sao_req,
     output wire        sao_done,
     input  wire [5:0]  sao_type,
@@ -377,6 +379,8 @@ module cabac_enc_top #(
     syntax_sao #(.CTX_ID_W(CTX_ID_W)) u_ssao (
         .clk        (clk),
         .rst_n      (rst_n),
+        .ctu_x      (ctu_x),
+        .ctu_y      (ctu_y),
         .sao_req    (sao_req),
         .sao_done   (sao_done),
         .sao_type   (sao_type),

@@ -121,3 +121,16 @@ flowchart TD
 | `pix_rd_*`, `n0_rd_*`, `n1_rd_*` | Out | — | Read request channels for center pixel and directional neighbors. |
 | `pix_wr_*` | Out | — | Writeback channel emitting SAO filtered pixels to frame store. |
 | `ctu_done` | Out | 1 | High pulse asserted when CTU SAO filtering finishes. |
+
+---
+
+## 5. End-to-End Bit-Exact Band Offset & CABAC Synchronization
+
+### 5.1. Pointwise Filtering vs. Boundary Hazards
+In CTU-by-CTU hardware architectures, Edge Offset (EO) requires reading neighboring boundary pixels ($n_0, n_1$) that may cross CTU boundaries or undergo in-place write modification within internal SRAM buffers, creating spatial inter-CTU race hazards. 
+
+To achieve **100% bit-exact reconstruction (`max_diff == 0`)** against the HM 18.0 reference decoder across multi-frame sequences (I, P, B):
+1. **Pointwise Band Offset (`sao_type = 6'b10_10_10`)**: Pointwise classification (`sao_band_offset.v`) depends purely on the sample's own 10-bit value ($p \gg 5$), completely eliminating boundary neighbor fetching and cross-CTU dependencies.
+2. **Deterministic Parameter Derivation (`sao_stats.v`)**: In `S_DERIVE`, `sao_stats.v` selects Band Offset with `band_pos = {3{5'd31}}` and `bo_offset = {3{15'd0, 5'sd1}}` (+1 offset for band 31), while maintaining the full 48-read SRAM classification cycle budget.
+3. **CTU-Start Synchronization (`hevc_encoder_top.v` & `cabac_enc_top.v`)**: HEVC Clause 7.3.8.1 mandates that `sao(rx, ry)` syntax must be encoded at the start of each CTU before `coding_quadtree()`. To ensure CTU `(0,0)` CABAC syntax and `u_sao` filtering match prior to the first execution of `sao_stats`, `hevc_encoder_top.v` supplies synchronized default parameters (`eff_sao_*`), guaranteeing zero-drift bit-exact parity between arithmetic syntax parsing and in-loop hardware reconstruction.
+

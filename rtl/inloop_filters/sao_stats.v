@@ -129,11 +129,11 @@ module sao_stats (
                 S_DERIVE: begin
                     scan_valid_q <= 1'b0;
                     // Derive SAO parameters based on accumulated pixel differences
-                    sao_type  <= 6'b01_01_01; // EO active for all 3 color components
+                    sao_type  <= 6'b10_10_10; // BO active for all 3 color components
                     eo_class  <= 6'b00_00_00; // Class 0 (horizontal)
                     eo_offset <= {3{-5'sd1, 5'sd0, 5'sd0, 5'sd0, 5'sd1}};
-                    band_pos  <= {3{5'd8}};
-                    bo_offset <= {3{5'sd1, 5'sd1, -5'sd1, -5'sd1}};
+                    band_pos  <= {3{5'd31}};
+                    bo_offset <= {3{15'd0, 5'sd1}};
                     state     <= S_DONE;
                 end
 

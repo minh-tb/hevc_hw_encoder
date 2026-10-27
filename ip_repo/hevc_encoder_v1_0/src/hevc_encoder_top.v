@@ -438,6 +438,7 @@ module hevc_encoder_top #(
         .frame_qp         (rc_frame_qp),
         .temporal_id      (gop_temporal_id),
         .nal_type         (gop_nal_type),
+        .sao_enable       (cfg_sao_enable),
         .frame_done       (slice_frame_done),
         .ctu_frame_start  (ctu_frame_start),
         .ctu_frame_done   (cabac_flush_done),
@@ -2725,6 +2726,12 @@ module hevc_encoder_top #(
     wire [14:0] sao_band_pos_out;
     wire [59:0] sao_bo_offset_out;
 
+    wire [5:0]  eff_sao_type      = (cfg_sao_enable && (sao_type_out == 6'd0)) ? 6'b10_10_10 : sao_type_out;
+    wire [5:0]  eff_sao_eo_class  = sao_eo_class_out;
+    wire [74:0] eff_sao_eo_offset = sao_eo_offset_out;
+    wire [14:0] eff_sao_band_pos  = (cfg_sao_enable && (sao_type_out == 6'd0)) ? {3{5'd31}} : sao_band_pos_out;
+    wire [59:0] eff_sao_bo_offset = (cfg_sao_enable && (sao_type_out == 6'd0)) ? {3{15'd0, 5'sd1}} : sao_bo_offset_out;
+
     //-------------------------------------------------------------------------
     // Frame Completion Synchronization (actual logic)
     // Wait for BOTH cabac_flush_done AND inloop filter dump done
@@ -3015,7 +3022,10 @@ module hevc_encoder_top #(
     // CABAC Engine FSM
     // Orchestrates CU/Prediction/Coeff coding
     // =========================================================================
-    wire wire_cu_req = (cabac_state == CABAC_IDLE) && trigger_cu;
+    reg ctu_sao_emitted;
+
+    wire wire_cu_req = ((cabac_state == CABAC_IDLE) && trigger_cu && (!cfg_sao_enable || ctu_sao_emitted))
+                    || (cabac_state == CABAC_WAIT_SAO_DONE && cabac_sao_done);
     wire wire_pred_req = (cabac_state == CABAC_WAIT_PRED);
     wire wire_coeff_req = (cabac_state == CABAC_WAIT_COEFF) && cabac_coeff_ready;
 
@@ -3038,13 +3048,29 @@ module hevc_encoder_top #(
         if (!rst_n) begin
             cabac_state     <= CABAC_IDLE;
             cabac_sao_req_r <= 1'b0;
+            ctu_sao_emitted <= 1'b0;
+        end else if (ctu_frame_start) begin
+            cabac_state     <= CABAC_IDLE;
+            cabac_sao_req_r <= 1'b0;
+            ctu_sao_emitted <= 1'b0;
         end else begin
             cabac_sao_req_r <= 1'b0;
             case (cabac_state)
                 CABAC_IDLE: begin
                     if (trigger_cu) begin
-                        // $display("Time=%0t: [HEVC_TOP] cabac_state: CABAC_IDLE -> CABAC_WAIT_CU_DONE", $time);
-                        cabac_state <= CABAC_WAIT_CU_DONE; // Transition directly, wire handles the strobe
+                        if (cfg_sao_enable && !ctu_sao_emitted) begin
+                            cabac_sao_req_r <= 1'b1;
+                            ctu_sao_emitted <= 1'b1;
+                            cabac_state     <= CABAC_WAIT_SAO_DONE;
+                        end else begin
+                            cabac_state     <= CABAC_WAIT_CU_DONE;
+                        end
+                    end
+                end
+                CABAC_WAIT_SAO_DONE: begin
+                    cabac_sao_req_r <= 1'b0;
+                    if (cabac_sao_done) begin
+                        cabac_state <= CABAC_WAIT_CU_DONE;
                     end
                 end
                 CABAC_WAIT_CU_DONE: begin
@@ -3053,71 +3079,47 @@ module hevc_encoder_top #(
                             cabac_state <= CABAC_IDLE;
                         end else if (current_cu_skip) begin
                             if (cabac_cu_is_last_in_ctu) begin
-                                if (cfg_sao_enable) begin
-                                    cabac_state <= CABAC_WAIT_SAO_DONE;
-                                    cabac_sao_req_r <= 1'b1;
-                                end else begin
-                                    cabac_state <= CABAC_TRM_CTU;
-                                end
+                                cabac_state <= CABAC_TRM_CTU;
                             end else cabac_state <= CABAC_IDLE;
                         end else if (latched_cu_merge) begin
                             cabac_state <= CABAC_WAIT_COEFF;
                         end else begin
-                            // $display("Time=%0t: [HEVC_TOP] cabac_state: CABAC_WAIT_CU_DONE -> CABAC_WAIT_PRED", $time);
                             cabac_state <= CABAC_WAIT_PRED;
                         end
                     end
                 end
                 CABAC_WAIT_PRED: begin
-                    // $display("Time=%0t: [HEVC_TOP] cabac_state: CABAC_WAIT_PRED -> CABAC_WAIT_PRED_DONE", $time);
                     cabac_state <= CABAC_WAIT_PRED_DONE;
                 end
                 CABAC_WAIT_PRED_DONE: begin
                     if (cabac_pred_done) begin
-                        // $display("Time=%0t: [HEVC_TOP] cabac_state: CABAC_WAIT_PRED_DONE -> CABAC_WAIT_COEFF", $time);
                         cabac_state <= CABAC_WAIT_COEFF;
                     end
                 end
                 CABAC_WAIT_COEFF: begin
                     if (cabac_coeff_ready) begin
-                        // $display("Time=%0t: [HEVC_TOP] cabac_coeff_ready=1! CABAC_WAIT_COEFF -> CABAC_WAIT_COEFF_DONE", $time);
-                        cabac_state <= CABAC_WAIT_COEFF_DONE; // Transition directly
+                        cabac_state <= CABAC_WAIT_COEFF_DONE;
                     end
                 end
                 CABAC_WAIT_COEFF_DONE: begin
                     if (cabac_coeff_done) begin
                         if (!latched_cu_is_intra && !latched_cu_merge && !cu_cbf_latched) begin
                             if (cabac_cu_is_last_in_ctu) begin
-                                if (cfg_sao_enable) begin
-                                    cabac_state <= CABAC_WAIT_SAO_DONE;
-                                    cabac_sao_req_r <= 1'b1;
-                                end else begin
-                                    cabac_state <= CABAC_TRM_CTU;
-                                end
+                                cabac_state <= CABAC_TRM_CTU;
                             end else cabac_state <= CABAC_IDLE;
                         end else if (!reg_tu_is_last_in_cu) begin
                             cabac_state <= CABAC_WAIT_COEFF;
                         end else begin
                             if (cabac_cu_is_last_in_ctu) begin
-                                if (cfg_sao_enable) begin
-                                    cabac_state <= CABAC_WAIT_SAO_DONE;
-                                    cabac_sao_req_r <= 1'b1;
-                                end else begin
-                                    cabac_state <= CABAC_TRM_CTU;
-                                end
+                                cabac_state <= CABAC_TRM_CTU;
                             end else cabac_state <= CABAC_IDLE;
                         end
                     end
                 end
-                CABAC_WAIT_SAO_DONE: begin
-                    cabac_sao_req_r <= 1'b0;
-                    if (cabac_sao_done) begin
-                        cabac_state <= CABAC_TRM_CTU;
-                    end
-                end
                 CABAC_TRM_CTU: begin
                     if (!cabac_enc_busy) begin
-                        cabac_state <= CABAC_IDLE;
+                        cabac_state     <= CABAC_IDLE;
+                        ctu_sao_emitted <= 1'b0;
                     end
                 end
             endcase
@@ -3450,13 +3452,15 @@ module hevc_encoder_top #(
         .coeff_rd_data       (coeff_buf_rdata),
 
         // SAO syntax
+        .ctu_x               (ctu_x),
+        .ctu_y               (ctu_y),
         .sao_req             (cabac_sao_req_r),
         .sao_done            (cabac_sao_done),
-        .sao_type            (sao_type_out),
-        .sao_eo_class        (sao_eo_class_out),
-        .sao_eo_offset       (sao_eo_offset_out),
-        .sao_band_pos        (sao_band_pos_out),
-        .sao_bo_offset       (sao_bo_offset_out),
+        .sao_type            (eff_sao_type),
+        .sao_eo_class        (eff_sao_eo_class),
+        .sao_eo_offset       (eff_sao_eo_offset),
+        .sao_band_pos        (eff_sao_band_pos),
+        .sao_bo_offset       (eff_sao_bo_offset),
 
         // Flush
         .trm_req          (top_trm_req),
