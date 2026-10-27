@@ -51,7 +51,7 @@ flowchart TD
     %% Quantization Path
     subgraph Quant_Stage ["Giai đoạn 3: Lượng tử hóa Forward Quant (fwd_quant.v)"]
         ReadFreqCoeff["Đọc hệ số tần số theo thứ tự quét nghịch đảo (Reverse Scan)"]
-        ApplyQuant["Áp dụng công thức Lượng tử hóa Vô hướng:<br/>Level = sign(C) &times; ((|C| &times; QScale + Offset) &gt;&gt; (14 + QP/6))"]
+        ApplyQuant["Áp dụng công thức Lượng tử hóa Vô hướng:<br/>Level = sign(C) &times; ((&#124;C&#124; &times; QScale + Offset) &gt;&gt; (14 + QP/6))"]
         CheckZero{"Tất cả hệ số trong TU<br/>đều bằng 0?"}
         SetCBF0["Gán CBF = 0 (Không cần truyền hệ số)"]
         SetCBF1["Gán CBF = 1 (Lưu hệ số vào CoeffBuffer)"]

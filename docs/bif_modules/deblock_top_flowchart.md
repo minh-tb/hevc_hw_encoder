@@ -31,7 +31,7 @@ flowchart TD
     %% Pass 1: Vertical Edges
     subgraph Pass1 ["GIAI ĐOẠN 1: LỌC BIÊN DỌC (Vertical Edges)"]
         IterVer["Duyệt qua các biên 8x8 dọc trong CTU 64x64<br/>(Bao gồm biên trái nối với CTU lân cận)"]
-        CalcBsVer["Tính Boundary Strength (bS) cho từng cạnh 4x4:<br/>&bull; bS = 2: Nếu khối P hoặc Q là Intra<br/>&bull; bS = 1: Nếu có hệ số non-zero (CBF) hoặc |&Delta;MV| &ge; 1 pixel<br/>&bull; bS = 0: Các trường hợp còn lại"]
+        CalcBsVer["Tính Boundary Strength (bS) cho từng cạnh 4x4:<br/>&bull; bS = 2: Nếu khối P hoặc Q là Intra<br/>&bull; bS = 1: Nếu có hệ số non-zero (CBF) hoặc &#124;&Delta;MV&#124; &ge; 1 pixel<br/>&bull; bS = 0: Các trường hợp còn lại"]
 
         CheckBsVer{"Giá trị bS &gt; 0?"}
 

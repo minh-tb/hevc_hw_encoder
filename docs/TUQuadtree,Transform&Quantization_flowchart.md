@@ -141,11 +141,11 @@ graph LR
     TransRAM[("transpose_ram_32x32.v<br/>Dual-Port Transpose SRAM<br/>(Row Write / Col Read)")]:::ram
     OutReg["Output Array<br/>(32x32 x 16-bit)"]:::core
 
-    InResidual -->|Row Vectors| Core1D
-    FSM -.->|Control & Shifts| Core1D
-    Core1D -->|Pass 1 Result| TransRAM
-    TransRAM -->|Col Vectors (Pass 2)| Core1D
-    Core1D -->|Pass 2 Result| OutReg
+    InResidual -->|"Row Vectors"| Core1D
+    FSM -.->|"Control &amp; Shifts"| Core1D
+    Core1D -->|"Pass 1 Result"| TransRAM
+    TransRAM -->|"Col Vectors (Pass 2)"| Core1D
+    Core1D -->|"Pass 2 Result"| OutReg
 ```
 
 ### Synthesis Verification & Resource Metrics

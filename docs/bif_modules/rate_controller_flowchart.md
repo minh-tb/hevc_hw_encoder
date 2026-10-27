@@ -58,7 +58,7 @@ flowchart TD
 
     %% Shift Tree Fullness
     subgraph Shift_Tree ["3. Ước lượng Tỷ lệ Đầy Bộ đệm (Dividerless Fullness Tree)"]
-        TreeComp["Cây so sánh dịch bit (Binary Shift Comparison Tree):<br/>So sánh |vbv_buffer_bits| với (vbv_max &gt;&gt; 1), (&gt;&gt; 2), (&gt;&gt; 3), (&gt;&gt; 4)<br/>Tích lũy các mức phần trăm (+25%, +12%, +6%, +3%)<br/>&rArr; Xuất status_vbv_fullness_pct &#91;0..100%&#93;"]
+        TreeComp["Cây so sánh dịch bit (Binary Shift Comparison Tree):<br/>So sánh &#124;vbv_buffer_bits&#124; với (vbv_max &gt;&gt; 1), (&gt;&gt; 2), (&gt;&gt; 3), (&gt;&gt; 4)<br/>Tích lũy các mức phần trăm (+25%, +12%, +6%, +3%)<br/>&rArr; Xuất status_vbv_fullness_pct &#91;0..100%&#93;"]
     end
 
     %% Lambda Derivation

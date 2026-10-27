@@ -46,9 +46,19 @@ for fpath in md_files:
             if q_count % 2 != 0:
                 issues.append(f"{fpath} Block {b_idx} Line {line_num}: Unbalanced quotes: {s}")
 
+            # Check edge pipe labels |...|
+            edge_pipes = re.findall(r'\|([^|\n]+)\|', s)
+            for p in edge_pipes:
+                lbl = p.strip()
+                if not (lbl.startswith('"') and lbl.endswith('"')):
+                    if any(c in lbl for c in ['(', ')', '[', ']', '{', '}', '<', '>', '&']):
+                        issues.append(f"{fpath} Block {b_idx} Line {line_num}: Unquoted special chars in edge label: |{p}|")
+
             # Extract labels inside double quotes
             labels = re.findall(r'"([^"]*)"', s)
             for lbl in labels:
+                if '|' in lbl:
+                    issues.append(f"{fpath} Block {b_idx} Line {line_num}: Raw pipe '|' inside label: {lbl}")
                 # Check for nested brackets inside label which can confuse some Mermaid parsers
                 if '[' in lbl or ']' in lbl:
                     issues.append(f"{fpath} Block {b_idx} Line {line_num}: Raw brackets '[' or ']' inside label: {lbl}")
