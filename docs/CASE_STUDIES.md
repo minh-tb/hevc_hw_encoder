@@ -167,11 +167,11 @@ Because `w_off_x` and `w_off_y` were declared as `signed [2:0]`, the expression 
 
 ### Mathematical Proof & Hardware Transformation
 Fractional Motion Estimation evaluates half-pel ($\pm 2$ qpel) and quarter-pel ($\pm 1$ qpel) positions around the integer base motion vector `base_mv`.
-$$\text{target\_mv} \in [4 \cdot \text{base\_mv} - 3, \; 4 \cdot \text{base\_mv} + 3]$$
+$$\text{target}_{\text{mv}} \in [4 \cdot \text{base}_{\text{mv}} - 3, \; 4 \cdot \text{base}_{\text{mv}} + 3]$$
 Performing arithmetic right shift by 2:
-$$t_{\text{int}} = \text{target\_mv} \gg 2 \in [\text{base\_mv} - 1, \; \text{base\_mv}]$$
-Subtracting $(\text{base\_mv} - 1)$:
-$$w_{\text{off}} = t_{\text{int}} - (\text{base\_mv} - 1) \in \{0, 1\} \quad \text{strictly!}$$
+$$t_{\text{int}} = \text{target}_{\text{mv}} \gg 2 \in [\text{base}_{\text{mv}} - 1, \; \text{base}_{\text{mv}}]$$
+Subtracting $(\text{base}_{\text{mv}} - 1)$:
+$$w_{\text{off}} = t_{\text{int}} - (\text{base}_{\text{mv}} - 1) \in \{0, 1\} \quad \text{strictly!}$$
 The variable offset can **only ever equal 0 or 1**!
 Instead of dynamic multiplication, each tap in `ext_11x11` is simply a 4:1 multiplexer among four compile-time constant bit-slices of `ref_12x12`:
 ```verilog

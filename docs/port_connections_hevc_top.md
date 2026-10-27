@@ -224,7 +224,7 @@ graph TD
 | 18 | `u_fwd_quant` | `fwd_quant` | `dct_out_data`, `frame_qp`, `tu_size_log2` | `quant_out_level`, `quant_out_cbf` | Deadzone scalar quantization and Coded Block Flag generation. |
 | 19 | `u_inv_quant` | `inv_quant` | `quant_out_level`, `frame_qp` | `inv_quant_out_coeff` | Dequantizes transform coefficients for the local reconstruction feedback loop. |
 | 20 | `u_s2p_addr_gen` | `address_generator` | `ref_req_x`, `ref_req_y`, `ref_slot` | `fs_araddr`, `fs_arlen` | Serial-to-parallel memory address generator for reference frame read requests. |
-| 21 | `u_recon_unit` | `recon_unit` | `pred_pixel`, `idct_out_data` | `recon_out_pixel` ($10\text{-bit}$) | Reconstructs pixels: $\text{Clip Main10}(\text{Pred} + \text{IDCT\_Residual}) \in [0..1023]$. |
+| 21 | `u_recon_unit` | `recon_unit` | `pred_pixel`, `idct_out_data` | `recon_out_pixel` ($10\text{-bit}$) | Reconstructs pixels: $\text{Clip Main10}(\text{Pred} + \text{IDCT}_{\text{res}}) \in [0..1023]$. |
 | 22 | `u_inloop_filters` | `decoder_inloop_filters` | `recon_out_pixel`, `cu_map_*`, `nbr_*` | `filt_out_pixel`, `inloop_ctu_done` | Dual in-loop filter subsystem combining `deblock_top` and `sao_top`. |
 | 23 | `u_frame_store` | `frame_store` | `recon_out_pixel`, `filt_out_pixel` | `ref_resp_data`, `axi_wdata` | Multi-bank on-chip reconstructed pixel buffer and DMA interface. |
 | 24 | `u_axi_read_arbiter` | `axi_read_arbiter` | `fs_arvalid`, `tz_arvalid`, `mc_arvalid` | `axi_arvalid`, `axi_araddr` | Round-robin arbitration for external DRAM read requests across search and filter engines. |

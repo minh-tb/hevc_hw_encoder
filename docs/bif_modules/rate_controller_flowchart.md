@@ -7,14 +7,14 @@ The **Rate Control Subsystem** ([`rtl/rate_control/rate_controller.v`](file:///d
 Key mechanisms implemented:
 1. **Target Bit Budget Allocation**:
    - Computes dynamic bit budgets per frame based on Slice Type ($I, P, B$), frame rate ($\text{FPS}$), and target bitrate:
-     $$\text{Target}_P = \frac{\text{Bitrate}_{\text{kbps}} \cdot 1000}{\text{FPS} \cdot (1 + (w_I - 1)/\text{GOP\_SIZE})}, \quad \text{Target}_I = w_I \cdot \text{Target}_P$$
+     $$\text{Target}_P = \frac{\text{Bitrate}_{\text{kbps}} \cdot 1000}{\text{FPS} \cdot (1 + (w_I - 1)/\text{GOP})}, \quad \text{Target}_I = w_I \cdot \text{Target}_P$$
 2. **VBV Buffer Accumulator**:
    - Tracks buffer fill deviation across frames:
-     $$\text{Buffer\_Fill} \leftarrow \text{Buffer\_Fill} + \text{Actual\_Bits}_{\text{prev}} - \text{Target\_Bits}$$
+     $$B_{\text{fill}} \leftarrow B_{\text{fill}} + R_{\text{actual}} - R_{\text{target}}$$
 3. **Proportional Buffer Feedback $\Delta\text{QP}$**:
    - Dampens bit fluctuations by adjusting QP within $[-3, +3]$ per frame:
-     $$\Delta\text{QP} = \text{clamp}\left(\frac{\text{Buffer\_Fill} - \text{Buffer\_Target}}{K_{\text{buf}}}, -3, +3\right)$$
-     $$\text{Frame\_QP} = \text{clamp}(\text{Base\_QP} + \Delta\text{QP}, 10, 51)$$
+     $$\Delta\text{QP} = \text{clamp}\left(\frac{B_{\text{fill}} - B_{\text{target}}}{K_{\text{buf}}}, -3, +3\right)$$
+     $$\text{QP}_{\text{frame}} = \text{clamp}(\text{QP}_{\text{base}} + \Delta\text{QP}, 10, 51)$$
 4. **Dividerless Synthesizable Fullness Estimator**:
    - Evaluates virtual buffer fullness ($0..100\%$) via a binary shift-threshold comparator tree without hardware dividers.
 5. **Lagrangian Multiplier Derivation**:
@@ -89,8 +89,8 @@ flowchart TD
 
 ### VBV Buffer Capacities
 - **Buffer Size**: 1.0 second worth of bits:
-  $$\text{VBV\_Max} = \text{Target\_Bitrate}_{\text{kbps}} \cdot 1000$$
-- **Target Buffer Occupancy**: 50% ($0.5 \cdot \text{VBV\_Max}$)
+  $$B_{\text{max}} = \text{Bitrate}_{\text{kbps}} \cdot 1000$$
+- **Target Buffer Occupancy**: 50% ($0.5 \cdot B_{\text{max}}$)
 - **Weightings**: $w_I = 3.0$ (I-frame bit allocation weight), $w_B = 0.8$ (B-frame weight).
 
 ### Dividerless Hardware Fullness Estimator Algorithm

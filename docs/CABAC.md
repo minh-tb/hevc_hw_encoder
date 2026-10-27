@@ -148,11 +148,11 @@ $$\text{rLPS} = \text{LUT}[\text{pStateIdx}][(\text{Range} \gg 6) \,\&\, 3]$$
 - **When $\text{bin} == \text{valMPS}$**:
   $$\text{Range} \leftarrow \text{Range} - \text{rLPS}$$
   $$\text{Low} \leftarrow \text{Low}$$
-  $$\text{pStateIdx} \leftarrow \text{MPS\_State\_Transition}(\text{pStateIdx})$$
+  $$\text{pStateIdx} \leftarrow \text{Trans}_{\text{MPS}}(\text{pStateIdx})$$
 - **When $\text{bin} \neq \text{valMPS}$**:
   $$\text{Low} \leftarrow \text{Low} + (\text{Range} - \text{rLPS})$$
   $$\text{Range} \leftarrow \text{rLPS}$$
-  $$\text{pStateIdx} \leftarrow \text{LPS\_State\_Transition}(\text{pStateIdx})$$
+  $$\text{pStateIdx} \leftarrow \text{Trans}_{\text{LPS}}(\text{pStateIdx})$$
   $$\text{If } \text{pStateIdx} == 0: \quad \text{valMPS} \leftarrow 1 - \text{valMPS}$$
 
 ### Bypass Coding (Equiprobable Bins)
