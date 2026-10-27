@@ -201,7 +201,11 @@ module tb_b_frame_encoder;
         .cfg_gop_structure(`DEFAULT_GOP_STRUCTURE),
         .cfg_rc_enable(CFG_RC[0]),
         .cfg_target_bitrate_kbps(CFG_BITRATE),
+`ifdef CFG_SAO_ENABLE
+        .cfg_sao_enable(1'b1),
+`else
         .cfg_sao_enable(1'b0),
+`endif
         .status_vbv_fullness_pct()
     );
 

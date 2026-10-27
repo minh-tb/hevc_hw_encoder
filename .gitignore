@@ -56,6 +56,10 @@ greybox_tmp/
 *.qws
 *.jou
 *.backup.jou
+*.backup.log
+tonghop/
+*.qpf
+*.qsf
 cabac_enc_top.*
 synth/synth_log.txt
 
@@ -84,5 +88,5 @@ synth/vivado_output/
 synth/vivado_output_dct/
 
 # Documentation & visual dashboards (local / non-repo)
-walkthrough*.md
+/walkthrough*.md
 visual_verification_dashboard.html

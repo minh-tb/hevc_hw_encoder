@@ -42,16 +42,8 @@ read_verilog -sv $header_files
 
 set rtl_files [list \
     "rtl/common/axi_read_arbiter.v" \
-    "rtl/common/clk_gate.v" \
-    "rtl/common/fifo_sync.v" \
     "rtl/common/hadamard_satd_4x4.v" \
-    "rtl/common/pipeline_reg.v" \
-    "rtl/common/ram_dp_10b.v" \
-    "rtl/common/ram_sp_generic.v" \
-    "rtl/common/radix2_div_signed.v" \
-    "rtl/entropy/bin_decoder.v" \
     "rtl/entropy/bin_encoder.v" \
-    "rtl/entropy/cabac_dec_top.v" \
     "rtl/entropy/cabac_enc_top.v" \
     "rtl/entropy/coeff_buffer.v" \
     "rtl/entropy/ctx_model_store.v" \
@@ -59,9 +51,6 @@ set rtl_files [list \
     "rtl/entropy/range_coder.v" \
     "rtl/entropy/syntax_coeff.v" \
     "rtl/entropy/syntax_cu.v" \
-    "rtl/entropy/syntax_dec_coeff.v" \
-    "rtl/entropy/syntax_dec_cu.v" \
-    "rtl/entropy/syntax_dec_pred.v" \
     "rtl/entropy/syntax_pred.v" \
     "rtl/entropy/syntax_sao.v" \
     "rtl/inloop_filters/boundary_strength.v" \
@@ -72,11 +61,7 @@ set rtl_files [list \
     "rtl/inloop_filters/sao_edge_offset.v" \
     "rtl/inloop_filters/sao_stats.v" \
     "rtl/inloop_filters/sao_top.v" \
-    "rtl/inloop_filters/sao_window_buffer.v" \
-    "rtl/input_output/input_buffer.v" \
-    "rtl/input_output/nal_parser.v" \
     "rtl/input_output/nal_writer.v" \
-    "rtl/input_output/output_fifo.v" \
     "rtl/inter/fme_search.v" \
     "rtl/inter/hpel_filter_chroma.v" \
     "rtl/inter/hpel_filter_luma.v" \
@@ -85,7 +70,6 @@ set rtl_files [list \
     "rtl/inter/mvp_predictor.v" \
     "rtl/inter/ref_frame_buffer.v" \
     "rtl/inter/sad_4x4.v" \
-    "rtl/inter/sad_8x8.v" \
     "rtl/inter/streaming_subpel_filter.v" \
     "rtl/inter/subpel_interpolation_core.v" \
     "rtl/inter/tz_search.v" \
@@ -110,9 +94,7 @@ set rtl_files [list \
     "rtl/top/address_generator.v" \
     "rtl/top/decoder_inloop_filters.v" \
     "rtl/top/gop_controller.v" \
-    "rtl/top/hevc_decoder_top.v" \
     "rtl/top/hevc_encoder_top.v" \
-    "rtl/top/prediction_unit.v" \
     "rtl/top/slice_controller.v" \
     "rtl/transform/transform_1d_core.v" \
     "rtl/transform/transpose_ram_32x32.v" \
@@ -128,7 +110,7 @@ read_xdc "synth/hevc_encoder_top.xdc"
 puts "================================================================="
 puts " Running synth_design on $top_module..."
 puts "================================================================="
-synth_design -top $top_module -part $target_part -mode out_of_context -verilog_define {SYNTHESIS=1 REMEDIATION=1}
+synth_design -top $top_module -part $target_part -mode out_of_context -include_dirs {rtl/common} -verilog_define {SYNTHESIS=1 REMEDIATION=1}
 
 # 5. Export Synthesized Design Checkpoint (.dcp)
 puts "================================================================="

@@ -6,7 +6,7 @@
 **Standard References:** ITU-T Recommendation H.265 (Clauses 7, 8.4, 8.5, 8.6, 8.7, 9.3, Annex E)  
 **Software Benchmark:** Fraunhofer Heinrich-Hertz-Institut HM 18.0 Reference Software  
 **Simulator Environment:** Mentor Graphics ModelSim Altera Starter Edition 10.1d (`win32aloem`)  
-**Automated Regression Suite:** `scripts/run_all_flaw_tb.py` & `tb/modelsim_regression.do`  
+**Automated Regression Suite:** `scripts/run_all_flaw_tb.py`  
 **Status:** ALL 14 ALGORITHMIC FLAWS EMPIRICALLY REPRODUCED AND REMEDIATED (100% DUAL-STATE VERIFIED, REQUIREMENT R4 CONFORMANT)
 
 ---
@@ -700,7 +700,7 @@
 
 ---
 
-## 8. Master Automated Regression Log (`scripts/run_all_flaw_tb.py` and `tb/modelsim_regression.do`)
+## 8. Master Automated Regression Log (`scripts/run_all_flaw_tb.py`)
 
 ### 8.1 Automated Python Batch Regression (`scripts/run_all_flaw_tb.py`)
 Execution command in repository root `d:\UIT_Doc\hevc_hw_encoder`:
@@ -792,13 +792,6 @@ D-05     | Partitioning           | tb_flaw_cu_split         | PROVEN (FAIL)    
 D-12     | Rate Control           | tb_flaw_lambda_rc        | PROVEN (FAIL)    | PASS (100%)     
 ================================================================================
 ```
-
-### 8.2 ModelSim DO Macro Batch Execution (`tb/modelsim_regression.do`)
-Execution command:
-```powershell
-C:\altera\13.0sp1\modelsim_ase\win32aloem\vsim.exe -c -do "do tb/modelsim_regression.do"
-```
-The macro compiles and executes all 14 testbenches sequentially without interruption, confirming 100% dual-state parity between the Python test runner and native ModelSim automation.
 
 ---
 

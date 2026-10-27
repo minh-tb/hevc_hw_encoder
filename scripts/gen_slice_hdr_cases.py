@@ -60,9 +60,9 @@ def gen():
     lines.append("            end")
     lines.append("        endcase")
     
-    with open("slice_cases.vh", "w") as f:
+    with open("rtl/common/slice_cases.vh", "w") as f:
         f.write("\n".join(lines))
-    print(f"Generated {len(lines)} lines in slice_cases.vh")
+    print(f"Generated {len(lines)} lines in rtl/common/slice_cases.vh")
 
 if __name__ == "__main__":
     gen()

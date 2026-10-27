@@ -8,6 +8,7 @@ and synchronizes visual verification artifacts.
 
 import os
 import sys
+import glob
 import struct
 import math
 import subprocess
@@ -199,27 +200,32 @@ def main():
         print(f"Error: Bitstream {bitstream} not found.")
         return
 
-    # Standard HEVC decoding with in-loop deblocking filter enabled
-    dec_env = os.environ.copy()
-    dec_env.pop("DISABLE_LOOP_FILTERS", None)
-    print("Running HM 18.0 Reference Decoder on str_b_frame.bin (In-Loop Filters Enabled)...")
-    cmd = [decoder_exe, "-b", bitstream, "-o", decoded_yuv, "-d", "10"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=dec_env)
-    print("HM Decoder Output Summary:")
-    poc_lines = [l for l in proc.stdout.splitlines() if "POC" in l or "Total Time" in l]
-    for pl in poc_lines:
-        print("  " + pl)
-    if proc.stderr:
-        print("HM Decoder Stderr:", proc.stderr)
-    print(f"HM Return Code: {proc.returncode}")
+
+    frame_y_size = WIDTH * HEIGHT
+    frame_c_size = (WIDTH // 2) * (HEIGHT // 2)
+    samples_per_frame = frame_y_size + 2 * frame_c_size
+
+    # Standard HEVC decoding with in-loop deblocking filter enabled if needed
+    if not os.path.exists(decoded_yuv) or os.path.getsize(decoded_yuv) < samples_per_frame * 2 * 3:
+        dec_env = os.environ.copy()
+        dec_env.pop("DISABLE_LOOP_FILTERS", None)
+        print("Running HM 18.0 Reference Decoder on str_b_frame.bin (In-Loop Filters Enabled)...")
+        cmd = [decoder_exe, "-b", bitstream, "-o", decoded_yuv, "-d", "10"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=dec_env)
+        print("HM Decoder Output Summary:")
+        poc_lines = [l for l in proc.stdout.splitlines() if "POC" in l or "Total Time" in l]
+        for pl in poc_lines:
+            print("  " + pl)
+        if proc.stderr:
+            print("HM Decoder Stderr:", proc.stderr)
+        print(f"HM Return Code: {proc.returncode}")
+    else:
+        print(f"Reusing existing reference decoded YUV: {decoded_yuv} ({os.path.getsize(decoded_yuv)} bytes)")
 
     if not os.path.exists(decoded_yuv):
         print(f"Error: Decoded YUV {decoded_yuv} was not generated.")
         return
 
-    frame_y_size = WIDTH * HEIGHT
-    frame_c_size = (WIDTH // 2) * (HEIGHT // 2)
-    samples_per_frame = frame_y_size + 2 * frame_c_size
 
     if not os.path.exists(orig_yuv):
         print(f"Error: Ground truth {orig_yuv} not found.")
@@ -406,6 +412,13 @@ def main():
         if os.path.exists(ARTIFACT_DIR):
             shutil.copy(out_png, os.path.join(ARTIFACT_DIR, out_png))
             print(f"Copied {out_png} to artifact directory.")
+
+    # Clean up transient BMP files
+    for bmp_f in glob.glob("foreman_frame_*.bmp"):
+        try:
+            os.remove(bmp_f)
+        except OSError:
+            pass
 
     # Check pre-filter bit-exact match against rec_before_filter.yuv (regenerated above by TAppDecoder.exe)
     pre_filter_yuv = "rec_before_filter.yuv"
