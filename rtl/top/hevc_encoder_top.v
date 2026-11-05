@@ -1088,10 +1088,10 @@ module hevc_encoder_top #(
     //-------------------------------------------------------------------------
     // To make tz_search and residual structurally correct, we need access to the 
     // full original 64x64 block for Luma and 32x32 for Chroma.
-    (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] orig_y_ram     [0:`CTU_LUMA_SAMPLES-1];
-    (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] orig_y_ram_rmd [0:`CTU_LUMA_SAMPLES-1];
-    (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] orig_u_ram     [0:`CTU_CB_SAMPLES-1];
-    (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] orig_v_ram     [0:`CTU_CR_SAMPLES-1];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_y_ram     [0:`CTU_LUMA_SAMPLES-1];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_y_ram_rmd [0:`CTU_LUMA_SAMPLES-1];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_u_ram     [0:`CTU_CB_SAMPLES-1];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_v_ram     [0:`CTU_CR_SAMPLES-1];
     reg [11:0] orig_write_ptr;
 
     // Synchronous 17-cycle pre-fetcher for search_orig_flat using orig_y_ram_rmd
@@ -1137,13 +1137,18 @@ module hevc_encoder_top #(
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) orig_write_ptr <= 12'd0;
         else if (in_valid && in_ready) begin
+            orig_write_ptr <= orig_write_ptr + 12'd1;
+        end else if (ctu_done_pulse || ctu_frame_done) begin
+            orig_write_ptr <= 12'd0;
+        end
+    end
+
+    always @(posedge clk) begin
+        if (in_valid && in_ready) begin
             orig_y_ram[orig_write_ptr]     <= in_pixel_y;
             orig_y_ram_rmd[orig_write_ptr] <= in_pixel_y;
             orig_u_ram[{orig_write_ptr[11:7], orig_write_ptr[5:1]}] <= in_pixel_u;
             orig_v_ram[{orig_write_ptr[11:7], orig_write_ptr[5:1]}] <= in_pixel_v;
-            orig_write_ptr <= orig_write_ptr + 12'd1;
-        end else if (ctu_done_pulse || ctu_frame_done) begin
-            orig_write_ptr <= 12'd0;
         end
     end
 
@@ -1355,15 +1360,11 @@ module hevc_encoder_top #(
     //-------------------------------------------------------------------------
     // TU Sequencer & Neighbor Buffer for Intra Prediction
     //-------------------------------------------------------------------------
-`ifdef SYNTHESIS
-    (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] recon_y_ram [0:`CTU_LUMA_SAMPLES-1]; // CTU Luma recon buffer
-    (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] recon_u_ram [0:`CTU_CB_SAMPLES-1];   // CTU Chroma U recon buffer
-    (* ramstyle = "M10K, no_rw_check" *) reg [`PIXEL_WIDTH-1:0] recon_v_ram [0:`CTU_CR_SAMPLES-1];   // CTU Chroma V recon buffer
-`else
-    reg [`PIXEL_WIDTH-1:0] recon_y_ram [0:`CTU_LUMA_SAMPLES-1]; // CTU Luma recon buffer
-    reg [`PIXEL_WIDTH-1:0] recon_u_ram [0:`CTU_CB_SAMPLES-1];   // CTU Chroma U recon buffer
-    reg [`PIXEL_WIDTH-1:0] recon_v_ram [0:`CTU_CR_SAMPLES-1];   // CTU Chroma V recon buffer
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] recon_y_ram [0:`CTU_LUMA_SAMPLES-1]; // CTU Luma recon buffer
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] recon_u_ram [0:`CTU_CB_SAMPLES-1];   // CTU Chroma U recon buffer
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] recon_v_ram [0:`CTU_CR_SAMPLES-1];   // CTU Chroma V recon buffer
 
+    // synthesis translate_off
     integer sim_recon_i;
     initial begin
         for (sim_recon_i = 0; sim_recon_i < `CTU_LUMA_SAMPLES; sim_recon_i = sim_recon_i + 1)
@@ -1373,17 +1374,7 @@ module hevc_encoder_top #(
             recon_v_ram[sim_recon_i] = `MID_GRAY_SAMPLE;
         end
     end
-    always @(posedge clk) begin
-        if (sync_frame_done_pulse || !rst_n) begin
-            for (sim_recon_i = 0; sim_recon_i < `CTU_LUMA_SAMPLES; sim_recon_i = sim_recon_i + 1)
-                recon_y_ram[sim_recon_i] <= `MID_GRAY_SAMPLE;
-            for (sim_recon_i = 0; sim_recon_i < `CTU_CB_SAMPLES; sim_recon_i = sim_recon_i + 1) begin
-                recon_u_ram[sim_recon_i] <= `MID_GRAY_SAMPLE;
-                recon_v_ram[sim_recon_i] <= `MID_GRAY_SAMPLE;
-            end
-        end
-    end
-`endif
+    // synthesis translate_on
     
     // CTU Neighbor Line & Column Buffers for Inter-CTU Intra Prediction
     reg [`PIXEL_WIDTH-1:0] line_buf_y  [0:FRAME_WIDTH-1];
@@ -1447,23 +1438,33 @@ module hevc_encoder_top #(
             end
         end else if (recon_out_valid) begin
             if (recon_out_comp == 2'd0) begin
-                recon_y_ram[{recon_out_y[5:0], recon_out_x[5:0]}] <= recon_out_pixel;
                 if (recon_out_y[5:0] == 6'd63) line_buf_y[abs_recon_x] <= recon_out_pixel;
                 if (recon_out_x[5:0] == 6'd63) col_buf_y[recon_ctu_x[1:0]][recon_out_y[5:0]] <= recon_out_pixel;
                 if (recon_out_x[5:0] == 6'd63 && recon_out_y[5:0] == 6'd63)
                     ctu_corner_y[recon_ctu_x[1:0]][recon_ctu_y[1:0]] <= recon_out_pixel;
             end else if (recon_out_comp == 2'd1) begin
-                recon_u_ram[{recon_out_y[4:0], recon_out_x[4:0]}] <= recon_out_pixel;
                 if (recon_out_y[4:0] == 5'd31) line_buf_u[abs_recon_x_chr] <= recon_out_pixel;
                 if (recon_out_x[4:0] == 5'd31) col_buf_u[recon_ctu_x[1:0]][recon_out_y[4:0]] <= recon_out_pixel;
                 if (recon_out_x[4:0] == 5'd31 && recon_out_y[4:0] == 5'd31)
                     ctu_corner_u[recon_ctu_x[1:0]][recon_ctu_y[1:0]] <= recon_out_pixel;
             end else if (recon_out_comp == 2'd2) begin
-                recon_v_ram[{recon_out_y[4:0], recon_out_x[4:0]}] <= recon_out_pixel;
                 if (recon_out_y[4:0] == 5'd31) line_buf_v[abs_recon_x_chr] <= recon_out_pixel;
                 if (recon_out_x[4:0] == 5'd31) col_buf_v[recon_ctu_x[1:0]][recon_out_y[4:0]] <= recon_out_pixel;
                 if (recon_out_x[4:0] == 5'd31 && recon_out_y[4:0] == 5'd31)
                     ctu_corner_v[recon_ctu_x[1:0]][recon_ctu_y[1:0]] <= recon_out_pixel;
+            end
+        end
+    end
+
+    // Pure synchronous write for CTU Reconstruction Block RAMs
+    always @(posedge clk) begin
+        if (recon_out_valid) begin
+            if (recon_out_comp == 2'd0) begin
+                recon_y_ram[{recon_out_y[5:0], recon_out_x[5:0]}] <= recon_out_pixel;
+            end else if (recon_out_comp == 2'd1) begin
+                recon_u_ram[{recon_out_y[4:0], recon_out_x[4:0]}] <= recon_out_pixel;
+            end else if (recon_out_comp == 2'd2) begin
+                recon_v_ram[{recon_out_y[4:0], recon_out_x[4:0]}] <= recon_out_pixel;
             end
         end
     end
@@ -1641,24 +1642,6 @@ module hevc_encoder_top #(
 
     wire recon_rd_valid = any_neighbor_available;
 
-`ifdef SYNTHESIS
-    reg [9:0] recon_y_rd_q, recon_u_rd_q, recon_v_rd_q;
-    always @(posedge clk) begin
-        recon_y_rd_q <= recon_y_ram[recon_rd_addr];
-        recon_u_rd_q <= recon_u_ram[recon_rd_addr[9:0]];
-        recon_v_rd_q <= recon_v_ram[recon_rd_addr[9:0]];
-    end
-    wire [9:0] recon_sample_synth = (reg_tu_comp == 2'd0) ? recon_y_rd_q :
-                                   (reg_tu_comp == 2'd1) ? recon_u_rd_q :
-                                                           recon_v_rd_q;
-    wire [9:0] first_top_sample  = recon_sample_synth;
-    wire [9:0] first_left_sample = recon_sample_synth;
-
-    reg [9:0] recon_val_wire;
-    always @(*) begin
-        recon_val_wire = recon_sample_synth;
-    end
-`else
     // First available top sample for sample substitution when left is unavailable
     wire [9:0] first_top_sample = 
         (reg_tu_y > 0) ? (is_luma_comp ? recon_y_ram[{reg_tu_y - 6'd1, reg_tu_x}] :
@@ -1744,7 +1727,6 @@ module hevc_encoder_top #(
             end
         end
     end
-`endif
 
     reg recon_rd_valid_q;
     reg [9:0] recon_ram_q;
@@ -1846,17 +1828,6 @@ module hevc_encoder_top #(
     wire rmd_corner_available = rmd_top_available && rmd_left_available;
     wire rmd_any_available    = rmd_top_available || rmd_left_available;
 
-`ifdef SYNTHESIS
-    wire [9:0] rmd_first_top_sample  = recon_sample_synth;
-    wire [9:0] rmd_first_left_sample = recon_sample_synth;
-
-    reg [9:0] rmd_recon_val_wire;
-    always @(*) begin
-        rmd_recon_rd_addr  = 12'd0;
-        rmd_recon_rd_valid = rmd_any_available;
-        rmd_recon_val_wire = recon_sample_synth;
-    end
-`else
     wire [9:0] rmd_first_top_sample = 
         (rmd_latched_pu_y > 0) ? recon_y_ram[{rmd_latched_pu_y - 6'd1, rmd_latched_pu_x}] :
         (rmd_latched_ctu_y > 0) ? line_buf_y[{6'd0, rmd_latched_ctu_x, 6'd0} + {6'd0, rmd_latched_pu_x}] :
@@ -1923,7 +1894,6 @@ module hevc_encoder_top #(
             end
         end
     end
-`endif
 
     // Pipeline for RMD ref samples (1-cycle SRAM latency)
     always @(posedge clk) begin
@@ -2049,12 +2019,12 @@ module hevc_encoder_top #(
     // Memory replication pattern: dpb_*_ram_l0 and dpb_*_ram_l1 each store the full
     // 2-slot DPB (32768 samples = 2 slots of 128x128). Replicated so FPGA M10K/BRAM
     // can provide two independent read ports (one for ref_l0, one for ref_l1) alongside the write port.
-    (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_luma_ram_l0 [0:32767];
-    (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_luma_ram_l1 [0:32767];
-    (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_cb_ram_l0   [0:8191];
-    (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_cb_ram_l1   [0:8191];
-    (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_cr_ram_l0   [0:8191];
-    (* ramstyle = "M10K, no_rw_check" *) reg [9:0] dpb_cr_ram_l1   [0:8191];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_luma_ram_l0 [0:32767];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_luma_ram_l1 [0:32767];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_cb_ram_l0   [0:8191];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_cb_ram_l1   [0:8191];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_cr_ram_l0   [0:8191];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_cr_ram_l1   [0:8191];
 
     always @(posedge clk) begin
         if (filter_out_valid && filter_out_ready) begin
@@ -2314,7 +2284,6 @@ module hevc_encoder_top #(
                                            : clip_bd10((interm_val_l0 + 32'sd8) >>> 4);
 
     assign inter_pred_pixel = pred_inter_val;
-
 `endif
 
     wire        intra_out_valid;

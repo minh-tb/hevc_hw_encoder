@@ -115,7 +115,7 @@ graph LR
 ### 3.1 AXI4-Lite Control & Status Registers (Base Address + Offset)
 | Offset | Register Name | Access | Reset Default | Bitfield Definitions |
 |:---|:---|:---:|:---:|:---|
-| `0x00` | `CONTROL` | RW | `0x00000000` | `bit [0]`: **START** (Write 1 triggers `encode_start` single-cycle pulse; self-clearing)<br>`bit [1]`: **SOFT_RESET** (Active-high soft reset to core)<br>`bit [2]`: **IRQ_EN** (1 = Enable interrupt assertion on frame/session completion) |
+| `0x00` | `CONTROL` | RW | `0x00000000` | `bit [0]`: **START** (Write 1 triggers `encode_start` single-cycle pulse; self-clearing)<br>`bit [1]`: **SOFT_RESET** (Active-high soft reset driving synchronous reset register `core_rst_n_reg` to core, `0 LUTAR-1` warnings)<br>`bit [2]`: **IRQ_EN** (1 = Enable interrupt assertion on frame/session completion) |
 | `0x04` | `STATUS` | RO | `0x00000004` | `bit [0]`: **DONE** (Encoding session completed)<br>`bit [1]`: **BUSY** (Encoder core currently active)<br>`bit [2]`: **READY** (Encoder idle, ready for start pulse) |
 | `0x08` | `IRQ_STATUS` | RW1C | `0x00000000` | `bit [0]`: **IRQ_PENDING** (Read: interrupt pending; Write 1: acknowledge/clear interrupt) |
 | `0x0C` | `TOTAL_FRAMES` | RW | `0x00000001` | `bits [15:0]`: `total_frames` to encode before asserting `encode_done` |
@@ -224,11 +224,11 @@ graph TD
 | 18 | `u_fwd_quant` | `fwd_quant` | `dct_out_data`, `frame_qp`, `tu_size_log2` | `quant_out_level`, `quant_out_cbf` | Deadzone scalar quantization and Coded Block Flag generation. |
 | 19 | `u_inv_quant` | `inv_quant` | `quant_out_level`, `frame_qp` | `inv_quant_out_coeff` | Dequantizes transform coefficients for the local reconstruction feedback loop. |
 | 20 | `u_s2p_addr_gen` | `address_generator` | `ref_req_x`, `ref_req_y`, `ref_slot` | `fs_araddr`, `fs_arlen` | Serial-to-parallel memory address generator for reference frame read requests. |
-| 21 | `u_recon_unit` | `recon_unit` | `pred_pixel`, `idct_out_data` | `recon_out_pixel` ($10\text{-bit}$) | Reconstructs pixels: $\text{Clip Main10}(\text{Pred} + \text{IDCT}_{\text{res}}) \in [0..1023]$. |
-| 22 | `u_inloop_filters` | `decoder_inloop_filters` | `recon_out_pixel`, `cu_map_*`, `nbr_*` | `filt_out_pixel`, `inloop_ctu_done` | Dual in-loop filter subsystem combining `deblock_top` and `sao_top`. |
-| 23 | `u_frame_store` | `frame_store` | `recon_out_pixel`, `filt_out_pixel` | `ref_resp_data`, `axi_wdata` | Multi-bank on-chip reconstructed pixel buffer and DMA interface. |
+| 21 | `u_recon_unit` | `recon_unit` | `pred_pixel`, `idct_out_data` | `recon_out_pixel` ($10\text{-bit}$) | Reconstructs pixels: $\text{Clip Main10}(\text{Pred} + \text{IDCT}_{\text{res}}) \in [0..1023]$ (`1 RAMB36E2, 1 RAMB18E2`). |
+| 22 | `u_inloop_filters` | `decoder_inloop_filters` | `recon_out_pixel`, `cu_map_*`, `nbr_*`, `out_ready` | `filt_out_pixel`, `out_valid`, `inloop_ctu_done` | Dual in-loop filter subsystem (`deblock_top` + `sao_top`) with synchronous BRAM CTU buffers and decoupled `dump_valid_q` streaming handshake. |
+| 23 | `u_frame_store` | `frame_store` | `recon_out_pixel`, `filt_out_pixel` | `ref_resp_data`, `axi_wdata` | Multi-bank on-chip reconstructed pixel buffer (`28 RAMB36E2, 8 RAMB18E2` in top DPB) and DMA interface. |
 | 24 | `u_axi_read_arbiter` | `axi_read_arbiter` | `fs_arvalid`, `tz_arvalid`, `mc_arvalid` | `axi_arvalid`, `axi_araddr` | Round-robin arbitration for external DRAM read requests across search and filter engines. |
 | 25 | `u_coeff_buffer` | `coeff_buffer` | `quant_out_level`, `coeff_rd_addr` | `coeff_rd_data` | Dual-port SRAM buffer decoupling fast Reconstruction from CABAC serialization. |
-| 26 | `u_cabac_enc_top` | `cabac_enc_top` | `wire_cu_req`, `pred_req`, `coeff_req`, `sao_req` | `rbsp_byte`, `rbsp_valid` | M-coder entropy coder with 154 contexts, binarizers, and single-cycle renormalization. |
+| 26 | `u_cabac_enc_top` | `cabac_enc_top` | `wire_cu_req`, `pred_req`, `coeff_req`, `sao_req` | `rbsp_byte`, `rbsp_valid` | M-coder entropy coder with 154 contexts, binarizers, and single-cycle renormalization (`5,300 LUTs, 2,320 FFs`). |
 | 27 | `u_nal_writer` | `nal_writer` | `rbsp_byte`, `rbsp_valid`, `nal_type` | `out_byte`, `out_valid` | Packs RBSP into Annex B NAL units with `0x00000001` headers and emulation prevention. |
 

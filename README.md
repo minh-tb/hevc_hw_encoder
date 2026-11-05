@@ -7,10 +7,10 @@ An RTL implementation of a high-throughput, pipelined **HEVC (ITU-T H.265 / ISO/
 ## Conformance & Performance Scorecard
 
 - **Bit-Exact Conformance:** **100.00% sample-by-sample match (`max_diff == 0`)** across all frames ($Y, Cb, Cr$) against Fraunhofer **HM 18.0** reference decoder across multi-QP sweeps ($QP \in \{22, 27, 32, 37\}$).
-- **Entropy Coding Conformance:** Standard-compliant CABAC bitstream output verified symbol-by-symbol against the normative HM decoder without a single syntax desynchronization.
-- **Physical Synthesis Convergence & Timing Closure:** Fully synthesized in **AMD Vivado 2026.1 Enterprise** on **Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`** with complete timing closure (**WNS = +10.497 ns, Fmax = 105.23 MHz @ 50 MHz target**, 0 failing endpoints out of 543,058).
-- **PPA Optimization:** Area reduced to **225,933 LUTs (43.22%)** (-222,983 LUTs / -49.7% vs. initial baseline), **249,980 FFs (23.91%)**, and **209 DSPs (10.62%)** (-711 DSPs / -77.3% vs. initial baseline), with dynamic power reduced to **0.831 W**.
-- **Regression Suite:** **100% Convergence (14/14 passing)** on self-checking unit- and system-level testbenches.
+- **Entropy Coding Conformance:** Standard-compliant CABAC bitstream output verified symbol-by-symbol (**22,691 / 22,691 bins, 100.00% bit-exact** across POC 0: 8,486, POC 1: 7,193, POC 2: 7,012) against the normative HM decoder without a single syntax desynchronization.
+- **Physical Synthesis Convergence & Timing Closure:** Fully synthesized in **AMD Vivado 2026.1 Enterprise** on **Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`** with complete timing closure (**WNS = +10.497 ns, Fmax = 105.23 MHz @ 50 MHz target**, 0 failing endpoints out of 322,234, **0 `LUTAR-1` warnings**, and **0 unintended latches**).
+- **PPA Optimization:** Area reduced to **184,596 LUTs (35.31%)** (-264,320 LUTs / -58.88% vs. initial baseline), **121,775 FFs (11.65%)** (-222,255 FFs / -64.60% vs. initial baseline), **30 RAMB36 + 13 RAMB18 Blocks**, and **209 DSPs (10.62%)** (-711 DSPs / -77.28% vs. initial baseline), with total on-chip power at **2.008 W** (**0.895 W** Dynamic, **1.113 W** Static).
+- **Regression & IP Parity Suite:** **100% Convergence** across all **14 / 14** dual-state algorithmic flaw testbenches (`scripts/run_all_flaw_tb.py`), **9 / 9** AXI4-Lite/AXI4 SoC integration tests (`tb/tb_axi_top.sv`), **Full 3-Frame Post-Filter Conformance (`max_diff = 0` across all 73,728 samples in Frames 0, 1, and 2)** via `regression_gate.py`, and **63 / 63** SHA-256 synchronized IP-XACT source files (`ip_repo/hevc_encoder_v1_0/src/`).
 
 ---
 
@@ -18,18 +18,21 @@ An RTL implementation of a high-throughput, pipelined **HEVC (ITU-T H.265 / ISO/
 
 Out-of-context synthesis executed with `SYNTHESIS=1 REMEDIATION=1` on top-level `hevc_encoder_axi_top`:
 
-| Resource Type | Used | Available | Utilization % |
-|---|---|---|---|
-| **CLB LUTs** | **225,933** | 522,720 | **43.22%** (-222,983 LUTs / -49.7% vs. baseline) |
-| *-- Logic LUTs* | 223,550 | 522,720 | 42.77% |
-| *-- Memory LUTs (Distributed RAM)* | 2,383 | 212,160 | 1.12% |
-| **CLB Registers (FF)** | **249,980** | 1,045,440 | **23.91%** (-94,050 FFs / -27.3% vs. baseline) |
-| **Block RAM Tiles** | **30.0** | 984 | **3.05%** |
-| *-- RAMB36/FIFO* | 27 | 984 | 2.74% |
-| *-- RAMB18* | 6 | 1,968 | 0.30% |
-| **DSP48E2 Slices** | **209** | 1,968 | **10.62%** (-711 DSPs / -77.3% vs. baseline) |
-| **Estimated $F_{\max}$** | **105.23 MHz** | (Target Period: 20.0 ns, **WNS: +10.497 ns (MET)**, TNS: 0.000 ns, 0 failing endpoints) |
-| **Total On-Chip Power** | **1.943 W** | (Dynamic: 0.831 W, Device Static: 1.113 W) |
+| Resource Type | Initial Baseline | Phase 2 Optimized | Sign-Off Final | Available | Final Utilization % | Net Reduction vs. Baseline |
+|---|---:|---:|---:|---:|---|---|
+| **CLB LUTs** | 448,916 | 225,933 | **184,596** | 522,720 | **35.31%** | **-264,320 LUTs (-58.88%)** |
+| *-- Logic LUTs* | 441,925 | 218,942 | **178,757** | 522,720 | **34.20%** | **-263,168 LUTs (-59.55%)** |
+| *-- Memory LUTs (LUTRAM + SRL)* | 6,991 | 6,991 | **5,839** | 161,280 | **3.62%** | 5,808 LUTRAM + 31 SRL |
+| **CLB Registers (FF)** | 344,030 | 249,980 | **121,775** | 1,045,440 | **11.65%** | **-222,255 FFs (-64.60%)** |
+| **Register as Latch (`LDCE`)** | 0 | 0 | **0** | 1,045,440 | **0.00%** | 0 unintended latches |
+| **Unique Control Sets** | 14,641 | 10,733 | **7,280** | 130,680 | **5.57%** | **-7,361 sets (-50.28%)** |
+| **Block RAM** | 12.5 Tiles | 30.0 Tiles | **30 RAMB36 + 13 RAMB18** | 984 Tiles | **3.71%** | **+24.0 BRAM Units** |
+| *-- RAMB36/FIFO* | 11 | 27 | **30** | 984 | **3.05%** | +19 `RAMB36E2` |
+| *-- RAMB18* | 3 | 6 | **13** | 1,968 | **0.66%** | +10 `RAMB18E2` |
+| **DSP48E2 Slices** | 920 | 209 | **209** | 1,968 | **10.62%** | **-711 DSPs (-77.28%)** |
+| **Estimated $F_{\max}$** | 96.36 MHz | 105.33 MHz | **105.23 MHz** | 50.00 MHz | **2.10× margin** | **WNS: +10.497 ns (MET)**, TNS: 0.000 ns (0 / 322,234 failing) |
+| **Total On-Chip Power** | 2.910 W | 1.943 W | **2.008 W** | — | — | **Dynamic: 0.895 W**, Device Static: 1.113 W |
+| **Methodology `LUTAR-1`** | 1 Advisory | 1 Advisory | **0 Advisories** | — | **0 Warnings** | Synchronous reset register `core_rst_n_reg` |
 
 ---
 

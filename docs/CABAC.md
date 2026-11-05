@@ -159,5 +159,6 @@ $$\text{rLPS} = \text{LUT}[\text{pStateIdx}][(\text{Range} \gg 6) \,\&\, 3]$$
 $$\text{Low} \leftarrow (\text{Low} \ll 1) + (\text{bin} ? \text{Range} : 0)$$
 $$\text{Range} \leftarrow \text{Range}$$
 
-### Conformance Verification
-The CABAC engine achieves **100.00% bit-exact conformance across all 22,745 bins** against HM 18.0 reference decoder traces (`TAppDecoder.exe`) across all frame types ($I$, $P$, $B$).
+### Conformance Verification & Synthesis Footprint
+- **Bit-Exact Bin Conformance**: The CABAC engine achieves **100.00% bit-exact conformance across all 22,691 bins** (`POC 0`: `8,486/8,486`, `POC 1`: `7,193/7,193`, `POC 2`: `7,012/7,012`) against HM 18.0 reference decoder traces (`TAppDecoder.exe`) across all frame types ($I$, $P$, $B$).
+- **UltraScale+ Synthesis Footprint (`xczu19eg-ffvb1517-2-e`)**: `cabac_enc_top` synthesizes to **5,300 CLB LUTs** and **2,320 Flip-Flops** (`0 DSPs`) with zero timing violations (`u_sc`: `2,683 LUTs, 717 FFs`; `u_ctx`: `1,240 LUTs, 1,335 FFs`; `u_rc`: `765 LUTs, 109 FFs`; `u_sp`: `302 LUTs, 109 FFs`; `u_be`: `233 LUTs, 10 FFs`).

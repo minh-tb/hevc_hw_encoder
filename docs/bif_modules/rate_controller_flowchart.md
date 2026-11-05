@@ -62,8 +62,8 @@ flowchart TD
     end
 
     %% Lambda Derivation
-    subgraph Lambda_Stage ["4. Tính Toán Hệ số Lambda RDO (lambda_calc.v)"]
-        CalcLambda["Tính hệ số Lagrangian Multiplier:<br/>&lambda; = 0.57 &times; 2^((frame_qp - 12) / 3)<br/>Truyền &lambda; sang mode_decision.v để tối ưu hóa RD Cost"]
+    subgraph Lambda_Stage ["4. Tính Toán Hệ số Lambda RDO Main10 (lambda_calc.v)"]
+        CalcLambda["Tính hệ số Lagrangian Multiplier Main10:<br/>&lambda;_mode = 0.57 &times; 2^(frame_qp / 3) &times; 4.0 (28-bit Q16.8)<br/>Truyền &lambda; sang mode_decision.v để tối ưu hóa RD Cost"]
     end
 
     %% Stream Connections

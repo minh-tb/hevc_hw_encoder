@@ -98,9 +98,9 @@ $$J = D + \lambda \cdot R$$
   - For Inter AMVP: Sub-pel SAD from `fme_search`.
   - For Merge / Skip: Motion-compensated difference against current block.
 - **Lagrangian Multiplier ($\lambda$)**:
-  Derived dynamically in [`lambda_calc.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/rate_control/lambda_calc.v) from QP:
-  $$\lambda = 0.57 \cdot 2^{(\text{QP} - 12) / 3}$$
-  In hardware, this is computed using an on-chip LUT or shift-multiplier tree with fixed-point $Q8.8$ scaling.
+  Derived dynamically in [`lambda_calc.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/rate_control/lambda_calc.v) from QP with Main10 10-bit bit-depth scaling ($2^{2\cdot(\text{BitDepth}-8)} = 4.0$):
+  $$\lambda_{\text{mode}} = 0.57 \cdot 2^{\text{QP} / 3.0} \cdot 4.0, \quad \lambda_{\text{motion}} = \sqrt{\lambda_{\text{mode}}}$$
+  In hardware, this is computed via a 52-entry Q16.8 fixed-point LUT (`lambda_mode [27:0]`, `lambda_motion [17:0]`, `lambda_chroma [27:0]`), preventing 32-bit overflow and guarding `32'hFFFFFFFF` sentinel RD costs at depth 0 ($64\times 64$).
 
 ---
 

@@ -204,7 +204,15 @@ module hevc_encoder_axi_top #(
     wire [15:0] status_vbv_fullness_pct;
 
     // Active-low soft reset combined with hardware pin reset
-    assign core_rst_n = rst_n & (~reg_soft_rst);
+    // Synchronized to clk to eliminate glitchy combinational LUT driving async clear (LUTAR-1)
+    reg core_rst_n_reg;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            core_rst_n_reg <= 1'b0;
+        else
+            core_rst_n_reg <= ~reg_soft_rst;
+    end
+    assign core_rst_n = core_rst_n_reg;
 
     // Interrupt output: asserted if enabled and event pending
     assign irq = reg_irq_en & irq_status;

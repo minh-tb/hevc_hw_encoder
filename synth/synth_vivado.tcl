@@ -27,8 +27,8 @@ puts "================================================================="
 puts " Starting Vivado Synthesis for $top_module on $target_part"
 puts "================================================================="
 
-# Enable multi-threaded synthesis (up to 8 physical cores if available)
-catch {set_param general.maxThreads 8}
+# Use single-thread on Windows to prevent TclStackFree multithreading allocator crash
+catch {set_param general.maxThreads 1}
 
 # 1. Create in-memory project
 create_project -in_memory -part $target_part

@@ -1,12 +1,14 @@
 # HEVC Main10 Hardware Video Encoder - Complete Regression Execution Results
 
-**Execution Timestamp:** 2026-10-04T16:29:27Z  
-**Regression Runner:** `scripts/run_all_flaw_tb.py`  
-**Toolchain:** ModelSim Altera Starter Edition 10.1d (`vlog.exe`, `vsim.exe` headless batch)  
+**Execution Timestamp:** 2026-11-04T22:55:00+07:00  
+**Regression Runner:** [`scripts/run_all_flaw_tb.py`](file:///d:/UIT_Doc/hevc_hw_encoder/scripts/run_all_flaw_tb.py), [`tb/run_tb_axi.do`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/run_tb_axi.do), [`run_sim.do`](file:///d:/UIT_Doc/hevc_hw_encoder/run_sim.do)  
+**Toolchain:** ModelSim Altera Starter Edition 10.1d (`vlog.exe`, `vsim.exe` headless batch) & AMD Vivado 2026.1 (64-bit)  
 **Host Environment:** Windows PowerShell, Python 3.12.8  
-**Total Test Cases:** 14  
-**Total Wallclock Runtime:** 22.0 seconds  
-**Regression Status:** **100% CONVERGENCE (14/14 PROVEN BUGGY, 14/14 PASS REMEDIATED)**
+**Default RTL State:** `REMEDIATION` enabled by default in [`rtl/common/parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh) (`+define+NO_REMEDIATION` selects legacy unpatched state for dual-mode flaw verification)  
+**Total Flaw Test Cases:** 14 (`18.7 seconds` total wallclock runtime)  
+**Total AXI SoC Test Cases:** 9 (`9 / 9 PASS`)  
+**3-Frame CABAC Bin Conformance:** **22,691 / 22,691 bins (100.00% bit-exact)**  
+**Regression Status:** **100% CONVERGENCE (14/14 PROVEN BUGGY, 14/14 PASS REMEDIATED, 9/9 AXI PASS, 63/63 IP FILES SYNCED)**
 
 ---
 
@@ -117,48 +119,73 @@
 
 ## 3. Physical Implementation & AMD Vivado UltraScale+ Synthesis Conformance
 
-**Synthesis Toolchain:** AMD Vivado 2026.1 Enterprise  
+**Synthesis Toolchain:** AMD Vivado 2026.1 Enterprise (Build 6511674)  
 **Target Part:** `xczu19eg-ffvb1517-2-e` (AMD Zynq UltraScale+ MPSoC)  
 **Synthesis Mode:** Out-of-Context (`-mode out_of_context -verilog_define {SYNTHESIS=1 REMEDIATION=1}`)  
 **Target Module:** `hevc_encoder_axi_top` (Includes core encoder, AXI4 memory controller, and register interfaces)  
-**Status:** **SYNTHESIS CONVERGENCE & TIMING CLOSURE ACHIEVED (Zero Design Errors, Fully Mapped Primitives, WNS > 0)**
+**Status:** **SYNTHESIS CONVERGENCE & TIMING CLOSURE ACHIEVED (0 Errors, 0 Critical Warnings, 0 Latches, 0 `LUTAR-1` Warnings, WNS = +10.497 ns)**
 
-### 3.1 Device Utilization Summary (Baseline vs. Phase 1 vs. Phase 2)
+### 3.1 Device Utilization Summary (Baseline vs. Phase 1 vs. Phase 2 vs. Sign-Off Final)
 
-| Cell / Logic Primitive | Baseline Used | Phase 1 Used | **Phase 2 (Final) Used** | Available | Utilization % | Total Delta / Savings vs Baseline |
-|---|---|---|---|---|---|---|
-| **CLB LUTs** | 448,916 | 342,547 | **225,933** | 522,720 | **43.22%** | **-222,983 LUTs (-49.7%)** |
-| *-- Logic LUTs* | 446,581 | 340,166 | **223,550** | 522,720 | **42.77%** | **-223,031 LUTs (-49.9%)** |
-| *-- LUT as Memory (Distributed RAM)* | 2,335 | 2,381 | **2,383** | 212,160 | **1.12%** | +48 LUTs |
-| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | **249,980** | 1,045,440 | **23.91%** | **-94,050 FFs (-27.3%)** |
-| **Block RAM Tile** | 30.0 | 30.0 | **30.0** | 984 | **3.05%** | 0.0 (Preserved) |
-| *-- RAMB36/FIFO* | 27 | 27 | **27** | 984 | **2.74%** | 0 (Preserved) |
-| *-- RAMB18* | 6 | 6 | **6** | 1,968 | **0.30%** | 0 (Preserved) |
-| **DSP48E2 Slices** | 920 | 878 | **209** | 1,968 | **10.62%** | **-711 DSPs (-77.3%)** |
+| Cell / Logic Primitive | Baseline Used | Phase 1 Used | Phase 2 Used | **Sign-Off Final Used** | Available | Utilization % | Total Delta / Savings vs Baseline |
+|---|---:|---:|---:|---:|---:|---|---|
+| **CLB LUTs** | 448,916 | 342,547 | 225,933 | **184,596** | 522,720 | **35.31%** | **-264,320 LUTs (-58.88%)** |
+| *-- Logic LUTs* | 446,581 | 340,166 | 223,550 | **178,757** | 522,720 | **34.20%** | **-267,824 LUTs (-59.97%)** |
+| *-- LUT as Memory (LUTRAM + SRL)* | 6,991 | 6,991 | 6,991 | **5,839** | 161,280 | **3.62%** | 5,808 LUTRAM + 31 SRL |
+| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | 249,980 | **121,775** | 1,045,440 | **11.65%** | **-222,255 FFs (-64.60%)** |
+| **Register as Latch (`LDCE`)** | 0 | 0 | 0 | **0** | 1,045,440 | **0.00%** | 0 Unintended Latches |
+| **Unique Control Sets** | 14,641 | 10,812 | 10,733 | **7,280** | 130,680 | **5.57%** | **-7,361 sets (-50.28%)** |
+| **Block RAM Tile** | 12.5 | 30.0 | 30.0 | **36.5** | 984 | **3.71%** | **+24.0 BRAM Tiles** |
+| *-- RAMB36/FIFO* | 11 | 27 | 27 | **30** | 984 | **3.05%** | +19 `RAMB36E2` |
+| *-- RAMB18* | 3 | 6 | 6 | **13** | 1,968 | **0.66%** | +10 `RAMB18E2` |
+| **DSP48E2 Slices** | 920 | 878 | 209 | **209** | 1,968 | **10.62%** | **-711 DSPs (-77.28%)** |
 
-### 3.2 Key Subsystem Utilization Breakdown (Part 2 Un-bypassed Modules)
+### 3.2 Hierarchical Subsystem Utilization Breakdown (`synth/vivado_output/utilization_hierarchical.rpt`)
 
-| Hierarchical Instance | Submodule | LUTs | FFs | DSPs | Implementation Note |
-|---|---|---|---|---|---|
-| `u_rate_controller` | `rate_controller` | **1,113** | **149** | **3** | Dynamic reciprocal-multiplier arithmetic, 6-stage VBV threshold tree, 0 LDCE latches |
-| `u_gop_controller` | `gop_controller` | **243** | **135** | **0** | Dynamic runtime `cfg_gop_structure` control |
-| `u_inloop_filters.u_sao` | `sao_top` | **1,736** | **99** | **0** | Synthesizable Sample Adaptive Offset filter |
-| `u_inloop_filters.u_sao_stats` | `sao_stats` | **158** | **21** | **0** | 52-cycle pixel-scanning EO/BO statistics engine |
-| `u_cabac_enc_top` | `cabac_enc_top` | **5,281** | **2,321** | **0** | Fully unified CABAC engine with integrated `syntax_sao` |
-| `u_1d_core` in `u_dct_top` | `transform_1d_core` | **50,024** | **513** | **1** | Consolidated symmetric odd DCT-II and DST-VII basis multiplier trees |
-| `u_fme_search` | `fme_search` | **4,193** | **1,595** | **0** | Constant-indexed 4:1 pixel mux replacing variable multiply index |
+| Hierarchical Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP48E2 | Architectural Note |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| **`hevc_encoder_axi_top`** | `(top)` | **184,596** | **178,757** | **5,808** | **31** | **121,775** | **30** | **13** | **209** | Full AXI4-Lite/AXI4 SoC wrapper (`core_rst_n_reg` sync reset) |
+| `  u_hevc_encoder_top` | `hevc_encoder_top` | **184,558** | **178,719** | **5,808** | **31** | **121,682** | **30** | **13** | **209** | Top-level encoder datapath & BRAM frame/DPB buffers (`28 RAMB36, 8 RAMB18`) |
+| `    u_dct_top` | `dct_top` | **86,280** | **86,280** | 0 | 0 | **35,075** | 0 | 0 | **1** | Row-serial 2D DCT-II / DST-VII (`u_1d_core`: `50,027 LUTs`; `u_transpose_ram`: `5,077 LUTs, 16,896 FFs`) |
+| `    u_inter_pred` | `inter_pred_top` | **28,656** | **28,625** | 0 | 31 | **8,007** | 0 | 0 | **13** | TZ search (`622 LUTs`), FME (`26,342 LUTs`), MC unit (`112 LUTs`), Ref buffer (`1,579 LUTs, 13 DSPs`) |
+| `    u_inloop_filters` | `decoder_inloop_filters` | **19,371** | **19,371** | 0 | 0 | **24,936** | **1** | **3** | **0** | Sync BRAM CTU buffers (`u_deblock`: `15,437 LUTs`; `u_sao`: `597 LUTs`; `u_sao_stats`: `59 LUTs`) |
+| `    u_intra_pred` | `intra_pred_top` | **10,340** | **10,292** | **48** | 0 | **4,436** | 0 | 0 | **23** | Angular (`7,407 LUTs, 17 DSPs`), Ref filter (`2,421 LUTs, 2 DSPs`), DC (`358 LUTs`), Planar (`154 LUTs, 4 DSPs`) |
+| `    u_intra_rmd` | `intra_rmd` | **6,225** | **6,225** | 0 | 0 | **3,069** | 0 | 0 | **4** | 35-mode RMD pre-screener with 4 parallel $4\times4$ Hadamard SATD cores |
+| `    u_cabac_enc_top` | `cabac_enc_top` | **5,300** | **5,300** | 0 | 0 | **2,320** | 0 | 0 | **0** | 154-context SRAM (`1,240 LUTs`), `syntax_coeff` (`2,683 LUTs`), `range_coder` (`765 LUTs`), `syntax_sao` |
+| `    u_ctu_partitioner` | `ctu_partitioner` | **3,153** | **3,153** | 0 | 0 | **375** | 0 | 0 | **0** | Recursive Morton Z-scan quadtree controller ($64\times64 \to 8\times8$) |
+| `    u_synth_subpel_filter`| `streaming_subpel_filter`| **2,922** | **2,922** | 0 | 0 | **362** | 0 | 0 | **156** | Streaming 8-tap Luma / 4-tap Chroma sub-pel FIR interpolation core |
+| `    u_recon_unit` | `recon_unit` | **1,298** | **1,298** | 0 | 0 | **220** | **1** | **1** | **0** | Pixel clipping & BRAM reconstruction buffer (`1 RAMB36E2, 1 RAMB18E2`) |
+| `    u_rate_controller` | `rate_controller` | **1,107** | **1,107** | 0 | 0 | **149** | 0 | 0 | **3** | Closed-loop VBV fullness shift-tree & reciprocal-multiply budget allocator (`0 LDCE`) |
+| `    u_residual_sub` | `residual_sub` | **1,043** | **1,043** | 0 | 0 | **116** | 0 | 0 | **0** | 11-bit signed residual subtraction |
+| `    u_pu_cu_splitter` | `pu_cu_splitter` | **903** | **903** | 0 | 0 | **712** | 0 | 0 | **0** | PU/CU partition sequencer |
+| `    u_ctu_raster_scan` | `ctu_raster_scan` | **617** | **617** | 0 | 0 | **39** | 0 | 0 | **0** | Frame-level CTU raster coordinate generator |
+| `    u_mode_decision` | `mode_decision` | **501** | **501** | 0 | 0 | **221** | 0 | 0 | **3** | Lagrangian RDO cost comparator & FEN early-termination split logic |
+| `    u_gop_controller` | `gop_controller` | **236** | **236** | 0 | 0 | **135** | 0 | 0 | **0** | Dynamic runtime AI/LDP/RA GOP scheduler |
+| `    u_inv_quant` | `inv_quant` | **203** | **203** | 0 | 0 | **140** | 0 | 0 | **2** | Main10 inverse dequantizer with Table 8-10 Chroma QP mapping |
+| `    u_fwd_quant` | `fwd_quant` | **175** | **175** | 0 | 0 | **30** | 0 | 0 | **1** | Scalar deadzone forward quantizer |
+| `    u_slice_controller` | `slice_controller` | **174** | **174** | 0 | 0 | **78** | 0 | 0 | **0** | Slice header & VPS/SPS/PPS `param_set_writer` (`77 LUTs`) |
+| `    u_frame_store` | `frame_store` | **121** | **121** | 0 | 0 | **695** | 0 | 0 | **3** | AXI4 burst write/read frame buffer controller |
+| `    u_mvp_predictor` | `mvp_predictor` | **31** | **31** | 0 | 0 | **104** | 0 | 0 | **0** | Spatial/Temporal AMVP & 5-candidate Merge derivation |
 
-### 3.3 Timing Performance & Closure
+### 3.3 Timing Performance & Closure (`synth/vivado_output/timing_summary_synth.rpt`)
 - **Clock Domain:** `clk`
 - **Target Period:** 20.000 ns (50.00 MHz)
-- **Worst Negative Slack (WNS):** **+10.497 ns (MET)** (Target: > +5.0 ns)
-- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of 543,058 total endpoints)
-- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz**
+- **Worst Negative Slack (WNS):** **+10.497 ns (MET)** (Critical path `9.285 ns`: `3.363 ns` logic [36.22%] + `5.922 ns` route [63.78%]; 43 logic levels in `u_dct_top/u_1d_core`)
+- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of **322,234** total endpoints)
+- **Worst Pulse Width Slack (WPWS):** **+9.458 ns** (0 failing endpoints out of 127,700 total endpoints)
+- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz** ($2.10\times$ above 50 MHz constraint)
 
-### 3.4 Vector-less Power Estimation
-- **Dynamic On-Chip Power:** **0.831 W**
+### 3.4 Vector-less Power Estimation (`synth/vivado_output/power_synth.rpt`)
+- **Dynamic On-Chip Power:** **0.895 W**
 - **Device Static Power:** **1.113 W**
-- **Total On-Chip Power:** **1.943 W**
+- **Total On-Chip Power:** **2.008 W** (Junction Temp: `26.7 °C`, Max Ambient: `98.3 °C`)
+
+### 3.5 Sign-Off Verification & IP Packaging Parity
+- **Full 3-Frame Post-Filter Pixel Reconstruction (`scripts/regression_gate.py --enable-loop-filters --num-frames 3`):** **100.00% bit-exact across all 73,728 samples in Frames 0, 1, and 2 (Y, Cb, Cr)**, `Global Max Diff = 0`, `Avg Diff = 0.0000` against Fraunhofer HM 18.0 reference decoder (`TAppDecoder.exe`).
+- **3-Frame Top-Level Simulation (`tb/tb_hevc_encoder_top.sv` + `scripts/verify_3frames_bins.py`):** **100.00% bit-exact CABAC bins** across all 6 syntax trace fields (`bin`, `type`, `range`, `pstate`, `valmps`, `ctx`).
+- **AXI4-Lite / AXI4 SoC Testbench (`tb/tb_axi_top.sv`):** **9 / 9 test suites PASS** (CSR read/write, soft reset, frame encode, W1C interrupt clear, and VBV fullness telemetry).
+- **Dual-State Algorithmic Flaw Testbenches (`scripts/run_all_flaw_tb.py`):** **14 / 14 PASS (100%)** in Remediated Mode, **14 / 14 PROVEN (FAIL)** in Buggy Mode (`18.6s` runtime).
+- **IP-XACT Packaging Synchronization:** **63 / 63 `.v`/`.sv`/`.vh` files** verified 100% SHA-256 identical between [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src).
 
 ---
 

@@ -22,6 +22,13 @@
 // Modify these to retarget pipeline operating conditions.
 //=============================================================================
 
+// Enable normative remediation fixes by default for production, synthesis, and IP integration
+`ifndef NO_REMEDIATION
+`ifndef REMEDIATION
+`define REMEDIATION 1
+`endif
+`endif
+
 //-----------------------------------------------------------------------------
 // 1. BIT DEPTH & SAMPLE WIDTH
 //-----------------------------------------------------------------------------

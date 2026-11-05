@@ -115,9 +115,9 @@ flowchart TD
 | **2D Transform** | `dct_top` | `fwd_quant` | `dct_out_data`, `dct_out_tu_size_log2` | $32 \times 32 \times 16\text{-bit}$ frequency coefficients |
 | **Forward Quant** | `fwd_quant` | `coeff_buffer`, `inv_quant` | `quant_out_level`, `quant_out_scan_idx`, `cbf` | $16\text{-bit}$ level, $10\text{-bit}$ scan index, $1\text{-bit}$ CBF |
 | **Inverse Transform** | `inv_quant` $\to$ `dct_top` | `recon_unit` | `idct_out_data` | $16\text{-bit}$ decoded residual samples |
-| **Reconstruction** | `recon_unit` | `frame_store`, `intra_pred_top` | `recon_pixel_data`, `recon_sample_out` | $10\text{-bit}$ clipped pixel $[0..1023]$ |
-| **Deblocking Filter** | `frame_store` | `deblock_top` | `pix_rd_data`, `pix_wr_data` | $10\text{-bit}$ sample read/write |
-| **SAO Filter** | `deblock_top` | `sao_top` | `pix_rd_data`, `pix_wr_data` | $10\text{-bit}$ sample with edge/band offset applied |
+| **Reconstruction** | `recon_unit` | `frame_store`, `intra_pred_top` | `recon_pixel_data`, `recon_sample_out` | $10\text{-bit}$ clipped pixel $[0..1023]$ (`1 RAMB36E2, 1 RAMB18E2`) |
+| **Deblocking Filter** | `frame_store` | `deblock_top` | `pix_rd_data`, `pix_wr_data` | $10\text{-bit}$ synchronous BRAM sample read/write |
+| **SAO Filter** | `deblock_top` | `sao_top` | `pix_rd_data`, `pix_wr_data`, `sao_n0/n1_resp_data` | $10\text{-bit}$ sample with synchronous neighbor fetch & decoupled `dump_valid_q` |
 | **External Memory** | `address_generator` | External AXI4 DRAM | `axi_aw*`, `axi_w*`, `axi_ar*`, `axi_r*` | $33\text{-bit}$ address, $256\text{-bit}$ data channel |
 | **Bitstream Output** | `cabac_enc_top` | `nal_writer` $\to$ Output Pin | `rbsp_byte`, `out_byte` | $8\text{-bit}$ byte-stream Annex B format |
 
@@ -128,13 +128,13 @@ flowchart TD
 ```
 Cycle Timeline (per CTU):
 Stage 1: [ CTU Raster Fetch & MVP Derivation ]
-Stage 2:      [ TZ Integer ME & Intra RMD SATD ]
+Stage 2:      [ TZ Integer ME & Intra RMD SATD (1-Cycle Sync Row/Col BRAM Read) ]
 Stage 3:           [ FME 1/4-pel & Mode Decision (FEN) ]
-Stage 4:                [ Motion Compensation / Intra Prediction ]
+Stage 4:                [ Motion Compensation / Intra Prediction (Unified Sync Luma/Cb/Cr Ref Read) ]
 Stage 5:                     [ Residual Subtraction & 2D DCT/DST ]
 Stage 6:                          [ Forward Quantization & Coeff Buffer Store ]
 Stage 7:                               [ IQ / IDCT & Local Reconstruction Loop ] -> (Intra Line Buffer Feedback)
 Stage 8 (Parallel Async):              [ CABAC Entropy Serialization & NAL Packing ]
-Stage 9 (CTU Row Boundary):                 [ Deblocking Filter (Ver & Hor Edges) ]
-Stage 10 (Post-Deblock):                         [ SAO Offset Filtering & DPB Commit ]
+Stage 9 (CTU Row Boundary):                 [ Deblocking Filter (Ver & Hor Edges, Sync CTU BRAM) ]
+Stage 10 (Post-Deblock):                         [ SAO Offset Filtering & Decoupled S_DUMP DPB Commit ]
 ```

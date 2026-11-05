@@ -149,6 +149,6 @@ graph LR
 ```
 
 ### Synthesis Verification & Resource Metrics
-- **Multipliers**: 348 shared constant multipliers in `transform_1d_core.v` (50,024 LUTs, 1 DSP48E2; 99.4% reduction over 57,411 unrolled 2D multipliers).
+- **Multipliers**: 348 shared constant multipliers in `transform_1d_core.v` (`50,027 LUTs, 513 FFs, 1 DSP48E2`; **99.4% reduction** over 57,411 unrolled 2D multipliers). Total `dct_top.v` footprint: `86,280 LUTs, 35,075 FFs, 1 DSP48E2` (including `transpose_ram_32x32`: `5,077 LUTs, 16,896 FFs`).
 - **Tested Block Types**: $4\times 4$ DST-VII, $4\times 4$ DCT-II, $8\times 8$ DCT-II, $16\times 16$ DCT-II, $32\times 32$ DCT-II.
 - **Verification**: Verified bit-exact against HM 18.0 `TComTrQuant::xTrMxN()` and `TComTrQuant::xITrMxN()`.

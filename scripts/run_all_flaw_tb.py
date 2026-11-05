@@ -249,7 +249,10 @@ def main():
         print(f"\n>>> [{t_id}] Running {name} ({subsys}) ...")
         
         # 1. Compile Buggy RTL
-        rc, out = run_cmd(tc["vlog_cmd"])
+        buggy_cmd = list(tc["vlog_cmd"])
+        if "+define+NO_REMEDIATION" not in buggy_cmd:
+            buggy_cmd.insert(4, "+define+NO_REMEDIATION")
+        rc, out = run_cmd(buggy_cmd)
         if rc != 0:
             print(f"    [COMPILE ERROR] vlog failed for {name}!")
             print(out)
