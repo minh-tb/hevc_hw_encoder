@@ -49,7 +49,7 @@ RTL_SOURCES = [
     "rtl/inter/mvp_predictor.v",
     "rtl/inter/ref_frame_buffer.v",
     "rtl/inter/sad_4x4.v",
-    "rtl/inter/streaming_subpel_filter.v",
+    "rtl/inter/mc_window_fetch.v",
     "rtl/inter/subpel_interpolation_core.v",
     "rtl/inter/tz_search.v",
     "rtl/intra/intra_angular.v",

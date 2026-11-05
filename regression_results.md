@@ -138,22 +138,22 @@
 | **Block RAM Tile** | 12.5 | 30.0 | 30.0 | **36.5** | 984 | **3.71%** | **+24.0 BRAM Tiles** |
 | *-- RAMB36/FIFO* | 11 | 27 | 27 | **30** | 984 | **3.05%** | +19 `RAMB36E2` |
 | *-- RAMB18* | 3 | 6 | 6 | **13** | 1,968 | **0.66%** | +10 `RAMB18E2` |
-| **DSP48E2 Slices** | 920 | 878 | 209 | **209** | 1,968 | **10.62%** | **-711 DSPs (-77.28%)** |
+| **DSP48E2 Slices** | 920 | 878 | 209 | **221** | 1,968 | **11.23%** | **-699 DSPs (-75.98%)** |
 
 ### 3.2 Hierarchical Subsystem Utilization Breakdown (`synth/vivado_output/utilization_hierarchical.rpt`)
 
 | Hierarchical Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP48E2 | Architectural Note |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| **`hevc_encoder_axi_top`** | `(top)` | **184,596** | **178,757** | **5,808** | **31** | **121,775** | **30** | **13** | **209** | Full AXI4-Lite/AXI4 SoC wrapper (`core_rst_n_reg` sync reset) |
-| `  u_hevc_encoder_top` | `hevc_encoder_top` | **184,558** | **178,719** | **5,808** | **31** | **121,682** | **30** | **13** | **209** | Top-level encoder datapath & BRAM frame/DPB buffers (`28 RAMB36, 8 RAMB18`) |
+| **`hevc_encoder_axi_top`** | `(top)` | **187,823** | **181,984** | **5,808** | **31** | **122,796** | **30** | **13** | **221** | Full AXI4-Lite/AXI4 SoC wrapper (`core_rst_n_reg` sync reset) |
+| `  u_hevc_encoder_top` | `hevc_encoder_top` | **187,785** | **181,946** | **5,808** | **31** | **122,703** | **30** | **13** | **221** | Top-level encoder datapath & BRAM frame/DPB buffers (`28 RAMB36, 8 RAMB18`) |
 | `    u_dct_top` | `dct_top` | **86,280** | **86,280** | 0 | 0 | **35,075** | 0 | 0 | **1** | Row-serial 2D DCT-II / DST-VII (`u_1d_core`: `50,027 LUTs`; `u_transpose_ram`: `5,077 LUTs, 16,896 FFs`) |
 | `    u_inter_pred` | `inter_pred_top` | **28,656** | **28,625** | 0 | 31 | **8,007** | 0 | 0 | **13** | TZ search (`622 LUTs`), FME (`26,342 LUTs`), MC unit (`112 LUTs`), Ref buffer (`1,579 LUTs, 13 DSPs`) |
 | `    u_inloop_filters` | `decoder_inloop_filters` | **19,371** | **19,371** | 0 | 0 | **24,936** | **1** | **3** | **0** | Sync BRAM CTU buffers (`u_deblock`: `15,437 LUTs`; `u_sao`: `597 LUTs`; `u_sao_stats`: `59 LUTs`) |
 | `    u_intra_pred` | `intra_pred_top` | **10,340** | **10,292** | **48** | 0 | **4,436** | 0 | 0 | **23** | Angular (`7,407 LUTs, 17 DSPs`), Ref filter (`2,421 LUTs, 2 DSPs`), DC (`358 LUTs`), Planar (`154 LUTs, 4 DSPs`) |
 | `    u_intra_rmd` | `intra_rmd` | **6,225** | **6,225** | 0 | 0 | **3,069** | 0 | 0 | **4** | 35-mode RMD pre-screener with 4 parallel $4\times4$ Hadamard SATD cores |
-| `    u_cabac_enc_top` | `cabac_enc_top` | **5,300** | **5,300** | 0 | 0 | **2,320** | 0 | 0 | **0** | 154-context SRAM (`1,240 LUTs`), `syntax_coeff` (`2,683 LUTs`), `range_coder` (`765 LUTs`), `syntax_sao` |
+| `    u_cabac_enc_top` | `cabac_enc_top` | **5,313** | **5,313** | 0 | 0 | **2,320** | 0 | 0 | **0** | 154-context SRAM (`1,244 LUTs`), `syntax_coeff` (`2,694 LUTs`), `range_coder` (`773 LUTs`), `syntax_sao` |
+| `    u_mc_window_fetch` | `mc_window_fetch` | **3,881** | **3,881** | 0 | 0 | **2,651** | 0 | 0 | **0** | Sliding-column DPB window fetch engine (Option A) |
 | `    u_ctu_partitioner` | `ctu_partitioner` | **3,153** | **3,153** | 0 | 0 | **375** | 0 | 0 | **0** | Recursive Morton Z-scan quadtree controller ($64\times64 \to 8\times8$) |
-| `    u_synth_subpel_filter`| `streaming_subpel_filter`| **2,922** | **2,922** | 0 | 0 | **362** | 0 | 0 | **156** | Streaming 8-tap Luma / 4-tap Chroma sub-pel FIR interpolation core |
 | `    u_recon_unit` | `recon_unit` | **1,298** | **1,298** | 0 | 0 | **220** | **1** | **1** | **0** | Pixel clipping & BRAM reconstruction buffer (`1 RAMB36E2, 1 RAMB18E2`) |
 | `    u_rate_controller` | `rate_controller` | **1,107** | **1,107** | 0 | 0 | **149** | 0 | 0 | **3** | Closed-loop VBV fullness shift-tree & reciprocal-multiply budget allocator (`0 LDCE`) |
 | `    u_residual_sub` | `residual_sub` | **1,043** | **1,043** | 0 | 0 | **116** | 0 | 0 | **0** | 11-bit signed residual subtraction |
@@ -164,21 +164,22 @@
 | `    u_inv_quant` | `inv_quant` | **203** | **203** | 0 | 0 | **140** | 0 | 0 | **2** | Main10 inverse dequantizer with Table 8-10 Chroma QP mapping |
 | `    u_fwd_quant` | `fwd_quant` | **175** | **175** | 0 | 0 | **30** | 0 | 0 | **1** | Scalar deadzone forward quantizer |
 | `    u_slice_controller` | `slice_controller` | **174** | **174** | 0 | 0 | **78** | 0 | 0 | **0** | Slice header & VPS/SPS/PPS `param_set_writer` (`77 LUTs`) |
+| `    u_subpel_core_l0` | `subpel_interpolation_core` | **159** | **159** | 0 | 0 | **0** | 0 | 0 | **84** | Unified 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 0) |
+| `    u_subpel_core_l1` | `subpel_interpolation_core` | **150** | **150** | 0 | 0 | **0** | 0 | 0 | **84** | Unified 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 1) |
 | `    u_frame_store` | `frame_store` | **121** | **121** | 0 | 0 | **695** | 0 | 0 | **3** | AXI4 burst write/read frame buffer controller |
 | `    u_mvp_predictor` | `mvp_predictor` | **31** | **31** | 0 | 0 | **104** | 0 | 0 | **0** | Spatial/Temporal AMVP & 5-candidate Merge derivation |
 
 ### 3.3 Timing Performance & Closure (`synth/vivado_output/timing_summary_synth.rpt`)
 - **Clock Domain:** `clk`
 - **Target Period:** 20.000 ns (50.00 MHz)
-- **Worst Negative Slack (WNS):** **+10.497 ns (MET)** (Critical path `9.285 ns`: `3.363 ns` logic [36.22%] + `5.922 ns` route [63.78%]; 43 logic levels in `u_dct_top/u_1d_core`)
-- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of **322,234** total endpoints)
-- **Worst Pulse Width Slack (WPWS):** **+9.458 ns** (0 failing endpoints out of 127,700 total endpoints)
-- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz** ($2.10\times$ above 50 MHz constraint)
+- **Worst Negative Slack (WNS):** **+3.847 ns (MET)**
+- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of **325,536** total endpoints)
+- **Estimated Maximum Frequency ($F_{\max}$):** **61.91 MHz** (Meets 50 MHz constraint with positive slack)
 
 ### 3.4 Vector-less Power Estimation (`synth/vivado_output/power_synth.rpt`)
-- **Dynamic On-Chip Power:** **0.895 W**
+- **Dynamic On-Chip Power:** **0.902 W**
 - **Device Static Power:** **1.113 W**
-- **Total On-Chip Power:** **2.008 W** (Junction Temp: `26.7 °C`, Max Ambient: `98.3 °C`)
+- **Total On-Chip Power:** **2.015 W** (Junction Temp: `26.7 °C`, Max Ambient: `98.3 °C`)
 
 ### 3.5 Sign-Off Verification & IP Packaging Parity
 - **Full 3-Frame Post-Filter Pixel Reconstruction (`scripts/regression_gate.py --enable-loop-filters --num-frames 3`):** **100.00% bit-exact across all 73,728 samples in Frames 0, 1, and 2 (Y, Cb, Cr)**, `Global Max Diff = 0`, `Avg Diff = 0.0000` against Fraunhofer HM 18.0 reference decoder (`TAppDecoder.exe`).

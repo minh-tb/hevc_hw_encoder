@@ -1196,7 +1196,6 @@ module hevc_encoder_top #(
     
     // TU Sequencer Registers
     reg         inter_p2s_active;
-    reg [9:0]   inter_p2s_idx;
     reg         intra_ref_active;
     reg [7:0]   intra_ref_idx; // 0 to 4N (max 128)
     reg         tu_can_start;
@@ -2015,7 +2014,6 @@ module hevc_encoder_top #(
     wire [11:0] filter_out_x;
     wire [11:0] filter_out_y;
 
-`ifdef SYNTHESIS
     // Memory replication pattern: dpb_*_ram_l0 and dpb_*_ram_l1 each store the full
     // 2-slot DPB (32768 samples = 2 slots of 128x128). Replicated so FPGA M10K/BRAM
     // can provide two independent read ports (one for ref_l0, one for ref_l1) alongside the write port.
@@ -2025,6 +2023,22 @@ module hevc_encoder_top #(
     (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_cb_ram_l1   [0:8191];
     (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_cr_ram_l0   [0:8191];
     (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] dpb_cr_ram_l1   [0:8191];
+
+    // synthesis translate_off
+    integer dpb_init_i;
+    initial begin
+        for (dpb_init_i = 0; dpb_init_i < 32768; dpb_init_i = dpb_init_i + 1) begin
+            dpb_luma_ram_l0[dpb_init_i] = 10'd512;
+            dpb_luma_ram_l1[dpb_init_i] = 10'd512;
+        end
+        for (dpb_init_i = 0; dpb_init_i < 8192; dpb_init_i = dpb_init_i + 1) begin
+            dpb_cb_ram_l0[dpb_init_i] = 10'd512;
+            dpb_cb_ram_l1[dpb_init_i] = 10'd512;
+            dpb_cr_ram_l0[dpb_init_i] = 10'd512;
+            dpb_cr_ram_l1[dpb_init_i] = 10'd512;
+        end
+    end
+    // synthesis translate_on
 
     always @(posedge clk) begin
         if (filter_out_valid && filter_out_ready) begin
@@ -2040,95 +2054,20 @@ module hevc_encoder_top #(
             end
         end
     end
-`else
-    reg [9:0] dpb_luma_ram [0:1][0:16383];
-    reg [9:0] dpb_cb_ram   [0:1][0:4095];
-    reg [9:0] dpb_cr_ram   [0:1][0:4095];
 
-    // synthesis translate_off
-    integer dpb_i, dpb_s;
-    initial begin
-        for (dpb_s = 0; dpb_s < 2; dpb_s = dpb_s + 1) begin
-            for (dpb_i = 0; dpb_i < 16384; dpb_i = dpb_i + 1) dpb_luma_ram[dpb_s][dpb_i] = 10'd512;
-            for (dpb_i = 0; dpb_i < 4096;  dpb_i = dpb_i + 1) begin
-                dpb_cb_ram[dpb_s][dpb_i] = 10'd512;
-                dpb_cr_ram[dpb_s][dpb_i] = 10'd512;
-            end
-        end
-    end
-    // synthesis translate_on
+    // Reference slot index from GOP controller
+    wire [2:0] ref_slot_0 = ref_l0[2:0];
+    wire [2:0] ref_slot_1 = ref_l1[2:0];
+    wire is_bi_pred = (ctu_slice_type == 2'd0); // B-slice: Average L0 and L1
 
-    always @(posedge clk) begin
-        if (filter_out_valid && filter_out_ready) begin
-            if (filter_out_comp == 2'd0)
-                dpb_luma_ram[latched_wr_slot[0]][{filter_out_y[6:0], filter_out_x[6:0]}] <= filter_out_pixel;
-            else if (filter_out_comp == 2'd1)
-                dpb_cb_ram[latched_wr_slot[0]][{filter_out_y[5:0], filter_out_x[5:0]}] <= filter_out_pixel;
-            else if (filter_out_comp == 2'd2)
-                dpb_cr_ram[latched_wr_slot[0]][{filter_out_y[5:0], filter_out_x[5:0]}] <= filter_out_pixel;
-        end
-    end
-`endif
-
-    function automatic [6:0] clamp_128;
-        input signed [12:0] val;
+    function automatic [9:0] clip_bd10;
+        input signed [24:0] v;
         begin
-            if (val < 0) clamp_128 = 7'd0;
-            else if (val > 127) clamp_128 = 7'd127;
-            else clamp_128 = val[6:0];
+            if (v < 25'sd0) clip_bd10 = 10'd0;
+            else if (v > 25'sd1023) clip_bd10 = 10'd1023;
+            else clip_bd10 = v[9:0];
         end
     endfunction
-
-    function automatic [5:0] clamp_64;
-        input signed [12:0] val;
-        begin
-            if (val < 0) clamp_64 = 6'd0;
-            else if (val > 63) clamp_64 = 6'd63;
-            else clamp_64 = val[5:0];
-        end
-    endfunction
-
-    wire [9:0] inter_p2s_max = (10'd1 << (reg_tu_size_log2 * 2)) - 10'd1;
-    // P2S Sequencer dynamically maps Y, Cb, Cr flats from mc_unit to current TU processing sequence
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            inter_p2s_active <= 0;
-            inter_p2s_idx <= 0;
-        end else begin
-            if (tu_valid && tu_ready_signal && !latched_cu_is_intra) begin
-                inter_p2s_active <= 1'b1;
-                inter_p2s_idx <= 0;
-            end else if (inter_p2s_active) begin
-                if (inter_p2s_idx == inter_p2s_max) begin
-                    inter_p2s_active <= 1'b0;
-                end else begin
-                    inter_p2s_idx <= inter_p2s_idx + 1;
-                end
-            end
-        end
-    end
-
-    assign inter_pred_valid = inter_p2s_active;
-    
-    assign inter_out_x = (reg_tu_size_log2 == 3'd2) ? {8'd0, inter_p2s_idx[1:0]} :
-                         (reg_tu_size_log2 == 3'd3) ? {8'd0, inter_p2s_idx[2:0]} :
-                         (reg_tu_size_log2 == 3'd4) ? {8'd0, inter_p2s_idx[3:0]} :
-                                                      {8'd0, inter_p2s_idx[4:0]};
-                                                      
-    assign inter_out_y = (reg_tu_size_log2 == 3'd2) ? {8'd0, inter_p2s_idx[3:2]} :
-                         (reg_tu_size_log2 == 3'd3) ? {8'd0, inter_p2s_idx[5:3]} :
-                         (reg_tu_size_log2 == 3'd4) ? {8'd0, inter_p2s_idx[7:4]} :
-                                                      {8'd0, inter_p2s_idx[9:5]};
-                                                      
-    assign inter_out_last = (inter_p2s_idx == inter_p2s_max);
-
-    // Absolute spatial coordinate of current sample within the 128x128 frame
-    wire [6:0] cur_sample_abs_x = {latched_cu_ctu_x[0], 6'd0} + {1'b0, reg_tu_x} + {1'b0, inter_out_x[5:0]};
-    wire [6:0] cur_sample_abs_y = {latched_cu_ctu_y[0], 6'd0} + {1'b0, reg_tu_y} + {1'b0, inter_out_y[5:0]};
-
-    // Chroma coordinate (half resolution 64x64)
-    wire [5:0] cur_sample_abs_cx = {latched_cu_ctu_x[0], 5'd0} + {1'b0, reg_tu_x[4:0]} + {1'b0, inter_out_x[4:0]};
-    wire [5:0] cur_sample_abs_cy = {latched_cu_ctu_y[0], 5'd0} + {1'b0, reg_tu_y[4:0]} + {1'b0, inter_out_y[4:0]};
 
     // Motion vector components in integer units and fractional phases
     wire signed [11:0] mv_x_int = $signed(latched_cu_mv_x) >>> 2;
@@ -2142,149 +2081,124 @@ module hevc_encoder_top #(
     wire [2:0] chroma_frac_x = latched_cu_mv_x[2:0];
     wire [2:0] chroma_frac_y = latched_cu_mv_y[2:0];
 
-    // Reference slot index from GOP controller
-    wire [2:0] ref_slot_0 = ref_l0[2:0];
-    wire [2:0] ref_slot_1 = ref_l1[2:0];
+    // TU origin coordinates in picture (128x128 luma, 64x64 chroma)
+    wire [6:0] tu_abs_origin_x = {latched_cu_ctu_x[0], 6'd0} + {1'b0, reg_tu_x};
+    wire [6:0] tu_abs_origin_y = {latched_cu_ctu_y[0], 6'd0} + {1'b0, reg_tu_y};
+    wire [5:0] tu_abs_origin_cx = {latched_cu_ctu_x[0], 5'd0} + {1'b0, reg_tu_x[4:0]};
+    wire [5:0] tu_abs_origin_cy = {latched_cu_ctu_y[0], 5'd0} + {1'b0, reg_tu_y[4:0]};
 
-    wire is_bi_pred = (ctu_slice_type == 2'd0); // B-slice: Average L0 and L1
+    wire signed [12:0] luma_base_x = $signed({6'd0, tu_abs_origin_x}) + mv_x_int;
+    wire signed [12:0] luma_base_y = $signed({6'd0, tu_abs_origin_y}) + mv_y_int;
+    wire signed [12:0] chroma_base_x = $signed({7'd0, tu_abs_origin_cx}) + mv_xc_int;
+    wire signed [12:0] chroma_base_y = $signed({7'd0, tu_abs_origin_cy}) + mv_yc_int;
 
-    localparam PIXEL_WIDTH = `PIXEL_WIDTH;
+    wire signed [12:0] mc_base_x = (reg_tu_comp == 2'd0) ? luma_base_x : chroma_base_x;
+    wire signed [12:0] mc_base_y = (reg_tu_comp == 2'd0) ? luma_base_y : chroma_base_y;
 
-    function automatic [9:0] clip_bd10;
-        input signed [24:0] v;
-        begin
-            if (v < 25'sd0) clip_bd10 = 10'd0;
-            else if (v > 25'sd1023) clip_bd10 = 10'd1023;
-            else clip_bd10 = v[9:0];
-        end
-    endfunction
+    // Trigger mc_window_fetch on inter TU accept (registered by 1 cycle so reg_tu_* and mc_base_* are updated)
+    reg mc_fetch_start;
+    wire mc_fetch_busy;
+    wire [13:0] mc_rd_addr;
+    wire [9:0]  mc_rd_data_l0;
+    wire [9:0]  mc_rd_data_l1;
 
-
-
-    wire signed [12:0] luma_x_base = $signed({6'd0, cur_sample_abs_x}) + mv_x_int;
-    wire signed [12:0] luma_y_base = $signed({6'd0, cur_sample_abs_y}) + mv_y_int;
-
-    wire signed [12:0] chroma_x_base = $signed({7'd0, cur_sample_abs_cx}) + mv_xc_int;
-    wire signed [12:0] chroma_y_base = $signed({7'd0, cur_sample_abs_cy}) + mv_yc_int;
-
-`ifdef SYNTHESIS
-    // Synchronous DPB RAM read ports for FPGA BRAM inference
-    reg [9:0] synth_rd_luma_l0, synth_rd_luma_l1;
-    reg [9:0] synth_rd_cb_l0,   synth_rd_cb_l1;
-    reg [9:0] synth_rd_cr_l0,   synth_rd_cr_l1;
+    // Synchronous DPB RAM read ports (1-cycle BRAM read latency)
+    reg [9:0] dpb_rd_luma_l0, dpb_rd_luma_l1;
+    reg [9:0] dpb_rd_cb_l0,   dpb_rd_cb_l1;
+    reg [9:0] dpb_rd_cr_l0,   dpb_rd_cr_l1;
 
     always @(posedge clk) begin
-        synth_rd_luma_l0 <= dpb_luma_ram_l0[{ref_slot_0[0], clamp_128(luma_y_base), clamp_128(luma_x_base)}];
-        synth_rd_luma_l1 <= dpb_luma_ram_l1[{ref_slot_1[0], clamp_128(luma_y_base), clamp_128(luma_x_base)}];
-        synth_rd_cb_l0   <= dpb_cb_ram_l0[{ref_slot_0[0], clamp_64(chroma_y_base), clamp_64(chroma_x_base)}];
-        synth_rd_cb_l1   <= dpb_cb_ram_l1[{ref_slot_1[0], clamp_64(chroma_y_base), clamp_64(chroma_x_base)}];
-        synth_rd_cr_l0   <= dpb_cr_ram_l0[{ref_slot_0[0], clamp_64(chroma_y_base), clamp_64(chroma_x_base)}];
-        synth_rd_cr_l1   <= dpb_cr_ram_l1[{ref_slot_1[0], clamp_64(chroma_y_base), clamp_64(chroma_x_base)}];
+        dpb_rd_luma_l0 <= dpb_luma_ram_l0[{ref_slot_0[0], mc_rd_addr[13:0]}];
+        dpb_rd_luma_l1 <= dpb_luma_ram_l1[{ref_slot_1[0], mc_rd_addr[13:0]}];
+        dpb_rd_cb_l0   <= dpb_cb_ram_l0[{ref_slot_0[0], mc_rd_addr[11:0]}];
+        dpb_rd_cb_l1   <= dpb_cb_ram_l1[{ref_slot_1[0], mc_rd_addr[11:0]}];
+        dpb_rd_cr_l0   <= dpb_cr_ram_l0[{ref_slot_0[0], mc_rd_addr[11:0]}];
+        dpb_rd_cr_l1   <= dpb_cr_ram_l1[{ref_slot_1[0], mc_rd_addr[11:0]}];
     end
 
-    wire [9:0] synth_sample_l0 = (reg_tu_comp == 2'd0) ? synth_rd_luma_l0 :
-                                 (reg_tu_comp == 2'd1) ? synth_rd_cb_l0 : synth_rd_cr_l0;
-    wire [9:0] synth_sample_l1 = (reg_tu_comp == 2'd0) ? synth_rd_luma_l1 :
-                                 (reg_tu_comp == 2'd1) ? synth_rd_cb_l1 : synth_rd_cr_l1;
+    assign mc_rd_data_l0 = (reg_tu_comp == 2'd0) ? dpb_rd_luma_l0 :
+                           (reg_tu_comp == 2'd1) ? dpb_rd_cb_l0   : dpb_rd_cr_l0;
+    assign mc_rd_data_l1 = (reg_tu_comp == 2'd0) ? dpb_rd_luma_l1 :
+                           (reg_tu_comp == 2'd1) ? dpb_rd_cb_l1   : dpb_rd_cr_l1;
 
-    reg [639:0] synth_win_l0_reg;
-    reg [639:0] synth_win_l1_reg;
+    // Sliding-column window DPB fetch engine
+    wire         win_valid;
+    wire [639:0] win_l0_flat;
+    wire [639:0] win_l1_flat;
+    wire [5:0]   win_x;
+    wire [5:0]   win_y;
+    wire         win_last;
 
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            synth_win_l0_reg <= 640'd0;
-            synth_win_l1_reg <= 640'd0;
-        end else if (inter_pred_valid) begin
-            synth_win_l0_reg <= {synth_win_l0_reg[629:0], synth_sample_l0};
-            synth_win_l1_reg <= {synth_win_l1_reg[629:0], synth_sample_l1};
-        end
-    end
-
-    // Synthesizable path: streaming subpel filter
-    wire [9:0] synth_pred_pixel;
-    streaming_subpel_filter #(
-        .PIXEL_WIDTH(`PIXEL_WIDTH)
-    ) u_synth_subpel_filter (
-        .clk        (clk),
-        .rst_n      (rst_n),
-        .valid_in   (inter_pred_valid),
-        .comp       (reg_tu_comp),
-        .is_bi_pred (is_bi_pred),
-        .frac_x     (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
-        .frac_y     (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
-        .win_l0_flat(synth_win_l0_reg),
-        .win_l1_flat(synth_win_l1_reg),
-        .valid_out  (),
-        .pred_pixel (synth_pred_pixel)
+    mc_window_fetch #(
+        .PW(10)
+    ) u_mc_window_fetch (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .start       (mc_fetch_start),
+        .comp        (reg_tu_comp),
+        .tu_size_log2(reg_tu_size_log2),
+        .base_x      (mc_base_x),
+        .base_y      (mc_base_y),
+        .rd_addr     (mc_rd_addr),
+        .rd_data_l0  (mc_rd_data_l0),
+        .rd_data_l1  (mc_rd_data_l1),
+        .win_valid   (win_valid),
+        .win_l0_flat (win_l0_flat),
+        .win_l1_flat (win_l1_flat),
+        .win_x       (win_x),
+        .win_y       (win_y),
+        .win_last    (win_last),
+        .busy        (mc_fetch_busy)
     );
-    assign inter_pred_pixel = synth_pred_pixel;
-`else
-    // Stage 2a Behavioral Model: Zero-latency window lookup from DPB RAMs
-    reg [PIXEL_WIDTH*64-1:0] win_luma_l0_flat;
-    reg [PIXEL_WIDTH*64-1:0] win_luma_l1_flat;
-    reg [PIXEL_WIDTH*16-1:0] win_cb_l0_flat;
-    reg [PIXEL_WIDTH*16-1:0] win_cb_l1_flat;
-    reg [PIXEL_WIDTH*16-1:0] win_cr_l0_flat;
-    reg [PIXEL_WIDTH*16-1:0] win_cr_l1_flat;
 
-    integer wy, wx;
-    always @(*) begin
-        for (wy = 0; wy < 8; wy = wy + 1) begin
-            for (wx = 0; wx < 8; wx = wx + 1) begin
-                win_luma_l0_flat[PIXEL_WIDTH*(wy*8 + wx) +: PIXEL_WIDTH] =
-                    dpb_luma_ram[ref_slot_0[0]][{clamp_128(luma_y_base + wy - 3), clamp_128(luma_x_base + wx - 3)}];
-                win_luma_l1_flat[PIXEL_WIDTH*(wy*8 + wx) +: PIXEL_WIDTH] =
-                    dpb_luma_ram[ref_slot_1[0]][{clamp_128(luma_y_base + wy - 3), clamp_128(luma_x_base + wx - 3)}];
-            end
-        end
-        for (wy = 0; wy < 4; wy = wy + 1) begin
-            for (wx = 0; wx < 4; wx = wx + 1) begin
-                win_cb_l0_flat[PIXEL_WIDTH*(wy*4 + wx) +: PIXEL_WIDTH] =
-                    dpb_cb_ram[ref_slot_0[0]][{clamp_64(chroma_y_base + wy - 1), clamp_64(chroma_x_base + wx - 1)}];
-                win_cb_l1_flat[PIXEL_WIDTH*(wy*4 + wx) +: PIXEL_WIDTH] =
-                    dpb_cb_ram[ref_slot_1[0]][{clamp_64(chroma_y_base + wy - 1), clamp_64(chroma_x_base + wx - 1)}];
-                win_cr_l0_flat[PIXEL_WIDTH*(wy*4 + wx) +: PIXEL_WIDTH] =
-                    dpb_cr_ram[ref_slot_0[0]][{clamp_64(chroma_y_base + wy - 1), clamp_64(chroma_x_base + wx - 1)}];
-                win_cr_l1_flat[PIXEL_WIDTH*(wy*4 + wx) +: PIXEL_WIDTH] =
-                    dpb_cr_ram[ref_slot_1[0]][{clamp_64(chroma_y_base + wy - 1), clamp_64(chroma_x_base + wx - 1)}];
-            end
-        end
-    end
-
-    wire [PIXEL_WIDTH*16-1:0] win_chroma_l0 = (reg_tu_comp == 2'd1) ? win_cb_l0_flat : win_cr_l0_flat;
-    wire [PIXEL_WIDTH*16-1:0] win_chroma_l1 = (reg_tu_comp == 2'd1) ? win_cb_l1_flat : win_cr_l1_flat;
+    // Sub-pel interpolation cores (L0 and L1)
     wire signed [15:0] interm_val_l0;
     wire signed [15:0] interm_val_l1;
 
     subpel_interpolation_core #(
-        .PIXEL_WIDTH (`PIXEL_WIDTH),
+        .PIXEL_WIDTH (10),
         .INTERM_WIDTH(16)
     ) u_subpel_core_l0 (
         .is_chroma      (reg_tu_comp != 2'd0),
         .frac_x         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
         .frac_y         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
-        .win_luma_flat  (win_luma_l0_flat),
-        .win_chroma_flat(win_chroma_l0),
+        .win_luma_flat  (win_l0_flat),
+        .win_chroma_flat(win_l0_flat[159:0]),
         .interm_val     (interm_val_l0)
     );
 
     subpel_interpolation_core #(
-        .PIXEL_WIDTH (`PIXEL_WIDTH),
+        .PIXEL_WIDTH (10),
         .INTERM_WIDTH(16)
     ) u_subpel_core_l1 (
         .is_chroma      (reg_tu_comp != 2'd0),
         .frac_x         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
         .frac_y         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
-        .win_luma_flat  (win_luma_l1_flat),
-        .win_chroma_flat(win_chroma_l1),
+        .win_luma_flat  (win_l1_flat),
+        .win_chroma_flat(win_l1_flat[159:0]),
         .interm_val     (interm_val_l1)
     );
 
     wire [9:0] pred_inter_val = is_bi_pred ? clip_bd10((interm_val_l0 + interm_val_l1 + 32'sd16) >>> 5)
                                            : clip_bd10((interm_val_l0 + 32'sd8) >>> 4);
 
+    assign inter_pred_valid = win_valid;
     assign inter_pred_pixel = pred_inter_val;
-`endif
+    assign inter_out_x      = {4'd0, win_x};
+    assign inter_out_y      = {4'd0, win_y};
+    assign inter_out_last   = win_last;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            mc_fetch_start   <= 1'b0;
+            inter_p2s_active <= 1'b0;
+        end else begin
+            mc_fetch_start <= tu_valid && tu_ready_signal && !latched_cu_is_intra;
+            if (tu_valid && tu_ready_signal && !latched_cu_is_intra)
+                inter_p2s_active <= 1'b1;
+            else if (!mc_fetch_start && !mc_fetch_busy && !win_valid)
+                inter_p2s_active <= 1'b0;
+        end
+    end
 
     wire        intra_out_valid;
     wire [9:0]  intra_out_pixel;

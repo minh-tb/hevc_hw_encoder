@@ -215,7 +215,7 @@ graph TD
 | 9 | `u_residual_sub` | `residual_sub` | `orig_pixel`, `pred_pixel`, `orig_valid`, `pred_valid` | `residual_data` | Subtracts predicted pixel from original sample to form 16-bit residual ($16\text{-bit}$). |
 | 10 | `u_intra_rmd` | `intra_rmd` | `orig_samples`, `ref_samples` | `intra_best_mode`, `intra_rd_cost` | Pre-screens all 35 intra modes using $4\times 4$ Hadamard SATD. |
 | 11 | `u_inter_pred` | `inter_pred_top` | `search_start`, `cu_orig_flat`, `mvp_x/y`, `ref_slot_in/l1` | `best_mv_x/y`, `best_sad`, `mc_pred_y/cb/cr` | Executes integer TZ search, quarter-pel FME, and bi-prediction MC. |
-| 12 | `u_synth_subpel_filter` | `streaming_subpel_filter` | `raw_ref_pixels`, `frac_x/y` | `filtered_subpel_pixels` | Pipelined sub-pel FIR interpolation filter for fractional motion compensation. |
+| 12 | `u_mc_window_fetch` | `mc_window_fetch` | `start`, `comp`, `tu_size_log2`, `base_x/y`, `rd_data_l0/l1` | `rd_addr`, `win_valid`, `win_l0/l1_flat`, `win_x/y`, `win_last`, `busy` | Sliding-column DPB window fetch engine for fractional motion compensation. |
 | 13 | `u_subpel_core_l0` | `subpel_interpolation_core` | `ref_stream_l0`, `subpel_phase_x/y` | `interp_pixels_l0` | 8-tap luma / 4-tap chroma sub-pel interpolation engine for List 0. |
 | 14 | `u_subpel_core_l1` | `subpel_interpolation_core` | `ref_stream_l1`, `subpel_phase_x/y` | `interp_pixels_l1` | 8-tap luma / 4-tap chroma sub-pel interpolation engine for List 1 (B-frames). |
 | 15 | `u_intra_pred` | `intra_pred_top` | `intra_mode`, `pu_size_log2`, `ref_sample` | `intra_pred_pixel`, `out_valid` | Computes Planar (0), DC (1), or Angular (2..34) prediction matrices with 3-tap ref filter. |

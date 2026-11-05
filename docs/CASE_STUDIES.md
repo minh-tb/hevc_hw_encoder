@@ -28,25 +28,25 @@ All metrics extracted from post-synthesis Vivado 2026.1 reports targeting `xczu1
 
 | Metric | Initial Baseline | Phase 1 Post-Optimization | Phase 2 Un-bypassed | **Sign-Off Final** | Total Reduction vs. Baseline |
 |---|---:|---:|---:|---:|---|
-| **CLB LUTs** | 448,916 (85.88%) | 342,547 (65.53%) | 225,933 (43.22%) | **184,596 (35.31%)** | **-264,320 LUTs (-58.88%)** |
-| *-- LUT as Logic* | 446,581 (85.43%) | 340,166 (65.08%) | 223,550 (42.77%) | **178,757 (34.20%)** | **-263,168 LUTs (-59.55%)** |
+| **CLB LUTs** | 448,916 (85.88%) | 342,547 (65.53%) | 225,933 (43.22%) | **187,823 (35.93%)** | **-261,093 LUTs (-58.16%)** |
+| *-- LUT as Logic* | 446,581 (85.43%) | 340,166 (65.08%) | 223,550 (42.77%) | **181,984 (34.81%)** | **-259,941 LUTs (-58.82%)** |
 | *-- LUT as Memory (LUTRAM + SRL)* | 6,991 (4.33%) | 6,991 (4.33%) | 6,991 (4.33%) | **5,839 (3.62%)** | 5,808 LUTRAM + 31 SRL |
-| **CLB Registers (FFs)** | 344,030 (32.91%) | 253,425 (24.24%) | 249,980 (23.91%) | **121,775 (11.65%)** | **-222,255 FFs (-64.60%)** |
+| **CLB Registers (FFs)** | 344,030 (32.91%) | 253,425 (24.24%) | 249,980 (23.91%) | **122,796 (11.75%)** | **-221,234 FFs (-64.31%)** |
 | **Unique Control Sets** | 14,641 (11.20%) | 10,812 (8.27%) | 10,733 (8.21%) | **7,280 (5.57%)** | **-7,361 sets (-50.28%)** |
-| **DSP48E2 Slices** | 920 (46.75%) | 878 (44.61%) | 209 (10.62%) | **209 (10.62%)** | **-711 DSPs (-77.28%)** |
+| **DSP48E2 Slices** | 920 (46.75%) | 878 (44.61%) | 209 (10.62%) | **221 (11.23%)** | **-699 DSPs (-75.98%)** |
 | **Block RAM** | 12.5 Tiles (1.27%) | 30.0 Tiles (3.05%) | 30.0 Tiles (3.05%) | **30 RAMB36 + 13 RAMB18** | **+24.0 BRAM Units (3.71%)** |
-| **Setup Slack (WNS)** | -5.394 ns (VIOLATED) | +1.485 ns (MET) | +10.497 ns (MET) | **+10.497 ns (MET)** | **+15.891 ns timing slack** |
-| **Failing Endpoints** | 37 failing endpoints | 0 failing endpoints | 0 / 543,058 | **0 / 322,234** | **100% Timing Closure** |
-| **Estimated $F_{\max}$** | 39.38 MHz | 54.01 MHz | 105.23 MHz | **105.23 MHz** | **+167.2% Clock Speedup** |
-| **Dynamic Power** | 1.926 W | 1.304 W | 0.831 W | **0.895 W** | **-53.5% Dynamic Power** |
-| **Total On-Chip Power** | 3.048 W | 2.420 W | 1.943 W | **2.008 W** | **-34.1% Total Power** |
+| **Setup Slack (WNS)** | -5.394 ns (VIOLATED) | +1.485 ns (MET) | +10.497 ns (MET) | **+3.847 ns (MET)** | **+9.241 ns timing slack** |
+| **Failing Endpoints** | 37 failing endpoints | 0 failing endpoints | 0 / 543,058 | **0 / 325,536** | **100% Timing Closure** |
+| **Estimated $F_{\max}$** | 39.38 MHz | 54.01 MHz | 105.23 MHz | **61.91 MHz** | **+57.2% Clock Speedup** |
+| **Dynamic Power** | 1.926 W | 1.304 W | 0.831 W | **0.902 W** | **-53.2% Dynamic Power** |
+| **Total On-Chip Power** | 3.048 W | 2.420 W | 1.943 W | **2.015 W** | **-33.9% Total Power** |
 | **Methodology `LUTAR-1`** | 1 Advisory | 1 Advisory | 1 Advisory | **0 Advisories** | Eliminated via sync `core_rst_n_reg` |
 
 ```
 Initial Baseline: 448,916 LUTs (85.88%) | 344,030 FFs (32.91%) | 920 DSPs (46.75%) | WNS = -5.394 ns (39.38 MHz)
 Phase 1:          342,547 LUTs (65.53%) | 253,425 FFs (24.24%) | 878 DSPs (44.61%) | WNS = +1.485 ns (54.01 MHz)
 Phase 2:          225,933 LUTs (43.22%) | 249,980 FFs (23.91%) | 209 DSPs (10.62%) | WNS = +10.497 ns (105.23 MHz)
-Sign-Off Final:   184,596 LUTs (35.31%) | 121,775 FFs (11.65%) | 209 DSPs (10.62%) | WNS = +10.497 ns (105.23 MHz)
+Sign-Off Final:   187,823 LUTs (35.93%) | 122,796 FFs (11.75%) | 221 DSPs (11.23%) | WNS = +3.847 ns (61.91 MHz)
 ```
 
 ---
