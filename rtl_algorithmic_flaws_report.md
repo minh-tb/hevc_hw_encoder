@@ -155,6 +155,24 @@
 
 ---
 
+### 2.3 Architectural De-Bifurcation: Sliding-Column Window DPB Fetch Engine (`mc_window_fetch.v`)
+- **RTL Location:** `rtl/inter/mc_window_fetch.v`, `rtl/top/hevc_encoder_top.v` lines 2018–2190
+- **Normative Spec:** ITU-T H.265 Clause 8.5.3.3.3 (Fractional sample interpolation), Clause 8.5.3.3.3.1 (Reference sample matrices derivation)
+- **Reference Software:** HM 18.0 `TLibCommon/TComInterpolationFilter.cpp`, `TLibCommon/TComPrediction.cpp`
+- **Failure Mechanism:** In previous RTL revisions, inter motion compensation was bifurcated: simulation relied on zero-latency 2D memory lookups, whereas synthesis branches instantiated `streaming_subpel_filter.v` using a 1D shift register (`synth_win_l0_reg <= {synth_win_l0_reg[629:0], synth_sample_l0}`) that scrambled 2D spatial window geometry.
+- **Architectural Solution (Option A: Sliding-Column Window):**
+  - **Single Read Port Bandwidth:** Synchronous single-port Block RAM read interface (1-cycle BRAM read latency) per reference list.
+  - **Sliding-Column Traversal:**
+    - At TU row start ($x = 0$): fetches full $8\times 8$ (luma: 64 reads) or $4\times 4$ (chroma: 16 reads).
+    - For each subsequent column ($x > 0$): shifts internal window register array left by 1 column and fetches only 8 (luma) or 4 (chroma) new samples into the vacated right column.
+  - **2-Stage Tracking Pipeline:** Address generated at cycle $T$, latched by DPB synchronous RAM at $T+1$, sampled into window matrix at $T+2$.
+  - **Subpel Interp Core Integration:** Window matrices feed dual unified `subpel_interpolation_core.v` engines for L0 and L1.
+  - **Zero Directives:** Completely eliminated all `` `ifdef SYNTHESIS `` branches across `rtl/top/hevc_encoder_top.v` and deleted `streaming_subpel_filter.v`.
+- **ModelSim Verification:** `tb/tb_mc_window_fetch/tb_mc_window_fetch.sv` validates 576 samples against golden pseudo-random LFSR reference images across all TU sizes ($4\times 4, 8\times 8, 16\times 16, 32\times 32$), components ($Y, Cb, Cr$), boundary clipping coordinates, and back-to-back 0-bubble requests.
+
+---
+
+
 ## 3. Subsystem 2: Transform & Quantization
 
 ### 3.1 Flaw D-02: 4×4 Intra Luma DST-VII Tie-Off to Ground (CRITICAL)
@@ -822,5 +840,8 @@ Following the 14-flaw algorithmic remediation campaign, a sign-off-grade RTL arc
 | **F-06** | **MAJOR** | [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v) | Asynchronous combinational reads on `luma_ram`, `cb_ram`, and `cr_ram` during `S_DUMP` and `S_SAO` neighbor fetches prevented BRAM inference and caused massive FF/LUT fallback. | Converted `S_DUMP` and `S_SAO` neighbor reads (`sao_n0_resp_data`, `sao_n1_resp_data`) to synchronous registered reads and consolidated single-always-block write ports. | Reduced total encoder FFs from `249,980` to **`121,775`** (**-128,205 FFs**) and LUTs from `225,933` to **`184,596`** (**-41,337 LUTs**). |
 | **F-07** | **MAJOR** | [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v) | Combinational `core_rst_n = rst_n & ~soft_reset` drove 30,190 asynchronous preset/clear pins through a LUT2, triggering Vivado `LUTAR-1` glitch warning. | Replaced combinational LUT reset with synchronous reset register `core_rst_n_reg` with asynchronous assertion and synchronous deassertion. | **0 `LUTAR-1` methodology warnings** in `synth/vivado_output/methodology_synth.rpt`. |
 | **F-08..F-12**| **MINOR / OPT**| `dct_top.v`, `transpose_ram_32x32.v`, `transform_1d_core.v`, `fme_search.v` | Documented 16,384-bit flattened transform array ports and `(* use_dsp = "no" *)` trade-offs for UltraScale+ vs. smaller FPGAs. | Verified post-synthesis timing closure (**WNS = +10.497 ns**, **$F_{\max} = 105.23\text{ MHz}$**, **0 failing endpoints out of 322,234**). | Full sign-off PPA & timing closure achieved on `xczu19eg-ffvb1517-2-e`. |
-| **F-13** | **MAJOR** | [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v) | Removed duplicate unbuffered subpel interpolator logic and unified subpel operations. | Eliminated redundant datapath muxing in top-level encoder pipeline. | Area reduced to **184,596 LUTs** and **121,775 FFs** with **209 DSP48E2** slices. |
-| **F-14** | **CRITICAL** | [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v) | Address advancing during downstream backpressure in `S_DUMP` created 1-cycle pipeline phase skews across CTU boundaries. | Decoupled `dump_rd_addr` advancing from output handshake and registered hold stages for `luma_rd_q`, `cb_rd_q`, `cr_rd_q`. | Achieved **100.00% sample-exact match (`max_diff = 0`)** across all 73,728 samples in Frames 0, 1, and 2 against Fraunhofer HM 18.0 reference decoder. |
+| **F-13** | **CRITICAL** | [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v) | Inter MC contained an artificial behavioral/synthesis bifurcation under `` `ifdef SYNTHESIS `` using unsynthesizable `streaming_subpel_filter.v` and a 1D shift register that scrambled 2D reference windows. | Permanently removed `streaming_subpel_filter.v`, deleted all `` `ifdef SYNTHESIS `` directives across `rtl/`, and integrated `mc_window_fetch.v` (Option A sliding-column window DPB fetch engine with 2-stage tracking pipeline). | 100% bit-exact hardware datapath parity across simulation, post-synthesis (`+define+SYNTHESIS`), and physical silicon. |
+| **F-14** | **CRITICAL** | [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v) | Address advancing during downstream backpressure in `S_DUMP` created 1-cycle pipeline phase skews across CTU boundaries. | Decoupled `dump_rd_addr` advancing from output handshake and registered hold stages for `luma_rd_q`, `cb_rd_q`, `cr_rd_q` (`dump_stall` gate). | Achieved **100.00% sample-exact match (`max_diff = 0`)** across all 73,728 samples in Frames 0, 1, and 2 against Fraunhofer HM 18.0 reference decoder. |
+| **F-15** | **CRITICAL** | [`docs/H265_CONFORMANCE_MATRIX.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/H265_CONFORMANCE_MATRIX.md) | Lack of formal clause-by-clause, equation-by-equation mapping against normative ITU-T H.265 specification. | Authored 3-track conformance matrix auditing In-Loop Filtering (Track 1), Prediction/Transform (Track 2), and CABAC/Syntax (Track 3) using page-calibrated spec extractor (`scripts/extract_h265_clauses.py`, offset +17). | Full normative traceability and mathematical integer parity established. |
+| **F-16** | **MAJOR** | [`synth/vivado_output/`](file:///d:/UIT_Doc/hevc_hw_encoder/synth/vivado_output) | Physical synthesis convergence with new un-bypassed `mc_window_fetch` and dual `subpel_interpolation_core` engines. | Verified out-of-context synthesis in AMD Vivado 2026.1 targeting Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`. | **187,823 LUTs (35.93%)**, **122,796 FFs (11.75%)**, **30 RAMB36 + 13 RAMB18 (3.71%)**, **221 DSPs (11.23%)**, **WNS = +3.847 ns (MET @ 50 MHz)**, 0 latches, 0 `LUTAR-1`. |
+
