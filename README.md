@@ -69,6 +69,7 @@ Evaluated on **Foreman 128x128 10-bit** (3 frames: POC 0 I-Slice, POC 1 P-Slice,
 - **2D Transform (`rtl/transform/`):**
   - Synthesizable 1D core implementing DCT-II (4x4, 8x8, 16x16, 32x32) and 4x4 DST-VII.
   - 2D transform realized via dual-port matrix transposition RAM (`transpose_ram_32x32.v`).
+  - *Encoder subset:* residual quadtree (RQT) depth is fixed at 0, so TU size = CU size. CU quadtree splitting still gives 8×8 to 32×32 TUs. Partitioning is PART_2Nx2N only (see T3-11/T3-12 in [`docs/H265_CONFORMANCE_MATRIX.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/H265_CONFORMANCE_MATRIX.md)).
 - **Quantization (`rtl/quant/`):**
   - Configurable QP forward quantization (`fwd_quant.v`) with sign-magnitude handling.
   - Paired inverse quantization (`inv_quant.v`) with ITU-T Table 8-10 Chroma QP mapping for the reconstruction loop.
@@ -78,7 +79,7 @@ Evaluated on **Foreman 128x128 10-bit** (3 frames: POC 0 I-Slice, POC 1 P-Slice,
   - Boundary strength (BS) calculation for luma and chroma edges.
   - Normal and strong filtering paths with threshold adaptivity.
 - **Sample Adaptive Offset (SAO):**
-  - Band Offset (BO) and Edge Offset (EO) classified over pixel neighborhoods with window buffering.
+  - Band Offset (BO) and Edge Offset (EO) classification datapaths with window buffering. *Encoder subset:* `sao_stats.v` currently selects only BO or OFF per CTU (`sao_type <= 6'b10_10_10`); EO is implemented in the filter but not chosen (see T3-13 in the conformance matrix).
 
 ### 4. CABAC Arithmetic Entropy Encoder
 - **Binary Arithmetic Range Coder (`rtl/entropy/range_coder.v`):**

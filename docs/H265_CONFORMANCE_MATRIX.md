@@ -12,9 +12,9 @@
 
 | Conformance Category | Count | Description |
 |----------------------|-------|-------------|
-| **CONFORMANT** | 38 | Full normative equivalence to ITU-T H.265 equations and HM 18.0 integer behaviors. |
-| **SUBSET** | 8 | Valid normative encoder choices (decodable by any standard-compliant decoder, e.g. PART_2Nx2N, RQT depth 0, BO-only SAO, DM chroma). |
-| **DIVERGENT** | 1 | Inter motion compensation `synth_win_l0_reg` shift register under `ifdef SYNTHESIS` (Replaced by `mc_window_fetch`). |
+| **CONFORMANT** | 46 | Full normative equivalence to ITU-T H.265 equations and HM 18.0 integer behaviors. |
+| **SUBSET** | 4 | Valid normative encoder choices (decodable by any standard-compliant decoder): PART_2Nx2N, RQT depth 0, BO-only SAO, DM chroma. |
+| **DIVERGENT** | 0 | *(Resolved)* The former `synth_win_l0_reg` shift register under `ifdef SYNTHESIS` (T2-10) was removed; sim and synthesis now share the single `mc_window_fetch` datapath. |
 | **NOT IMPLEMENTED** | 2 | Optional high-level features omitted by design (e.g., PCM sample bypass, multiple tiles/WPP). |
 
 ---
@@ -60,16 +60,16 @@
 
 | ID | Clause | Eq./Table | Spec p. | RTL File:Line | RTL quote | HM ref (file:func) | Status | Note |
 |---|---|---|---|---|---|---|---|---|
-| T2-01 | 6.4.1 | Eq. 6-1..6-2 | 26 | `hevc_encoder_top.v:1531` | `z_scan_idx_4x4 = {y_blk[3], x_blk[3], y_blk[2], x_blk[2], y_blk[1], x_blk[1], y_blk[0], x_blk[0]};` | `TComPattern.cpp:getNeighboringCandUnits` | `CONFORMANT` | Bit-interleaved Morton decoding for 4×4 z-scan block availability checks. |
+| T2-01 | 6.4.1 | Eq. 6-1..6-2 | 26 | `hevc_encoder_top.v:1530` | `z_scan_idx_4x4 = {y_blk[3], x_blk[3], y_blk[2], x_blk[2], y_blk[1], x_blk[1], y_blk[0], x_blk[0]};` | `TComPattern.cpp:getNeighboringCandUnits` | `CONFORMANT` | Bit-interleaved Morton decoding for 4×4 z-scan block availability checks. |
 | T2-02 | 8.4.4.2.2 | Table 8-4..8-6 | 133-134 | `ref_sample_filter.v:41` | `pFlt[i] = (pSrc[i-1] + 2*pSrc[i] + pSrc[i+1] + 2) >> 2` | `TComPrediction.cpp:xFilterReferenceSamples` | `CONFORMANT` | Intra reference sample smoothing: 3-tap $[1, 2, 1]/4$ filter gated by intra prediction mode and TU size. |
 | T2-03 | 8.4.4.2.3 | Eq. 8-44..46 | 135 | `intra_planar.v:78-85` | `pred = ((N - 1 - x)*left[y] + (x + 1)*top[N] + (N - 1 - y)*top[x] + (y + 1)*left[N] + N) >> (log2N + 1);` | `TComPrediction.cpp:xPredIntraPlanar` | `CONFORMANT` | Planar intra prediction 4-corner bilinear interpolation. |
 | T2-04 | 8.4.4.2.4 | Eq. 8-47..51 | 136 | `intra_dc.v:62-75` | `dc_val = (sum_samples + N) >> (log2N + 1);` | `TComPrediction.cpp:xPredIntraDC` | `CONFORMANT` | DC intra prediction with boundary smoothing filter on DC edge samples for $N < 32$. |
 | T2-05 | 8.4.4.2.6 | Table 8-7, Eq. 8-57 | 138 | `intra_angular.v:112-145` | `pred = ((32 - fact)*ref[idx] + fact*ref[idx+1] + 16) >> 5;` | `TComPrediction.cpp:xPredIntraAng` | `CONFORMANT` | All 33 angular directions (modes 2..34) with 1/32 sample precision linear interpolation. |
-| T2-06 | 8.5.3.3.3.2 | Table 8-8 | 166 | `subpel_interpolation_core.v:47-49` | `c_h[0]=-1; c_h[1]=4; c_h[2]=-10; c_h[3]=58; c_h[4]=17; c_h[5]=-5; c_h[6]=1; c_h[7]=0;` | `TComInterpolationFilter.cpp:m_lumaFilter` | `CONFORMANT` | 8-tap luma separable fractional interpolation filters for quarter-pel phases 1/4, 1/2, 3/4. |
-| T2-07 | 8.5.3.3.3.3 | Table 8-9 | 168 | `subpel_interpolation_core.v:99-105` | `c_h[0]=-2; c_h[1]=58; c_h[2]=10; c_h[3]=-2;` | `TComInterpolationFilter.cpp:m_chromaFilter` | `CONFORMANT` | 4-tap chroma separable fractional interpolation filters for eighth-pel phases 1/8 to 7/8. |
-| T2-08 | 8.5.3.3.3 | Eq. 8-224..248 | 167 | `subpel_interpolation_core.v:64,76,81` | `h_int[r] = sum_h[r] >>> 2; ... sum_v >>> 6;` | `TComInterpolationFilter.cpp:filterHor, filterVer` | `CONFORMANT` | Intermediate truncation shifts: $shift_1 = B_Y - 8 = 2$, $shift_2 = 6$, $shift_3 = 14 - B_Y = 4$. Fixed-point integer exact. |
-| T2-09 | 8.5.3.3.4.2 | Eq. 8-251 | 170 | `hevc_encoder_top.v:2283` | `pred_inter_val = is_bi_pred ? clip_bd10((interm_val_l0 + interm_val_l1 + 32'sd16) >>> 5) : ...` | `TComInterpolationFilter.cpp:xWeightedAverage` | `CONFORMANT` | Bi-prediction rounding and averaging: $(val_{L0} + val_{L1} + 16) \gg 5$. |
-| T2-10 | 8.5.3.3.3 | Shift Reg | 165 | `hevc_encoder_top.v:2198` | `synth_win_l0_reg <= {synth_win_l0_reg[629:0], synth_sample_l0};` | `TComInterpolationFilter.cpp` | `DIVERGENT` | **Hardware divergence under `ifdef SYNTHESIS`**: 64-sample 1D shift register instead of 8×8 2D spatial window. Fixed in Task 4 via `mc_window_fetch`. |
+| T2-06 | 8.5.3.3.3.2 | Table 8-8 | 166 | `subpel_interpolation_core.v:53-94` | `function automatic signed [6:0] coeff_luma; ... 3: coeff_luma = 7'sd58; 4: coeff_luma = 7'sd17;` | `TComInterpolationFilter.cpp:m_lumaFilter` | `CONFORMANT` | 8-tap luma separable fractional interpolation filters for quarter-pel phases 1/4, 1/2, 3/4. |
+| T2-07 | 8.5.3.3.3.3 | Table 8-9 | 168 | `subpel_interpolation_core.v:99-152` | `function automatic signed [6:0] coeff_chroma; ... 1: coeff_chroma = 7'sd58;` | `TComInterpolationFilter.cpp:m_chromaFilter` | `CONFORMANT` | 4-tap chroma separable fractional interpolation filters for eighth-pel phases 1/8 to 7/8. |
+| T2-08 | 8.5.3.3.3 | Eq. 8-224..248 | 167 | `subpel_interpolation_core.v:250-256,288,297` | `s1_h_luma[r_idx] <= fir8_luma_row(...) >>> 2; ... res_luma = sum_hv_luma >>> 6;` | `TComInterpolationFilter.cpp:filterHor, filterVer` | `CONFORMANT` | Intermediate truncation shifts: $shift_1 = B_Y - 8 = 2$, $shift_2 = 6$, $shift_3 = 14 - B_Y = 4$. Fixed-point integer exact. |
+| T2-09 | 8.5.3.3.4.2 | Eq. 8-251 | 170 | `hevc_encoder_top.v:2217-2218` | `pred_inter_val = is_bi_pred ? clip_bd10((interm_val_l0 + interm_val_l1 + 32'sd16) >>> 5) : ...` | `TComInterpolationFilter.cpp:xWeightedAverage` | `CONFORMANT` | Bi-prediction rounding and averaging: $(val_{L0} + val_{L1} + 16) \gg 5$. |
+| T2-10 | 8.5.3.3.3.1 | Ref. sample matrix | 165 | `mc_window_fetch.v:10-16`, `hevc_encoder_top.v:2134` | `) u_mc_window_fetch (` | `TComInterpolationFilter.cpp`, `TComPrediction.cpp` | `CONFORMANT` | **Resolved.** The former `ifdef SYNTHESIS` 1D shift register (`synth_win_l0_reg`) was removed. A single sliding-column 8×8 (luma) / 4×4 (chroma) 2D window with Clip3 boundary padding now serves both simulation and synthesis. |
 | T2-11 | 8.6.1 | Eq. 8-261 | 175 | `inv_quant.v:55` | `wire [6:0] level_scale = (rem6 == 0) ? 7'd40 : (rem6 == 1) ? 7'd45 : ...` | `TComTrQuant.cpp:xDeQuant` | `CONFORMANT` | Dequantization scale factor $levelScale[m] \in \{40, 45, 51, 57, 64, 72\}$. |
 | T2-12 | 8.6.2 | Eq. 8-262 | 175 | `inv_quant.v:62` | `wire signed [31:0] scaled = ((coeff * level_scale) <<< qp_div6) + (1 <<< (shift - 1));` | `TComTrQuant.cpp:xDeQuant` | `CONFORMANT` | Normative inverse quantization scaling with bit-depth and transform-size dependent rounding and clipping to $[-32768, 32767]$. |
 | T2-13 | 8.6.3 | Table 8-16 | 178 | `transform_1d_core.v:150-158` | `wire signed [7:0] dst7_coeffs [0:3][0:3] = '{{29, 55, 74, 84}, ...};` | `TComTrQuant.cpp:fastForwardDst, fastInverseDst` | `CONFORMANT` | 4×4 DST-VII core for 4×4 intra luma transform blocks. |
@@ -79,16 +79,18 @@
 
 ---
 
-## Classification of the 13 `SYNTHESIS` Directives in RTL
+## Classification of `SYNTHESIS` Directives in RTL
+
+13 directives were originally audited. The 2 behavioral divergences (S-01, S-02) have been removed. The 11 that remain are all `` `ifndef SYNTHESIS `` simulation-only memory init/reset loops and do not change datapath behavior (re-verified by `Select-String` over `rtl/` on 2026-11-09).
 
 | Site | File:Line | Directive | Purpose / Nature | Audit Verdict |
 |---|---|---|---|---|
-| **S-01** | `rtl/top/hevc_encoder_top.v:2018` | `` `ifdef SYNTHESIS `` | Alternate DPB array structure | **Behavioral Divergence** — Unified into synthesizable block RAM array in Task 4. |
-| **S-02** | `rtl/top/hevc_encoder_top.v:2170` | `` `ifdef SYNTHESIS `` | Inter MC streaming filter instantiation | **Behavioral Divergence (Flawed)** — Scrambled 2D spatial window. Replaced by `mc_window_fetch`. |
-| **S-03** | `rtl/top/hevc_encoder_top.v:1290` | `` `ifndef SYNTHESIS `` | `residual_buffer` clear loop | **Benign Sim Reset** — Proven write-before-read. Gated by `res_sub_valid`. |
-| **S-04** | `rtl/top/hevc_encoder_top.v:1297` | `` `ifndef SYNTHESIS `` | `residual_buffer` reset loop | **Benign Sim Reset** — Omitted in synthesis to avoid 16,384 FF reset fanout. |
-| **S-05** | `rtl/top/hevc_encoder_top.v:2546` | `` `ifndef SYNTHESIS `` | `s2p_buffer` clear loop | **Benign Sim Reset** — Proven write-before-read. Gated by `quant_out_valid`. |
-| **S-06** | `rtl/top/hevc_encoder_top.v:2554` | `` `ifndef SYNTHESIS `` | `s2p_buffer` reset loop | **Benign Sim Reset** — Omitted in synthesis to infer block RAM without reset. |
+| **S-01** | *(removed)* | ~~`` `ifdef SYNTHESIS ``~~ | Alternate DPB array structure | **Resolved** — Unified into a single synthesizable block-RAM DPB (`dpb_*_ram_l0/l1`, `hevc_encoder_top.v:2020-2025`) used by both sim and synthesis. |
+| **S-02** | *(removed)* | ~~`` `ifdef SYNTHESIS ``~~ | Inter MC streaming filter instantiation | **Resolved** — Replaced by `mc_window_fetch` (`hevc_encoder_top.v:2134`); `streaming_subpel_filter.v` deleted. |
+| **S-03** | `rtl/top/hevc_encoder_top.v:1289` | `` `ifndef SYNTHESIS `` | `residual_buffer` clear loop | **Benign Sim Reset** — Proven write-before-read. Gated by `res_sub_valid`. |
+| **S-04** | `rtl/top/hevc_encoder_top.v:1296` | `` `ifndef SYNTHESIS `` | `residual_buffer` reset loop | **Benign Sim Reset** — Omitted in synthesis to avoid 16,384 FF reset fanout. |
+| **S-05** | `rtl/top/hevc_encoder_top.v:2495` | `` `ifndef SYNTHESIS `` | `s2p_buffer` clear loop | **Benign Sim Reset** — Proven write-before-read. Gated by `quant_out_valid`. |
+| **S-06** | `rtl/top/hevc_encoder_top.v:2503` | `` `ifndef SYNTHESIS `` | `s2p_buffer` reset loop | **Benign Sim Reset** — Omitted in synthesis to infer block RAM without reset. |
 | **S-07** | `rtl/intra/ref_sample_filter.v:95` | `` `ifndef SYNTHESIS `` | `ref_buf` reset and init | **Benign Sim Reset** — Proven write-before-read. `in_valid` buffers $4N+1$ samples before readout. |
 | **S-08** | `rtl/intra/intra_rmd.v:49` | `` `ifndef SYNTHESIS `` | `ref_buf` reset and init | **Benign Sim Reset** — Proven write-before-read. Serial loading before SATD calculation. |
 | **S-09** | `rtl/entropy/coeff_buffer.v:23` | `` `ifndef SYNTHESIS `` | Initial memory fill | **Benign Sim Init** — Overwritten during TU coefficient serialization. |
@@ -113,14 +115,14 @@
 | T3-03 | 7.3.8.3 | Clause text | 52 | `syntax_sao.v:78` | `sao_type_idx_luma <= sao_type_idx;` | `TEncCavlc.cpp:codeSao` | `CONFORMANT` | SAO syntax: `sao_merge_left_flag`, `sao_merge_up_flag`, `sao_type_idx_luma/chroma`, offsets and band positions. |
 | T3-04 | 7.3.8.8 | Clause text | 58 | `syntax_pred.v:92` | `prev_intra_luma_pred_flag <= 1'b1;` | `TEncCavlc.cpp:codeIntraDirLumaAng` | `CONFORMANT` | Intra prediction syntax: `prev_intra_luma_pred_flag`, `mpm_idx`, `rem_intra_luma_pred_mode`. |
 | T3-05 | 7.3.8.11 | Clause text | 60 | `syntax_coeff.v:112` | `last_sig_coeff_x_prefix <= ...;` | `TEncCavlc.cpp:codeCoeffNxN` | `CONFORMANT` | Residual coding syntax: `transform_skip_flag`, `last_sig_coeff_x_prefix`, `last_sig_coeff_y_prefix`, `coded_sub_block_flag`, `sig_coeff_flag`. |
-| T3-06 | 9.3.2.2 | Table 9-5..37 | 204-217 | `cabac_context_init.v:45-120` | `preCtxState = Clip3(1, 126, ((m * Clip3(0, 51, SliceQpY)) >> 4) + n);` | `TComCABACTables.cpp:sm_aucLPSTable` | `CONFORMANT` | Context model initialization across all slice types from normative $(m, n)$ table pairs. |
+| T3-06 | 9.3.2.2 | Table 9-5..37 | 204-217 | `ctx_model_store.v:138-177` | `slope = $signed({5'b0, iv[7:4]}) * 9'sd5 - 9'sd45; tmp = (slope * $signed({1'b0, qp})) >>> 4;` | `ContextModel.cpp:init` | `CONFORMANT` | Context model initialization per slice type (I/P/B init values via `get_init_val`), state clamped to [1, 126]. |
 | T3-07 | 9.3.4.2 | Table 9-52 | 235 | `range_coder.v:104-125` | `t[0]=8'd128; t[1]=8'd176; t[2]=8'd208; t[3]=8'd240;` | `TComCABACTables.cpp:sm_aucLPSTable` | `CONFORMANT` | Arithmetic decoding/encoding engine $64 \times 4$ probability table `rangeTabLPS`. |
 | T3-08 | 9.3.4.2 | Table 9-53 | 237 | `ctx_model_store.v:82-95` | `next_pstate = bin ? trans_idx_mps(pstate) : trans_idx_lps(pstate);` | `TComCABACTables.cpp:sm_aucNextStateMPS, sm_aucNextStateLPS` | `CONFORMANT` | State transition tables `transIdxMPS` and `transIdxLPS` for context model adaptation. |
 | T3-09 | 9.3.4.3 | Fig. 9-10..12 | 241-243 | `range_coder.v:180-195` | `function automatic [2:0] renorm_shift_lzc;` | `TEncBinCABAC.cpp:encodeBin` | `CONFORMANT` | `EncodeDecision` and `RenormE`: exact interval subdivision and leading-zero normalization. |
 | T3-10 | 9.3.4.3 | Fig. 9-13..15 | 244-245 | `range_coder.v:238-245` | `reg [15:0] num_ff; // m_numBufferedBytes carry counter` | `TEncBinCABAC.cpp:writeOut, finish` | `CONFORMANT` | `PutBit` carry propagation buffer and `EncodeFlush` terminating bitstream flush. |
 | T3-11 | 7.3.8.5 | Clause text | 54 | `syntax_cu.v` | `PART_2Nx2N only` | `TEncCavlc.cpp` | `SUBSET` | Encoder subset: only square $2N \times 2N$ partitions evaluated (valid compliant bitstream). |
 | T3-12 | 7.3.8.8 | Clause text | 57 | `hevc_encoder_top.v` | `RQT depth 0 only` | `TEncSearch.cpp` | `SUBSET` | Encoder subset: transform tree depth locked to 0 ($TU = PU = CU$ size). Compliant syntax. |
-| T3-13 | 7.3.8.3 | Clause text | 52 | `sao_rdo_decision.v` | `BO-only mode selection` | `TEncSampleAdaptiveOffset.cpp` | `SUBSET` | Encoder RDO subset: selects Band Offset or OFF; Edge Offset decodable in bitstream. |
+| T3-13 | 7.3.8.3 | Clause text | 52 | `sao_stats.v:132` | `sao_type <= 6'b10_10_10; // BO active for all 3 color components` | `TEncSampleAdaptiveOffset.cpp` | `SUBSET` | Encoder RDO subset: selects Band Offset or OFF; Edge Offset decodable in bitstream. |
 | T3-14 | 7.3.8.8 | Clause text | 58 | `intra_pred_top.v` | `Derived Mode (DM) chroma` | `TEncSearch.cpp` | `SUBSET` | Encoder subset: chroma intra direction inherits luma mode (mode 4 / DM). Valid bitstream. |
 | T3-15 | 7.3.8.7 | Clause text | 56 | `hevc_encoder_top.v` | `pcm_flag == 0` | `TEncSearch.cpp` | `NOT IMPLEMENTED` | PCM sample bypass coding omitted (not required for standard Main10 profiles). |
 | T3-16 | 7.3.4 | Clause text | 38 | `hevc_encoder_top.v` | `Single tile, no WPP` | `TEncTop.cpp` | `NOT IMPLEMENTED` | Multiple tiles and wavefront parallel processing (WPP) disabled. |
@@ -131,4 +133,5 @@
 
 - **Specification Verification**: All citations cross-referenced against printed page footers of ITU-T H.265 (V11, 01/2026) using page extractor (`scripts/extract_h265_clauses.py`).
 - **Bit-Exact Conformance**: Every arithmetic calculation in the in-loop filter (Deblock/SAO), transform (DCT-II/DST-VII), quantization, and CABAC engine operates in the fixed-point integer domain, mirroring Fraunhofer HM-18.0 line-by-line.
-- **Hardware Architecture Rectification**: The single verified non-conformance between sim and FPGA synthesis (`synth_win_l0_reg` shift register under `ifdef SYNTHESIS` in `hevc_encoder_top.v`) is replaced in Task 4 by `mc_window_fetch`.
+- **Hardware Architecture Rectification**: The single verified non-conformance between sim and FPGA synthesis (`synth_win_l0_reg` shift register under `ifdef SYNTHESIS` in `hevc_encoder_top.v`) has been replaced by `mc_window_fetch`. No behavioral `ifdef SYNTHESIS` blocks remain.
+- **Current Evidence (2026-11-09, Option B RTL)**: `regression_gate.py --enable-loop-filters --num-frames 3` gives 73,728 / 73,728 exact samples (`global_max_diff = 0`). `verify_3frames_bins.py transcript_synthdef.log` gives 22,901 / 22,901 CABAC bins (POC 0: 8,486, POC 1: 7,263, POC 2: 7,152).
