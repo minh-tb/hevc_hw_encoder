@@ -22,7 +22,7 @@ LUMA_SIZE = WIDTH * HEIGHT
 CHROMA_SIZE = (WIDTH // 2) * (HEIGHT // 2)
 SAMPLES_PER_FRAME = LUMA_SIZE + 2 * CHROMA_SIZE
 
-ARTIFACT_DIR = r"C:\Users\Admin\.gemini\antigravity\brain\e27560eb-42b9-45b7-8dc4-83cab9c298bf"
+ARTIFACT_DIR = os.environ.get("ARTIFACT_DIR", r"C:\Users\Admin\.gemini\antigravity\brain\19963ef2-f4a5-40c2-a794-57e7d40a873a")
 
 # Color constants
 COLOR_BG = (15, 23, 42)          # Slate 900

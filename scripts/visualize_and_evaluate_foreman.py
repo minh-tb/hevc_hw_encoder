@@ -18,7 +18,7 @@ import base64
 
 WIDTH = 128
 HEIGHT = 128
-ARTIFACT_DIR = r"C:\Users\Admin\.gemini\antigravity\brain\e27560eb-42b9-45b7-8dc4-83cab9c298bf"
+ARTIFACT_DIR = os.environ.get("ARTIFACT_DIR", r"C:\Users\Admin\.gemini\antigravity\brain\19963ef2-f4a5-40c2-a794-57e7d40a873a")
 
 def yuv420_to_rgb_bmp(y_plane, u_plane, v_plane, width, height, bmp_path):
     row_bytes = width * 3

@@ -10,7 +10,7 @@ import shutil
 WIDTH = 128
 HEIGHT = 128
 NUM_FRAMES = 3
-ARTIFACT_DIR = r"C:\Users\Admin\.gemini\antigravity\brain\e27560eb-42b9-45b7-8dc4-83cab9c298bf"
+ARTIFACT_DIR = os.environ.get("ARTIFACT_DIR", r"C:\Users\Admin\.gemini\antigravity\brain\19963ef2-f4a5-40c2-a794-57e7d40a873a")
 
 def yuv420_to_rgb_png(y_plane, u_plane, v_plane, width=128, height=128):
     raw_lines = []
