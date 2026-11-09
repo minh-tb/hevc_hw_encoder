@@ -46,14 +46,43 @@ def parse_enc_bins(log_file):
                 })
     return bins_by_poc
 
-enc_log_path = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('-') else 'transcript'
-enc_bins_by_poc = parse_enc_bins(enc_log_path)
-total_enc = sum(len(b) for b in enc_bins_by_poc.values())
+def select_default_enc_log(candidates=('transcript', 'transcript_synthdef.log', 'transcript_3frames.log')):
+    """Pick the newest candidate log that has ENC_BIN entries for EVERY POC.
 
-if total_enc == 0 and enc_log_path == 'transcript' and os.path.exists('transcript_3frames.log'):
-    enc_log_path = 'transcript_3frames.log'
+    The generic 'transcript' file is overwritten by every ModelSim run (including
+    unit testbenches and aborted runs), so it may hold no or only partial encoder
+    bins. Preferring the newest *complete* log avoids a false FAIL. If no log is
+    complete, fall back to the log with the most bins.
+    """
+    complete, partial = None, None
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        bins = parse_enc_bins(path)
+        total = sum(len(b) for b in bins.values())
+        if total == 0:
+            continue
+        if all(len(b) > 0 for b in bins.values()):
+            if complete is None or os.path.getmtime(path) > os.path.getmtime(complete[0]):
+                complete = (path, bins)
+        elif partial is None or total > sum(len(b) for b in partial[1].values()):
+            partial = (path, bins)
+    return complete or partial
+
+if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+    enc_log_path = sys.argv[1]
     enc_bins_by_poc = parse_enc_bins(enc_log_path)
-    total_enc = sum(len(b) for b in enc_bins_by_poc.values())
+else:
+    selected = select_default_enc_log()
+    if selected is None:
+        enc_log_path = 'transcript'
+        enc_bins_by_poc = parse_enc_bins(enc_log_path)
+    else:
+        enc_log_path, enc_bins_by_poc = selected
+        print(f"Auto-selected encoder log: {enc_log_path}")
+        if os.path.exists(bitstream_path) and os.path.getmtime(bitstream_path) - os.path.getmtime(enc_log_path) > 60:
+            print(f"[WARNING] {enc_log_path} is older than {bitstream_path}; bins may not correspond to the current bitstream.")
+total_enc = sum(len(b) for b in enc_bins_by_poc.values())
 
 if total_enc == 0:
     print(f"\n[ERROR] No ENC_BIN entries found in {enc_log_path}!")

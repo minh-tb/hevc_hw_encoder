@@ -218,14 +218,24 @@ def print_metadata(bitstream, enable_loop_filters=False):
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="HEVC Regression Gate")
-    parser.add_argument("--enable-loop-filters", action="store_true", help="Enable in-loop filters in HM decoder (omit DISABLE_LOOP_FILTERS)")
+    # hw_recon.yuv is the POST-filter (deblock + SAO) reconstruction, so the HM decoder
+    # must run with loop filters ENABLED for a meaningful comparison. This is the default.
+    # --enable-loop-filters is kept as an accepted no-op for backward compatibility.
+    parser.add_argument("--enable-loop-filters", dest="enable_loop_filters", action="store_true", default=True,
+                        help="(Default) Run HM decoder with in-loop filters enabled; compares post-filter output")
+    parser.add_argument("--disable-loop-filters", dest="enable_loop_filters", action="store_false",
+                        help="Run HM decoder with DISABLE_LOOP_FILTERS=1. Only meaningful with a PRE-filter HW YUV via --hw-yuv")
     parser.add_argument("--bitstream", default="str_b_frame.bin", help="Input bitstream")
     parser.add_argument("--hw-yuv", default="hw_recon.yuv", help="Hardware reconstructed YUV")
-    parser.add_argument("--dec-yuv", default="dec_gate.yuv", help="Decoder reconstructed YUV")
+    parser.add_argument("--dec-yuv", default=None,
+                        help="Decoder output YUV (default: dec_gate.yuv, or dec_gate_nofilter.yuv with --disable-loop-filters)")
     parser.add_argument("--transcript", default="transcript", help="Simulation transcript")
     parser.add_argument("--phase1", action="store_true", help="Deprecated (unmasked full verification is now standard)")
     parser.add_argument("--num-frames", type=int, default=3, help="Number of frames (default: 3)")
     args = parser.parse_args()
+    if args.dec_yuv is None:
+        # Never let an unfiltered decode overwrite the post-filter golden dec_gate.yuv
+        args.dec_yuv = "dec_gate.yuv" if args.enable_loop_filters else "dec_gate_nofilter.yuv"
     
     print_metadata(args.bitstream, enable_loop_filters=args.enable_loop_filters)
     
