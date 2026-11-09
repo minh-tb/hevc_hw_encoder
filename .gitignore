@@ -1,6 +1,7 @@
 # IDE and AI Tooling (CRITICAL: DO NOT TRACK)
 .gemini/
 .agents/
+.agent/
 .vscode/
 _ide/
 .Xil/

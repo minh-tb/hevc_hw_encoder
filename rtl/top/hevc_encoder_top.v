@@ -2152,6 +2152,8 @@ module hevc_encoder_top #(
     );
 
     // Sub-pel interpolation cores (L0 and L1)
+    wire               subpel_valid_l0;
+    wire               subpel_valid_l1;
     wire signed [15:0] interm_val_l0;
     wire signed [15:0] interm_val_l1;
 
@@ -2159,11 +2161,15 @@ module hevc_encoder_top #(
         .PIXEL_WIDTH (10),
         .INTERM_WIDTH(16)
     ) u_subpel_core_l0 (
+        .clk            (clk),
+        .rst_n          (rst_n),
+        .valid_in       (win_valid),
         .is_chroma      (reg_tu_comp != 2'd0),
         .frac_x         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
         .frac_y         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
         .win_luma_flat  (win_l0_flat),
         .win_chroma_flat(win_l0_flat[159:0]),
+        .valid_out      (subpel_valid_l0),
         .interm_val     (interm_val_l0)
     );
 
@@ -2171,22 +2177,51 @@ module hevc_encoder_top #(
         .PIXEL_WIDTH (10),
         .INTERM_WIDTH(16)
     ) u_subpel_core_l1 (
+        .clk            (clk),
+        .rst_n          (rst_n),
+        .valid_in       (win_valid),
         .is_chroma      (reg_tu_comp != 2'd0),
         .frac_x         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_x} : chroma_frac_x),
         .frac_y         (reg_tu_comp == 2'd0 ? {1'b0, luma_frac_y} : chroma_frac_y),
         .win_luma_flat  (win_l1_flat),
         .win_chroma_flat(win_l1_flat[159:0]),
+        .valid_out      (subpel_valid_l1),
         .interm_val     (interm_val_l1)
     );
+
+    reg [5:0] win_x_s1, win_x_s2;
+    reg [5:0] win_y_s1, win_y_s2;
+    reg       win_last_s1, win_last_s2;
+    reg       win_valid_s1;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            win_valid_s1 <= 1'b0;
+            win_last_s1  <= 1'b0;
+            win_last_s2  <= 1'b0;
+            win_x_s1     <= 6'd0;
+            win_x_s2     <= 6'd0;
+            win_y_s1     <= 6'd0;
+            win_y_s2     <= 6'd0;
+        end else begin
+            win_valid_s1 <= win_valid;
+            win_last_s1  <= win_last;
+            win_last_s2  <= win_last_s1;
+            win_x_s1     <= win_x;
+            win_x_s2     <= win_x_s1;
+            win_y_s1     <= win_y;
+            win_y_s2     <= win_y_s1;
+        end
+    end
 
     wire [9:0] pred_inter_val = is_bi_pred ? clip_bd10((interm_val_l0 + interm_val_l1 + 32'sd16) >>> 5)
                                            : clip_bd10((interm_val_l0 + 32'sd8) >>> 4);
 
-    assign inter_pred_valid = win_valid;
+    assign inter_pred_valid = subpel_valid_l0;
     assign inter_pred_pixel = pred_inter_val;
-    assign inter_out_x      = {4'd0, win_x};
-    assign inter_out_y      = {4'd0, win_y};
-    assign inter_out_last   = win_last;
+    assign inter_out_x      = {4'd0, win_x_s2};
+    assign inter_out_y      = {4'd0, win_y_s2};
+    assign inter_out_last   = win_last_s2;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             mc_fetch_start   <= 1'b0;
@@ -2195,7 +2230,7 @@ module hevc_encoder_top #(
             mc_fetch_start <= tu_valid && tu_ready_signal && !latched_cu_is_intra;
             if (tu_valid && tu_ready_signal && !latched_cu_is_intra)
                 inter_p2s_active <= 1'b1;
-            else if (!mc_fetch_start && !mc_fetch_busy && !win_valid)
+            else if (!mc_fetch_start && !mc_fetch_busy && !win_valid && !win_valid_s1 && !subpel_valid_l0)
                 inter_p2s_active <= 1'b0;
         end
     end

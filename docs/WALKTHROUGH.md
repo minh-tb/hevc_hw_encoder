@@ -81,16 +81,16 @@ The legacy behavioral/synthesis discrepancy in inter-prediction motion compensat
 ### Gate G7: AMD Vivado 2026.1 Synthesis & Timing Closure
 - **Target Part:** AMD Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`
 - **Target Clock:** 50.00 MHz ($T = 20.000\text{ ns}$)
-- **Setup Timing Slack (WNS):** **+3.847 ns (MET)**
-- **Total Negative Slack (TNS):** **0.000 ns (0 failing endpoints out of 325,536)**
-- **Estimated Maximum Frequency ($F_{\max}$):** **61.91 MHz**
-- **CLB LUTs:** **187,823 / 522,720 (35.93%)**
-  - Logic LUTs: 181,984
+- **Setup Timing Slack (WNS):** **+10.497 ns (MET)**
+- **Total Negative Slack (TNS):** **0.000 ns (0 failing endpoints out of 327,424)**
+- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz**
+- **CLB LUTs:** **193,485 / 522,720 (37.02%)**
+  - Logic LUTs: 187,646
   - Memory LUTs (LUTRAM + SRL): 5,839 (5,808 LUTRAM + 31 SRL)
-- **CLB Registers (FFs):** **122,796 / 1,045,440 (11.75%)**
+- **CLB Registers (FFs):** **123,443 / 1,045,440 (11.81%)**
 - **Unintended Latches (`LDCE`):** **0 (0.00%)**
 - **Block RAM (BRAM Tile):** **36.5 Tiles (3.71%)**
   - RAMB36/FIFO: 30 / 984 (3.05%)
   - RAMB18: 13 / 1,968 (0.66%)
-- **DSP Slices:** **221 / 1,968 (11.23%)**
-- **Power Estimation:** **2.015 W Total** (0.902 W Dynamic, 1.113 W Static)
+- **DSP Slices:** **53 / 1,968 (2.69%)**
+- **Power Estimation:** **2.005 W Total** (0.892 W Dynamic, 1.113 W Static)

@@ -11,19 +11,27 @@
 `timescale 1ns/1ps
 `include "parameter_pkg.vh"
 
+(* use_dsp = "no" *)
 module subpel_interpolation_core #(
     parameter PIXEL_WIDTH  = `PIXEL_WIDTH,   // 10
     parameter INTERM_WIDTH = 16              // 16-bit intermediate signed
 )(
-    input  wire                      is_chroma,
-    input  wire [2:0]                frac_x,
-    input  wire [2:0]                frac_y,
-    input  wire [PIXEL_WIDTH*64-1:0] win_luma_flat,
-    input  wire [PIXEL_WIDTH*16-1:0] win_chroma_flat,
-    output wire signed [INTERM_WIDTH-1:0] interm_val
+    input  wire                           clk,
+    input  wire                           rst_n,
+    input  wire                           valid_in,
+    input  wire                           is_chroma,
+    input  wire [2:0]                     frac_x,
+    input  wire [2:0]                     frac_y,
+    input  wire [PIXEL_WIDTH*64-1:0]      win_luma_flat,
+    input  wire [PIXEL_WIDTH*16-1:0]      win_chroma_flat,
+    output reg                            valid_out,
+    output reg  signed [INTERM_WIDTH-1:0] interm_val
 );
 
-    function automatic [9:0] get_win_sample;
+    //-------------------------------------------------------------------------
+    // Pixel Extraction Helpers
+    //-------------------------------------------------------------------------
+    function automatic [PIXEL_WIDTH-1:0] get_win_sample;
         input [PIXEL_WIDTH*64-1:0] flat;
         input integer r, c;
         begin
@@ -31,119 +39,277 @@ module subpel_interpolation_core #(
         end
     endfunction
 
-    function automatic signed [15:0] filter_luma_subpel_interm;
+    function automatic [PIXEL_WIDTH-1:0] get_chroma_sample;
+        input [PIXEL_WIDTH*16-1:0] flat;
+        input integer r, c;
+        begin
+            get_chroma_sample = flat[PIXEL_WIDTH*(r*4 + c) +: PIXEL_WIDTH];
+        end
+    endfunction
+
+    //-------------------------------------------------------------------------
+    // ITU-T H.265 Table 8-8: 8-tap Luma Interpolation Filter Coefficients
+    //-------------------------------------------------------------------------
+    function automatic signed [6:0] coeff_luma;
+        input [1:0] frac;
+        input integer tap;
+        begin
+            case (frac)
+                2'd0: case (tap)
+                    3: coeff_luma = 7'sd64;
+                    default: coeff_luma = 7'sd0;
+                endcase
+                2'd1: case (tap)
+                    0: coeff_luma = -7'sd1;
+                    1: coeff_luma =  7'sd4;
+                    2: coeff_luma = -7'sd10;
+                    3: coeff_luma =  7'sd58;
+                    4: coeff_luma =  7'sd17;
+                    5: coeff_luma = -7'sd5;
+                    6: coeff_luma =  7'sd1;
+                    default: coeff_luma = 7'sd0;
+                endcase
+                2'd2: case (tap)
+                    0: coeff_luma = -7'sd1;
+                    1: coeff_luma =  7'sd4;
+                    2: coeff_luma = -7'sd11;
+                    3: coeff_luma =  7'sd40;
+                    4: coeff_luma =  7'sd40;
+                    5: coeff_luma = -7'sd11;
+                    6: coeff_luma =  7'sd4;
+                    default: coeff_luma = -7'sd1;
+                endcase
+                default: case (tap) // 2'd3
+                    0: coeff_luma =  7'sd0;
+                    1: coeff_luma =  7'sd1;
+                    2: coeff_luma = -7'sd5;
+                    3: coeff_luma =  7'sd17;
+                    4: coeff_luma =  7'sd58;
+                    5: coeff_luma = -7'sd10;
+                    6: coeff_luma =  7'sd4;
+                    default: coeff_luma = -7'sd1;
+                endcase
+            endcase
+        end
+    endfunction
+
+    //-------------------------------------------------------------------------
+    // ITU-T H.265 Table 8-9: 4-tap Chroma Interpolation Filter Coefficients
+    //-------------------------------------------------------------------------
+    function automatic signed [6:0] coeff_chroma;
+        input [2:0] frac;
+        input integer tap;
+        begin
+            case (frac)
+                3'd0: case (tap)
+                    1: coeff_chroma = 7'sd64;
+                    default: coeff_chroma = 7'sd0;
+                endcase
+                3'd1: case (tap)
+                    0: coeff_chroma = -7'sd2;
+                    1: coeff_chroma =  7'sd58;
+                    2: coeff_chroma =  7'sd10;
+                    default: coeff_chroma = -7'sd2;
+                endcase
+                3'd2: case (tap)
+                    0: coeff_chroma = -7'sd4;
+                    1: coeff_chroma =  7'sd54;
+                    2: coeff_chroma =  7'sd16;
+                    default: coeff_chroma = -7'sd2;
+                endcase
+                3'd3: case (tap)
+                    0: coeff_chroma = -7'sd6;
+                    1: coeff_chroma =  7'sd46;
+                    2: coeff_chroma =  7'sd28;
+                    default: coeff_chroma = -7'sd4;
+                endcase
+                3'd4: case (tap)
+                    0: coeff_chroma = -7'sd4;
+                    1: coeff_chroma =  7'sd36;
+                    2: coeff_chroma =  7'sd36;
+                    default: coeff_chroma = -7'sd4;
+                endcase
+                3'd5: case (tap)
+                    0: coeff_chroma = -7'sd4;
+                    1: coeff_chroma =  7'sd28;
+                    2: coeff_chroma =  7'sd46;
+                    default: coeff_chroma = -7'sd6;
+                endcase
+                3'd6: case (tap)
+                    0: coeff_chroma = -7'sd2;
+                    1: coeff_chroma =  7'sd16;
+                    2: coeff_chroma =  7'sd54;
+                    default: coeff_chroma = -7'sd4;
+                endcase
+                default: case (tap) // 3'd7
+                    0: coeff_chroma = -7'sd2;
+                    1: coeff_chroma =  7'sd10;
+                    2: coeff_chroma =  7'sd58;
+                    default: coeff_chroma = -7'sd2;
+                endcase
+            endcase
+        end
+    endfunction
+
+    //-------------------------------------------------------------------------
+    // Stage 1 Filtering Helpers
+    //-------------------------------------------------------------------------
+    function automatic signed [24:0] fir8_luma_row;
         input [1:0] fx;
+        input [PIXEL_WIDTH*64-1:0] flat;
+        input integer r;
+        reg signed [24:0] sum;
+        integer k;
+        begin
+            sum = 25'sd0;
+            for (k = 0; k < 8; k = k + 1)
+                sum = sum + coeff_luma(fx, k) * $signed({1'b0, get_win_sample(flat, r, k)});
+            fir8_luma_row = sum;
+        end
+    endfunction
+
+    function automatic signed [24:0] fir8_luma_col;
         input [1:0] fy;
-        input [PIXEL_WIDTH*64-1:0] win_flat;
-        reg signed [24:0] sum_h [0:7];
-        reg signed [17:0] h_int [0:7];
-        reg signed [24:0] sum_v;
-        integer r, k;
-        reg signed [6:0] c_h [0:7];
-        reg signed [6:0] c_v [0:7];
+        input [PIXEL_WIDTH*64-1:0] flat;
+        input integer c;
+        reg signed [24:0] sum;
+        integer k;
         begin
-            case (fx)
-                2'd0: begin c_h[0]=0; c_h[1]=0; c_h[2]=0; c_h[3]=64; c_h[4]=0; c_h[5]=0; c_h[6]=0; c_h[7]=0; end
-                2'd1: begin c_h[0]=-1; c_h[1]=4; c_h[2]=-10; c_h[3]=58; c_h[4]=17; c_h[5]=-5; c_h[6]=1; c_h[7]=0; end
-                2'd2: begin c_h[0]=-1; c_h[1]=4; c_h[2]=-11; c_h[3]=40; c_h[4]=40; c_h[5]=-11; c_h[6]=4; c_h[7]=-1; end
-                default: begin c_h[0]=0; c_h[1]=1; c_h[2]=-5; c_h[3]=17; c_h[4]=58; c_h[5]=-10; c_h[6]=4; c_h[7]=-1; end
-            endcase
-            case (fy)
-                2'd0: begin c_v[0]=0; c_v[1]=0; c_v[2]=0; c_v[3]=64; c_v[4]=0; c_v[5]=0; c_v[6]=0; c_v[7]=0; end
-                2'd1: begin c_v[0]=-1; c_v[1]=4; c_v[2]=-10; c_v[3]=58; c_v[4]=17; c_v[5]=-5; c_v[6]=1; c_v[7]=0; end
-                2'd2: begin c_v[0]=-1; c_v[1]=4; c_v[2]=-11; c_v[3]=40; c_v[4]=40; c_v[5]=-11; c_v[6]=4; c_v[7]=-1; end
-                default: begin c_v[0]=0; c_v[1]=1; c_v[2]=-5; c_v[3]=17; c_v[4]=58; c_v[5]=-10; c_v[6]=4; c_v[7]=-1; end
-            endcase
-
-            if (fx == 2'd0 && fy == 2'd0) begin
-                filter_luma_subpel_interm = $signed({6'd0, get_win_sample(win_flat, 3, 3)}) <<< 4;
-            end else if (fy == 2'd0) begin
-                sum_h[3] = 0;
-                for (k = 0; k < 8; k = k + 1)
-                    sum_h[3] = sum_h[3] + c_h[k] * $signed({1'b0, get_win_sample(win_flat, 3, k)});
-                filter_luma_subpel_interm = sum_h[3] >>> 2;
-            end else if (fx == 2'd0) begin
-                sum_v = 0;
-                for (k = 0; k < 8; k = k + 1)
-                    sum_v = sum_v + c_v[k] * $signed({1'b0, get_win_sample(win_flat, k, 3)});
-                filter_luma_subpel_interm = sum_v >>> 2;
-            end else begin
-                // Two-pass HV
-                for (r = 0; r < 8; r = r + 1) begin
-                    sum_h[r] = 0;
-                    for (k = 0; k < 8; k = k + 1)
-                        sum_h[r] = sum_h[r] + c_h[k] * $signed({1'b0, get_win_sample(win_flat, r, k)});
-                    h_int[r] = sum_h[r] >>> 2; // Plain truncation per Clause 8.5.3.3.3
-                end
-                sum_v = 0;
-                for (k = 0; k < 8; k = k + 1)
-                    sum_v = sum_v + c_v[k] * h_int[k];
-                filter_luma_subpel_interm = sum_v >>> 6;
-            end
+            sum = 25'sd0;
+            for (k = 0; k < 8; k = k + 1)
+                sum = sum + coeff_luma(fy, k) * $signed({1'b0, get_win_sample(flat, k, c)});
+            fir8_luma_col = sum;
         end
     endfunction
 
-    function automatic signed [15:0] filter_chroma_subpel_interm;
+    function automatic signed [24:0] fir4_chroma_row;
         input [2:0] fx;
-        input [2:0] fy;
-        input [PIXEL_WIDTH*16-1:0] win_flat;
-        reg signed [24:0] sum_h [0:3];
-        reg signed [17:0] h_int [0:3];
-        reg signed [24:0] sum_v;
-        integer r, k;
-        reg signed [6:0] c_h [0:3];
-        reg signed [6:0] c_v [0:3];
+        input [PIXEL_WIDTH*16-1:0] flat;
+        input integer r;
+        reg signed [24:0] sum;
+        integer k;
         begin
-            case (fx)
-                3'd0: begin c_h[0]=0;  c_h[1]=64; c_h[2]=0;  c_h[3]=0;  end
-                3'd1: begin c_h[0]=-2; c_h[1]=58; c_h[2]=10; c_h[3]=-2; end
-                3'd2: begin c_h[0]=-4; c_h[1]=54; c_h[2]=16; c_h[3]=-2; end
-                3'd3: begin c_h[0]=-6; c_h[1]=46; c_h[2]=28; c_h[3]=-4; end
-                3'd4: begin c_h[0]=-4; c_h[1]=36; c_h[2]=36; c_h[3]=-4; end
-                3'd5: begin c_h[0]=-4; c_h[1]=28; c_h[2]=46; c_h[3]=-6; end
-                3'd6: begin c_h[0]=-2; c_h[1]=16; c_h[2]=54; c_h[3]=-4; end
-                default: begin c_h[0]=-2; c_h[1]=10; c_h[2]=58; c_h[3]=-2; end
-            endcase
-            case (fy)
-                3'd0: begin c_v[0]=0;  c_v[1]=64; c_v[2]=0;  c_v[3]=0;  end
-                3'd1: begin c_v[0]=-2; c_v[1]=58; c_v[2]=10; c_v[3]=-2; end
-                3'd2: begin c_v[0]=-4; c_v[1]=54; c_v[2]=16; c_v[3]=-2; end
-                3'd3: begin c_v[0]=-6; c_v[1]=46; c_v[2]=28; c_v[3]=-4; end
-                3'd4: begin c_v[0]=-4; c_v[1]=36; c_v[2]=36; c_v[3]=-4; end
-                3'd5: begin c_v[0]=-4; c_v[1]=28; c_v[2]=46; c_v[3]=-6; end
-                3'd6: begin c_v[0]=-2; c_v[1]=16; c_v[2]=54; c_v[3]=-4; end
-                default: begin c_v[0]=-2; c_v[1]=10; c_v[2]=58; c_v[3]=-2; end
-            endcase
-
-            if (fx == 3'd0 && fy == 3'd0) begin
-                filter_chroma_subpel_interm = $signed({6'd0, win_flat[PIXEL_WIDTH*(1*4 + 1) +: PIXEL_WIDTH]}) <<< 4;
-            end else if (fy == 3'd0) begin
-                sum_h[1] = 0;
-                for (k = 0; k < 4; k = k + 1)
-                    sum_h[1] = sum_h[1] + c_h[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(1*4 + k) +: PIXEL_WIDTH]});
-                filter_chroma_subpel_interm = sum_h[1] >>> 2;
-            end else if (fx == 3'd0) begin
-                sum_v = 0;
-                for (k = 0; k < 4; k = k + 1)
-                    sum_v = sum_v + c_v[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(k*4 + 1) +: PIXEL_WIDTH]});
-                filter_chroma_subpel_interm = sum_v >>> 2;
-            end else begin
-                // Two-pass HV
-                for (r = 0; r < 4; r = r + 1) begin
-                    sum_h[r] = 0;
-                    for (k = 0; k < 4; k = k + 1)
-                        sum_h[r] = sum_h[r] + c_h[k] * $signed({1'b0, win_flat[PIXEL_WIDTH*(r*4 + k) +: PIXEL_WIDTH]});
-                    h_int[r] = sum_h[r] >>> 2;
-                end
-                sum_v = 0;
-                for (k = 0; k < 4; k = k + 1)
-                    sum_v = sum_v + c_v[k] * h_int[k];
-                filter_chroma_subpel_interm = sum_v >>> 6;
-            end
+            sum = 25'sd0;
+            for (k = 0; k < 4; k = k + 1)
+                sum = sum + coeff_chroma(fx, k) * $signed({1'b0, get_chroma_sample(flat, r, k)});
+            fir4_chroma_row = sum;
         end
     endfunction
 
-    assign interm_val = is_chroma ? filter_chroma_subpel_interm(frac_x, frac_y, win_chroma_flat)
-                                  : filter_luma_subpel_interm(frac_x[1:0], frac_y[1:0], win_luma_flat);
+    function automatic signed [24:0] fir4_chroma_col;
+        input [2:0] fy;
+        input [PIXEL_WIDTH*16-1:0] flat;
+        input integer c;
+        reg signed [24:0] sum;
+        integer k;
+        begin
+            sum = 25'sd0;
+            for (k = 0; k < 4; k = k + 1)
+                sum = sum + coeff_chroma(fy, k) * $signed({1'b0, get_chroma_sample(flat, k, c)});
+            fir4_chroma_col = sum;
+        end
+    endfunction
+
+    //-------------------------------------------------------------------------
+    // Stage 1 Pipeline Registers (Cycle T -> T+1)
+    //-------------------------------------------------------------------------
+    reg                            s1_valid;
+    reg                            s1_is_chroma;
+    reg [2:0]                      s1_frac_x;
+    reg [2:0]                      s1_frac_y;
+    reg signed [17:0]              s1_h_luma   [0:7];
+    reg signed [17:0]              s1_h_chroma [0:3];
+    reg signed [INTERM_WIDTH-1:0]  s1_v_luma;
+    reg signed [INTERM_WIDTH-1:0]  s1_v_chroma;
+    reg signed [INTERM_WIDTH-1:0]  s1_int_luma;
+    reg signed [INTERM_WIDTH-1:0]  s1_int_chroma;
+
+    integer r_idx;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s1_valid      <= 1'b0;
+            s1_is_chroma  <= 1'b0;
+            s1_frac_x     <= 3'd0;
+            s1_frac_y     <= 3'd0;
+            s1_v_luma     <= {INTERM_WIDTH{1'b0}};
+            s1_v_chroma   <= {INTERM_WIDTH{1'b0}};
+            s1_int_luma   <= {INTERM_WIDTH{1'b0}};
+            s1_int_chroma <= {INTERM_WIDTH{1'b0}};
+            for (r_idx = 0; r_idx < 8; r_idx = r_idx + 1)
+                s1_h_luma[r_idx] <= 18'sd0;
+            for (r_idx = 0; r_idx < 4; r_idx = r_idx + 1)
+                s1_h_chroma[r_idx] <= 18'sd0;
+        end else begin
+            s1_valid <= valid_in;
+            if (valid_in) begin
+                s1_is_chroma  <= is_chroma;
+                s1_frac_x     <= frac_x;
+                s1_frac_y     <= frac_y;
+
+                for (r_idx = 0; r_idx < 8; r_idx = r_idx + 1)
+                    s1_h_luma[r_idx] <= fir8_luma_row(frac_x[1:0], win_luma_flat, r_idx) >>> 2;
+
+                for (r_idx = 0; r_idx < 4; r_idx = r_idx + 1)
+                    s1_h_chroma[r_idx] <= fir4_chroma_row(frac_x, win_chroma_flat, r_idx) >>> 2;
+
+                s1_v_luma     <= fir8_luma_col(frac_y[1:0], win_luma_flat, 3) >>> 2;
+                s1_v_chroma   <= fir4_chroma_col(frac_y, win_chroma_flat, 1) >>> 2;
+                s1_int_luma   <= $signed({6'd0, get_win_sample(win_luma_flat, 3, 3)}) <<< 4;
+                s1_int_chroma <= $signed({6'd0, get_chroma_sample(win_chroma_flat, 1, 1)}) <<< 4;
+            end
+        end
+    end
+
+    //-------------------------------------------------------------------------
+    // Stage 2 Combinational Logic: Vertical FIR & Mode Mux
+    //-------------------------------------------------------------------------
+    (* use_dsp = "no" *) reg signed [24:0] sum_hv_luma;
+    (* use_dsp = "no" *) reg signed [24:0] sum_hv_chroma;
+    reg signed [INTERM_WIDTH-1:0] res_luma;
+    reg signed [INTERM_WIDTH-1:0] res_chroma;
+    integer k_v;
+
+    always @(*) begin
+        sum_hv_luma = 25'sd0;
+        for (k_v = 0; k_v < 8; k_v = k_v + 1)
+            sum_hv_luma = sum_hv_luma + coeff_luma(s1_frac_y[1:0], k_v) * s1_h_luma[k_v];
+
+        sum_hv_chroma = 25'sd0;
+        for (k_v = 0; k_v < 4; k_v = k_v + 1)
+            sum_hv_chroma = sum_hv_chroma + coeff_chroma(s1_frac_y, k_v) * s1_h_chroma[k_v];
+
+        if (s1_frac_x[1:0] == 2'd0 && s1_frac_y[1:0] == 2'd0)
+            res_luma = s1_int_luma;
+        else if (s1_frac_y[1:0] == 2'd0)
+            res_luma = s1_h_luma[3][INTERM_WIDTH-1:0];
+        else if (s1_frac_x[1:0] == 2'd0)
+            res_luma = s1_v_luma;
+        else
+            res_luma = sum_hv_luma >>> 6;
+
+        if (s1_frac_x == 3'd0 && s1_frac_y == 3'd0)
+            res_chroma = s1_int_chroma;
+        else if (s1_frac_y == 3'd0)
+            res_chroma = s1_h_chroma[1][INTERM_WIDTH-1:0];
+        else if (s1_frac_x == 3'd0)
+            res_chroma = s1_v_chroma;
+        else
+            res_chroma = sum_hv_chroma >>> 6;
+    end
+
+    //-------------------------------------------------------------------------
+    // Stage 2 Pipeline Registers (Cycle T+1 -> T+2)
+    //-------------------------------------------------------------------------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            valid_out  <= 1'b0;
+            interm_val <= {INTERM_WIDTH{1'b0}};
+        end else begin
+            valid_out <= s1_valid;
+            if (s1_valid) begin
+                interm_val <= s1_is_chroma ? res_chroma : res_luma;
+            end
+        end
+    end
 
 endmodule

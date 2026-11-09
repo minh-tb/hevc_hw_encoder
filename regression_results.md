@@ -129,57 +129,57 @@
 
 | Cell / Logic Primitive | Baseline Used | Phase 1 Used | Phase 2 Used | **Sign-Off Final Used** | Available | Utilization % | Total Delta / Savings vs Baseline |
 |---|---:|---:|---:|---:|---:|---|---|
-| **CLB LUTs** | 448,916 | 342,547 | 225,933 | **184,596** | 522,720 | **35.31%** | **-264,320 LUTs (-58.88%)** |
-| *-- Logic LUTs* | 446,581 | 340,166 | 223,550 | **178,757** | 522,720 | **34.20%** | **-267,824 LUTs (-59.97%)** |
+| **CLB LUTs** | 448,916 | 342,547 | 225,933 | **193,485** | 522,720 | **37.02%** | **-255,431 LUTs (-56.90%)** |
+| *-- Logic LUTs* | 446,581 | 340,166 | 223,550 | **187,646** | 522,720 | **35.90%** | **-258,935 LUTs (-57.99%)** |
 | *-- LUT as Memory (LUTRAM + SRL)* | 6,991 | 6,991 | 6,991 | **5,839** | 161,280 | **3.62%** | 5,808 LUTRAM + 31 SRL |
-| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | 249,980 | **121,775** | 1,045,440 | **11.65%** | **-222,255 FFs (-64.60%)** |
+| **CLB Registers (Flip-Flops)** | 344,030 | 253,425 | 249,980 | **123,443** | 1,045,440 | **11.81%** | **-220,587 FFs (-64.12%)** |
 | **Register as Latch (`LDCE`)** | 0 | 0 | 0 | **0** | 1,045,440 | **0.00%** | 0 Unintended Latches |
-| **Unique Control Sets** | 14,641 | 10,812 | 10,733 | **7,280** | 130,680 | **5.57%** | **-7,361 sets (-50.28%)** |
+| **Unique Control Sets** | 14,641 | 10,812 | 10,733 | **7,259** | 130,680 | **5.55%** | **-7,382 sets (-50.42%)** |
 | **Block RAM Tile** | 12.5 | 30.0 | 30.0 | **36.5** | 984 | **3.71%** | **+24.0 BRAM Tiles** |
 | *-- RAMB36/FIFO* | 11 | 27 | 27 | **30** | 984 | **3.05%** | +19 `RAMB36E2` |
 | *-- RAMB18* | 3 | 6 | 6 | **13** | 1,968 | **0.66%** | +10 `RAMB18E2` |
-| **DSP48E2 Slices** | 920 | 878 | 209 | **221** | 1,968 | **11.23%** | **-699 DSPs (-75.98%)** |
+| **DSP48E2 Slices** | 920 | 878 | 209 | **53** | 1,968 | **2.69%** | **-867 DSPs (-94.24%)** |
 
 ### 3.2 Hierarchical Subsystem Utilization Breakdown (`synth/vivado_output/utilization_hierarchical.rpt`)
 
 | Hierarchical Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP48E2 | Architectural Note |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| **`hevc_encoder_axi_top`** | `(top)` | **187,823** | **181,984** | **5,808** | **31** | **122,796** | **30** | **13** | **221** | Full AXI4-Lite/AXI4 SoC wrapper (`core_rst_n_reg` sync reset) |
-| `  u_hevc_encoder_top` | `hevc_encoder_top` | **187,785** | **181,946** | **5,808** | **31** | **122,703** | **30** | **13** | **221** | Top-level encoder datapath & BRAM frame/DPB buffers (`28 RAMB36, 8 RAMB18`) |
-| `    u_dct_top` | `dct_top` | **86,280** | **86,280** | 0 | 0 | **35,075** | 0 | 0 | **1** | Row-serial 2D DCT-II / DST-VII (`u_1d_core`: `50,027 LUTs`; `u_transpose_ram`: `5,077 LUTs, 16,896 FFs`) |
-| `    u_inter_pred` | `inter_pred_top` | **28,656** | **28,625** | 0 | 31 | **8,007** | 0 | 0 | **13** | TZ search (`622 LUTs`), FME (`26,342 LUTs`), MC unit (`112 LUTs`), Ref buffer (`1,579 LUTs, 13 DSPs`) |
-| `    u_inloop_filters` | `decoder_inloop_filters` | **19,371** | **19,371** | 0 | 0 | **24,936** | **1** | **3** | **0** | Sync BRAM CTU buffers (`u_deblock`: `15,437 LUTs`; `u_sao`: `597 LUTs`; `u_sao_stats`: `59 LUTs`) |
-| `    u_intra_pred` | `intra_pred_top` | **10,340** | **10,292** | **48** | 0 | **4,436** | 0 | 0 | **23** | Angular (`7,407 LUTs, 17 DSPs`), Ref filter (`2,421 LUTs, 2 DSPs`), DC (`358 LUTs`), Planar (`154 LUTs, 4 DSPs`) |
-| `    u_intra_rmd` | `intra_rmd` | **6,225** | **6,225** | 0 | 0 | **3,069** | 0 | 0 | **4** | 35-mode RMD pre-screener with 4 parallel $4\times4$ Hadamard SATD cores |
-| `    u_cabac_enc_top` | `cabac_enc_top` | **5,313** | **5,313** | 0 | 0 | **2,320** | 0 | 0 | **0** | 154-context SRAM (`1,244 LUTs`), `syntax_coeff` (`2,694 LUTs`), `range_coder` (`773 LUTs`), `syntax_sao` |
-| `    u_mc_window_fetch` | `mc_window_fetch` | **3,881** | **3,881** | 0 | 0 | **2,651** | 0 | 0 | **0** | Sliding-column DPB window fetch engine (Option A) |
-| `    u_ctu_partitioner` | `ctu_partitioner` | **3,153** | **3,153** | 0 | 0 | **375** | 0 | 0 | **0** | Recursive Morton Z-scan quadtree controller ($64\times64 \to 8\times8$) |
-| `    u_recon_unit` | `recon_unit` | **1,298** | **1,298** | 0 | 0 | **220** | **1** | **1** | **0** | Pixel clipping & BRAM reconstruction buffer (`1 RAMB36E2, 1 RAMB18E2`) |
-| `    u_rate_controller` | `rate_controller` | **1,107** | **1,107** | 0 | 0 | **149** | 0 | 0 | **3** | Closed-loop VBV fullness shift-tree & reciprocal-multiply budget allocator (`0 LDCE`) |
-| `    u_residual_sub` | `residual_sub` | **1,043** | **1,043** | 0 | 0 | **116** | 0 | 0 | **0** | 11-bit signed residual subtraction |
-| `    u_pu_cu_splitter` | `pu_cu_splitter` | **903** | **903** | 0 | 0 | **712** | 0 | 0 | **0** | PU/CU partition sequencer |
-| `    u_ctu_raster_scan` | `ctu_raster_scan` | **617** | **617** | 0 | 0 | **39** | 0 | 0 | **0** | Frame-level CTU raster coordinate generator |
-| `    u_mode_decision` | `mode_decision` | **501** | **501** | 0 | 0 | **221** | 0 | 0 | **3** | Lagrangian RDO cost comparator & FEN early-termination split logic |
-| `    u_gop_controller` | `gop_controller` | **236** | **236** | 0 | 0 | **135** | 0 | 0 | **0** | Dynamic runtime AI/LDP/RA GOP scheduler |
-| `    u_inv_quant` | `inv_quant` | **203** | **203** | 0 | 0 | **140** | 0 | 0 | **2** | Main10 inverse dequantizer with Table 8-10 Chroma QP mapping |
-| `    u_fwd_quant` | `fwd_quant` | **175** | **175** | 0 | 0 | **30** | 0 | 0 | **1** | Scalar deadzone forward quantizer |
-| `    u_slice_controller` | `slice_controller` | **174** | **174** | 0 | 0 | **78** | 0 | 0 | **0** | Slice header & VPS/SPS/PPS `param_set_writer` (`77 LUTs`) |
-| `    u_subpel_core_l0` | `subpel_interpolation_core` | **159** | **159** | 0 | 0 | **0** | 0 | 0 | **84** | Unified 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 0) |
-| `    u_subpel_core_l1` | `subpel_interpolation_core` | **150** | **150** | 0 | 0 | **0** | 0 | 0 | **84** | Unified 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 1) |
-| `    u_frame_store` | `frame_store` | **121** | **121** | 0 | 0 | **695** | 0 | 0 | **3** | AXI4 burst write/read frame buffer controller |
+| **`hevc_encoder_axi_top`** | `(top)` | **193,485** | **187,646** | **5,808** | **31** | **123,443** | **30** | **13** | **53** | Full AXI4-Lite/AXI4 SoC wrapper (`core_rst_n_reg` sync reset) |
+| `  u_hevc_encoder_top` | `hevc_encoder_top` | **193,447** | **187,608** | **5,808** | **31** | **123,350** | **30** | **13** | **53** | Top-level encoder datapath & BRAM frame/DPB buffers (`28 RAMB36, 8 RAMB18`) |
+| `    u_dct_top` | `dct_top` | **86,263** | **86,263** | 0 | 0 | **35,073** | 0 | 0 | **1** | Row-serial 2D DCT-II / DST-VII (`u_1d_core`: `49,934 LUTs`; `u_transpose_ram`: `5,077 LUTs, 16,896 FFs`) |
+| `    u_inter_pred` | `inter_pred_top` | **28,662** | **28,631** | 0 | 31 | **8,007** | 0 | 0 | **13** | TZ search (`622 LUTs`), FME (`26,348 LUTs`), MC unit (`112 LUTs`), Ref buffer (`1,579 LUTs, 13 DSPs`) |
+| `    u_inloop_filters` | `decoder_inloop_filters` | **19,371** | **19,371** | 0 | 0 | **24,938** | **1** | **3** | **0** | Sync BRAM CTU buffers (`u_deblock`: `15,436 LUTs`; `u_sao`: `597 LUTs`; `u_sao_stats`: `58 LUTs`) |
+| `    u_intra_pred` | `intra_pred_top` | **10,346** | **10,298** | **48** | 0 | **4,436** | 0 | 0 | **23** | Angular (`7,413 LUTs, 17 DSPs`), Ref filter (`2,425 LUTs, 2 DSPs`), DC (`358 LUTs`), Planar (`150 LUTs, 4 DSPs`) |
+| `    u_mc_window_fetch` | `mc_window_fetch` | **10,380** | **10,380** | 0 | 0 | **2,651** | 0 | 0 | **0** | Sliding-column DPB window fetch engine (Option A) |
+| `    u_intra_rmd` | `intra_rmd` | **6,222** | **6,222** | 0 | 0 | **3,069** | 0 | 0 | **4** | 35-mode RMD pre-screener with 4 parallel $4\times4$ Hadamard SATD cores |
+| `    u_cabac_enc_top` | `cabac_enc_top` | **5,309** | **5,309** | 0 | 0 | **2,321** | 0 | 0 | **0** | 154-context SRAM (`1,231 LUTs`), `syntax_coeff` (`2,675 LUTs`), `range_coder` (`801 LUTs`), `syntax_sao` |
+| `    u_ctu_partitioner` | `ctu_partitioner` | **3,009** | **3,009** | 0 | 0 | **372** | 0 | 0 | **0** | Recursive Morton Z-scan quadtree controller ($64\times64 \to 8\times8$) |
+| `    u_recon_unit` | `recon_unit` | **1,186** | **1,186** | 0 | 0 | **231** | **1** | **1** | **0** | Pixel clipping & BRAM reconstruction buffer (`1 RAMB36E2, 1 RAMB18E2`) |
+| `    u_rate_controller` | `rate_controller` | **1,106** | **1,106** | 0 | 0 | **149** | 0 | 0 | **3** | Closed-loop VBV fullness shift-tree & reciprocal-multiply budget allocator (`0 LDCE`) |
+| `    u_residual_sub` | `residual_sub` | **1,053** | **1,053** | 0 | 0 | **119** | 0 | 0 | **0** | 11-bit signed residual subtraction |
+| `    u_subpel_core_l1` | `subpel_interpolation_core` | **909** | **909** | 0 | 0 | **306** | 0 | 0 | **0** | Unified 2-stage pipelined 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 1, `(* use_dsp="no" *)`) |
+| `    u_pu_cu_splitter` | `pu_cu_splitter` | **899** | **899** | 0 | 0 | **712** | 0 | 0 | **0** | PU/CU partition sequencer |
+| `    u_subpel_core_l0` | `subpel_interpolation_core` | **557** | **557** | 0 | 0 | **293** | 0 | 0 | **0** | Unified 2-stage pipelined 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 0, `(* use_dsp="no" *)`) |
+| `    u_mode_decision` | `mode_decision` | **547** | **547** | 0 | 0 | **221** | 0 | 0 | **3** | Lagrangian RDO cost comparator & FEN early-termination split logic |
+| `    u_ctu_raster_scan` | `ctu_raster_scan` | **517** | **517** | 0 | 0 | **39** | 0 | 0 | **0** | Frame-level CTU raster coordinate generator |
+| `    u_gop_controller` | `gop_controller` | **240** | **240** | 0 | 0 | **135** | 0 | 0 | **0** | Dynamic runtime AI/LDP/RA GOP scheduler |
+| `    u_inv_quant` | `inv_quant` | **206** | **206** | 0 | 0 | **140** | 0 | 0 | **2** | Main10 inverse dequantizer with Table 8-10 Chroma QP mapping |
+| `    u_fwd_quant` | `fwd_quant` | **171** | **171** | 0 | 0 | **30** | 0 | 0 | **1** | Scalar deadzone forward quantizer |
+| `    u_slice_controller` | `slice_controller` | **159** | **159** | 0 | 0 | **78** | 0 | 0 | **0** | Slice header & VPS/SPS/PPS `param_set_writer` (`66 LUTs`) |
+| `    u_frame_store` | `frame_store` | **123** | **123** | 0 | 0 | **695** | 0 | 0 | **3** | AXI4 burst write/read frame buffer controller |
 | `    u_mvp_predictor` | `mvp_predictor` | **31** | **31** | 0 | 0 | **104** | 0 | 0 | **0** | Spatial/Temporal AMVP & 5-candidate Merge derivation |
 
 ### 3.3 Timing Performance & Closure (`synth/vivado_output/timing_summary_synth.rpt`)
 - **Clock Domain:** `clk`
 - **Target Period:** 20.000 ns (50.00 MHz)
-- **Worst Negative Slack (WNS):** **+3.847 ns (MET)**
-- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of **325,536** total endpoints)
-- **Estimated Maximum Frequency ($F_{\max}$):** **61.91 MHz** (Meets 50 MHz constraint with positive slack)
+- **Worst Negative Slack (WNS):** **+10.497 ns (MET)**
+- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of **327,424** total endpoints)
+- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz** (Meets 50 MHz constraint with positive slack)
 
 ### 3.4 Vector-less Power Estimation (`synth/vivado_output/power_synth.rpt`)
-- **Dynamic On-Chip Power:** **0.902 W**
+- **Dynamic On-Chip Power:** **0.892 W**
 - **Device Static Power:** **1.113 W**
-- **Total On-Chip Power:** **2.015 W** (Junction Temp: `26.7 °C`, Max Ambient: `98.3 °C`)
+- **Total On-Chip Power:** **2.005 W** (Junction Temp: `26.7 °C`, Max Ambient: `98.3 °C`)
 
 ### 3.5 Sign-Off Verification & IP Packaging Parity
 - **Full 3-Frame Post-Filter Pixel Reconstruction (`scripts/regression_gate.py --enable-loop-filters --num-frames 3`):** **100.00% bit-exact across all 73,728 samples in Frames 0, 1, and 2 (Y, Cb, Cr)**, `Global Max Diff = 0`, `Avg Diff = 0.0000` against Fraunhofer HM 18.0 reference decoder (`TAppDecoder.exe`).
