@@ -185,9 +185,13 @@ module hevc_encoder_top #(
     // 2. Partitioning Pipeline (Raster -> Partitioner -> Splitter)
     //-------------------------------------------------------------------------
     wire        inloop_ctu_done;
+    wire        inloop_sao_stats_done;
+    wire        cabac_bin_drain_en;
+    wire        cabac_bin_drain_done;
+    wire        ctu_both_done;
     wire        ctu_valid;
     wire        ctu_partitioner_accepted;
-    wire        ctu_ready = inloop_ctu_done;
+    wire        ctu_ready = ctu_both_done;
     wire [`CTU_ADDR_WIDTH-1:0]  ctu_addr;
     wire [`CTU_COORD_WIDTH-1:0] ctu_x;
     wire [`CTU_COORD_WIDTH-1:0] ctu_y;
@@ -270,6 +274,8 @@ module hevc_encoder_top #(
     localparam [3:0] CABAC_TRM_SLICE        = 4'd7;
     localparam [3:0] CABAC_FLUSH            = 4'd8;
     localparam [3:0] CABAC_WAIT_SAO_DONE    = 4'd9;
+    localparam [3:0] CABAC_WAIT_SAO_STATS   = 4'd10;
+    localparam [3:0] CABAC_DRAIN_CTU_BINS   = 4'd11;
     
     reg [3:0] cabac_state;
     wire cabac_ctx_init_busy;
@@ -569,8 +575,12 @@ module hevc_encoder_top #(
     wire [11:0] md_best_inter_mv_y = md_best_inter_mv_y_raw;
 `endif
 
+    wire [2:0]  rmd_best_chroma_pred_mode;
+    wire [5:0]  rmd_best_chroma_dir;
     reg         md_latched_is_intra;
     reg [5:0]   md_latched_intra_mode;
+    reg [2:0]   md_latched_chroma_pred_mode;
+    reg [5:0]   md_latched_chroma_dir;
     reg         md_latched_skip_flag;
     reg         md_latched_merge_flag;
     reg [2:0]   md_latched_merge_idx;
@@ -581,6 +591,8 @@ module hevc_encoder_top #(
         if (!rst_n) begin
             md_latched_is_intra   <= 1'b1;
             md_latched_intra_mode <= 6'd0;
+            md_latched_chroma_pred_mode <= 3'd4;
+            md_latched_chroma_dir       <= 6'd0;
             md_latched_skip_flag  <= 1'b0;
             md_latched_merge_flag <= 1'b0;
             md_latched_merge_idx  <= 3'd0;
@@ -589,6 +601,8 @@ module hevc_encoder_top #(
         end else if (md_mode_valid) begin
             md_latched_is_intra   <= md_best_is_intra;
             md_latched_intra_mode <= md_best_intra_mode;
+            md_latched_chroma_pred_mode <= rmd_best_chroma_pred_mode;
+            md_latched_chroma_dir       <= rmd_best_chroma_dir;
             md_latched_skip_flag  <= md_best_skip_flag;
             md_latched_merge_flag <= md_best_merge_flag;
             md_latched_merge_idx  <= md_best_merge_idx;
@@ -599,6 +613,8 @@ module hevc_encoder_top #(
 
     wire        md_eff_is_intra   = md_mode_valid ? md_best_is_intra   : md_latched_is_intra;
     wire [5:0]  md_eff_intra_mode = md_mode_valid ? md_best_intra_mode : md_latched_intra_mode;
+    wire [2:0]  md_eff_chroma_pred_mode = md_mode_valid ? rmd_best_chroma_pred_mode : md_latched_chroma_pred_mode;
+    wire [5:0]  md_eff_chroma_dir       = md_mode_valid ? rmd_best_chroma_dir       : md_latched_chroma_dir;
     wire        md_eff_skip_flag  = md_mode_valid ? md_best_skip_flag  : md_latched_skip_flag;
     wire        md_eff_merge_flag = md_mode_valid ? md_best_merge_flag : md_latched_merge_flag;
     wire [2:0]  md_eff_merge_idx  = md_mode_valid ? md_best_merge_idx  : md_latched_merge_idx;
@@ -610,6 +626,8 @@ module hevc_encoder_top #(
     reg [1:0]   latched_cu_split_ctx;
     reg         latched_cu_is_intra;
     reg [5:0]   latched_cu_intra_mode;
+    reg [2:0]   latched_cu_chroma_pred_mode;
+    reg [5:0]   latched_cu_chroma_dir;
     reg         latched_cu_skip;
     reg         latched_cu_merge;
     reg [2:0]   latched_cu_merge_idx;
@@ -627,38 +645,42 @@ module hevc_encoder_top #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            latched_cu_is_split   <= 1'b0;
-            latched_cu_depth      <= 2'd0;
-            latched_cu_split_ctx  <= 2'd0;
-            latched_cu_is_intra   <= 1'b1;
-            latched_cu_intra_mode <= 6'd0;
-            latched_cu_skip       <= 1'b0;
-            latched_cu_merge      <= 1'b0;
-            latched_cu_merge_idx  <= 3'd0;
-            latched_cu_mv_x       <= 12'd0;
-            latched_cu_mv_y       <= 12'd0;
-            latched_cu_ctu_x      <= 6'd0;
-            latched_cu_ctu_y      <= 6'd0;
+            latched_cu_is_split         <= 1'b0;
+            latched_cu_depth            <= 2'd0;
+            latched_cu_split_ctx        <= 2'd0;
+            latched_cu_is_intra         <= 1'b1;
+            latched_cu_intra_mode       <= 6'd0;
+            latched_cu_chroma_pred_mode <= 3'd4;
+            latched_cu_chroma_dir       <= 6'd0;
+            latched_cu_skip             <= 1'b0;
+            latched_cu_merge            <= 1'b0;
+            latched_cu_merge_idx        <= 3'd0;
+            latched_cu_mv_x             <= 12'd0;
+            latched_cu_mv_y             <= 12'd0;
+            latched_cu_ctu_x            <= 6'd0;
+            latched_cu_ctu_y            <= 6'd0;
 `ifdef REMEDIATION
-            latched_mvp_x_qp      <= 10'd0;
-            latched_mvp_y_qp      <= 10'd0;
+            latched_mvp_x_qp            <= 10'd0;
+            latched_mvp_y_qp            <= 10'd0;
 `endif
         end else if (trigger_cu) begin
-            latched_cu_is_split   <= node_split_start;
-            latched_cu_depth      <= cu_depth[1:0];
-            latched_cu_split_ctx  <= cu_split_ctx;
-            latched_cu_is_intra   <= md_eff_is_intra;
-            latched_cu_intra_mode <= md_eff_intra_mode;
-            latched_cu_skip       <= md_eff_skip_flag;
-            latched_cu_merge      <= md_eff_merge_flag;
-            latched_cu_merge_idx  <= md_eff_merge_idx;
-            latched_cu_mv_x       <= md_eff_inter_mv_x;
-            latched_cu_mv_y       <= md_eff_inter_mv_y;
-            latched_cu_ctu_x      <= ctu_x;
-            latched_cu_ctu_y      <= ctu_y;
+            latched_cu_is_split         <= node_split_start;
+            latched_cu_depth            <= cu_depth[1:0];
+            latched_cu_split_ctx        <= cu_split_ctx;
+            latched_cu_is_intra         <= md_eff_is_intra;
+            latched_cu_intra_mode       <= md_eff_intra_mode;
+            latched_cu_chroma_pred_mode <= md_eff_chroma_pred_mode;
+            latched_cu_chroma_dir       <= md_eff_chroma_dir;
+            latched_cu_skip             <= md_eff_skip_flag;
+            latched_cu_merge            <= md_eff_merge_flag;
+            latched_cu_merge_idx        <= md_eff_merge_idx;
+            latched_cu_mv_x             <= md_eff_inter_mv_x;
+            latched_cu_mv_y             <= md_eff_inter_mv_y;
+            latched_cu_ctu_x            <= ctu_x;
+            latched_cu_ctu_y            <= ctu_y;
 `ifdef REMEDIATION
-            latched_mvp_x_qp      <= mvp_x_qp;
-            latched_mvp_y_qp      <= mvp_y_qp;
+            latched_mvp_x_qp            <= mvp_x_qp;
+            latched_mvp_y_qp            <= mvp_y_qp;
 `endif
         end
     end
@@ -1056,6 +1078,7 @@ module hevc_encoder_top #(
     // Intra Rough Mode Decision (RMD)
     //-------------------------------------------------------------------------
     wire [11:0] rmd_orig_rd_addr;
+    wire [9:0]  rmd_orig_c_rd_addr;
     wire        rmd_active;
 
     // Convert cu_size (pixel width: 8/16/32/64) to log2, capped at 5
@@ -1168,7 +1191,7 @@ module hevc_encoder_top #(
         end else begin
             if (in_valid && in_ready && orig_write_ptr == 12'd4095)
                 ctu_buffer_free <= 1'b0;
-            if (inloop_ctu_done)
+            if (ctu_both_done)
                 ctu_buffer_free <= 1'b1;
         end
     end
@@ -1220,11 +1243,13 @@ module hevc_encoder_top #(
     wire [5:0] orig_ram_rd_x = recon_out_valid ? recon_out_x[5:0] : orig_res_rd_x;
     wire [5:0] orig_ram_rd_y = recon_out_valid ? recon_out_y[5:0] : orig_res_rd_y;
 
+    wire [9:0] orig_c_ram_rd_addr = rmd_active ? rmd_orig_c_rd_addr : {orig_ram_rd_y[4:0], orig_ram_rd_x[4:0]};
+
     reg [9:0] orig_y_data_q, orig_u_data_q, orig_v_data_q;
     always @(posedge clk) begin
         orig_y_data_q <= orig_y_ram[{orig_ram_rd_y[5:0], orig_ram_rd_x[5:0]}];
-        orig_u_data_q <= orig_u_ram[{orig_ram_rd_y[4:0], orig_ram_rd_x[4:0]}];
-        orig_v_data_q <= orig_v_ram[{orig_ram_rd_y[4:0], orig_ram_rd_x[4:0]}];
+        orig_u_data_q <= orig_u_ram[orig_c_ram_rd_addr];
+        orig_v_data_q <= orig_v_ram[orig_c_ram_rd_addr];
     end
 
     wire [9:0] orig_pixel_q = (reg_tu_comp == 2'd0) ? orig_y_data_q :
@@ -1822,6 +1847,29 @@ module hevc_encoder_top #(
     wire [11:0] rmd_abs_ref_corner_x = {6'd0, rmd_latched_ctu_x, 6'd0} + {6'd0, rmd_latched_pu_x} - 12'd1;
     wire [11:0] rmd_abs_ctu_corner_x = {6'd0, rmd_latched_ctu_x, 6'd0} - 12'd1;
 
+    // Chroma RMD coordinate derivation (4:2:0 format)
+    wire [5:0] rmd_N_c = rmd_N >> 1;
+    wire [4:0] rmd_latched_pu_x_c = rmd_latched_pu_x[5:1];
+    wire [4:0] rmd_latched_pu_y_c = rmd_latched_pu_y[5:1];
+
+    wire [5:0] rmd_top_idx_c_rel = (rmd_ref_idx >= 8'd1) ? (rmd_ref_idx[5:0] - 6'd1) : 6'd0;
+    wire [5:0] rmd_left_idx_c_rel = (rmd_ref_idx > rmd_N) ? (rmd_ref_idx[5:0] - rmd_N - 6'd1) : 6'd0;
+
+    wire [5:0] rmd_top_col_c_unclamped = {1'b0, rmd_latched_pu_x_c} + rmd_top_idx_c_rel;
+    wire rmd_top_col_c_use_unclamped = (rmd_top_idx_c_rel < rmd_N_c) || rmd_top_right_avail;
+    wire [5:0] rmd_top_col_c_effective = rmd_top_col_c_use_unclamped ? rmd_top_col_c_unclamped : ({1'b0, rmd_latched_pu_x_c} + rmd_N_c - 6'd1);
+    wire [4:0] rmd_top_col_c_clamped = (rmd_top_col_c_effective <= 6'd31) ? rmd_top_col_c_effective[4:0] : (rmd_latched_pu_x_c + rmd_N_c[4:0] - 5'd1);
+
+    wire [5:0] rmd_left_row_c_unclamped = {1'b0, rmd_latched_pu_y_c} + rmd_left_idx_c_rel;
+    wire rmd_left_row_c_use_unclamped = (rmd_left_idx_c_rel < rmd_N_c) || rmd_bottom_left_avail;
+    wire [5:0] rmd_left_row_c_effective = rmd_left_row_c_use_unclamped ? rmd_left_row_c_unclamped : ({1'b0, rmd_latched_pu_y_c} + rmd_N_c - 6'd1);
+    wire [4:0] rmd_left_row_c_clamped = (rmd_left_row_c_effective <= 6'd31) ? rmd_left_row_c_effective[4:0] : (rmd_latched_pu_y_c + rmd_N_c[4:0] - 5'd1);
+
+    wire [11:0] rmd_abs_top_x_c_raw = {7'd0, rmd_latched_ctu_x, 5'd0} + {7'd0, rmd_top_col_c_effective[4:0]};
+    wire [11:0] rmd_abs_ref_top_x_c = (rmd_abs_top_x_c_raw < (FRAME_WIDTH/2)) ? rmd_abs_top_x_c_raw : ((FRAME_WIDTH/2) - 12'd1);
+    wire [11:0] rmd_abs_ref_corner_x_c = {7'd0, rmd_latched_ctu_x, 5'd0} + {7'd0, rmd_latched_pu_x_c} - 12'd1;
+    wire [11:0] rmd_abs_ctu_corner_x_c = {7'd0, rmd_latched_ctu_x, 5'd0} - 12'd1;
+
     wire rmd_top_available    = (rmd_latched_pu_y > 0) || (rmd_latched_ctu_y > 0);
     wire rmd_left_available   = (rmd_latched_pu_x > 0) || (rmd_latched_ctu_x > 0);
     wire rmd_corner_available = rmd_top_available && rmd_left_available;
@@ -1837,11 +1885,33 @@ module hevc_encoder_top #(
         (rmd_latched_ctu_x > 0) ? col_buf_y[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_pu_y] :
         10'd512;
 
+    wire [9:0] rmd_first_top_sample_u = 
+        (rmd_latched_pu_y > 0) ? recon_u_ram[{rmd_latched_pu_y_c - 5'd1, rmd_latched_pu_x_c}] :
+        (rmd_latched_ctu_y > 0) ? line_buf_u[{7'd0, rmd_latched_ctu_x, 5'd0} + {7'd0, rmd_latched_pu_x_c}] :
+        10'd512;
+    wire [9:0] rmd_first_left_sample_u = 
+        (rmd_latched_pu_x > 0) ? recon_u_ram[{rmd_latched_pu_y_c, rmd_latched_pu_x_c - 5'd1}] :
+        (rmd_latched_ctu_x > 0) ? col_buf_u[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_pu_y_c] :
+        10'd512;
+
+    wire [9:0] rmd_first_top_sample_v = 
+        (rmd_latched_pu_y > 0) ? recon_v_ram[{rmd_latched_pu_y_c - 5'd1, rmd_latched_pu_x_c}] :
+        (rmd_latched_ctu_y > 0) ? line_buf_v[{7'd0, rmd_latched_ctu_x, 5'd0} + {7'd0, rmd_latched_pu_x_c}] :
+        10'd512;
+    wire [9:0] rmd_first_left_sample_v = 
+        (rmd_latched_pu_x > 0) ? recon_v_ram[{rmd_latched_pu_y_c, rmd_latched_pu_x_c - 5'd1}] :
+        (rmd_latched_ctu_x > 0) ? col_buf_v[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_pu_y_c] :
+        10'd512;
+
     reg [9:0] rmd_recon_val_wire;
+    reg [9:0] rmd_recon_val_u_wire;
+    reg [9:0] rmd_recon_val_v_wire;
     always @(*) begin
         rmd_recon_rd_addr = 12'd0;
         rmd_recon_rd_valid = rmd_any_available;
         rmd_recon_val_wire = 10'd512;
+        rmd_recon_val_u_wire = 10'd512;
+        rmd_recon_val_v_wire = 10'd512;
         if (rmd_ref_active) begin
             if (rmd_ref_idx == 8'd0) begin
                 // Corner
@@ -1849,20 +1919,37 @@ module hevc_encoder_top #(
                     if (rmd_latched_pu_x > 0 && rmd_latched_pu_y > 0) begin
                         rmd_recon_rd_addr = {rmd_latched_pu_y - 6'd1, rmd_latched_pu_x - 6'd1};
                         rmd_recon_val_wire = recon_y_ram[rmd_recon_rd_addr];
-                    end else if (rmd_latched_pu_y > 0 && rmd_latched_ctu_x > 0)
+                        rmd_recon_val_u_wire = recon_u_ram[{rmd_latched_pu_y_c - 5'd1, rmd_latched_pu_x_c - 5'd1}];
+                        rmd_recon_val_v_wire = recon_v_ram[{rmd_latched_pu_y_c - 5'd1, rmd_latched_pu_x_c - 5'd1}];
+                    end else if (rmd_latched_pu_y > 0 && rmd_latched_ctu_x > 0) begin
                         rmd_recon_val_wire = col_buf_y[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_pu_y - 6'd1];
-                    else if (rmd_latched_pu_x > 0 && rmd_latched_ctu_y > 0)
+                        rmd_recon_val_u_wire = col_buf_u[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_pu_y_c - 5'd1];
+                        rmd_recon_val_v_wire = col_buf_v[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_pu_y_c - 5'd1];
+                    end else if (rmd_latched_pu_x > 0 && rmd_latched_ctu_y > 0) begin
                         rmd_recon_val_wire = line_buf_y[rmd_abs_ref_corner_x];
-                    else if (rmd_latched_ctu_x > 0 && rmd_latched_ctu_y > 0)
+                        rmd_recon_val_u_wire = line_buf_u[rmd_abs_ref_corner_x_c];
+                        rmd_recon_val_v_wire = line_buf_v[rmd_abs_ref_corner_x_c];
+                    end else if (rmd_latched_ctu_x > 0 && rmd_latched_ctu_y > 0) begin
                         rmd_recon_val_wire = ctu_corner_y[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_ctu_y[1:0] - 2'd1];
-                    else
+                        rmd_recon_val_u_wire = ctu_corner_u[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_ctu_y[1:0] - 2'd1];
+                        rmd_recon_val_v_wire = ctu_corner_v[rmd_latched_ctu_x[1:0] - 2'd1][rmd_latched_ctu_y[1:0] - 2'd1];
+                    end else begin
                         rmd_recon_val_wire = line_buf_y[rmd_abs_ctu_corner_x];
+                        rmd_recon_val_u_wire = line_buf_u[rmd_abs_ctu_corner_x_c];
+                        rmd_recon_val_v_wire = line_buf_v[rmd_abs_ctu_corner_x_c];
+                    end
                 end else if (rmd_top_available) begin
                     rmd_recon_val_wire = rmd_first_top_sample;
+                    rmd_recon_val_u_wire = rmd_first_top_sample_u;
+                    rmd_recon_val_v_wire = rmd_first_top_sample_v;
                 end else if (rmd_left_available) begin
                     rmd_recon_val_wire = rmd_first_left_sample;
+                    rmd_recon_val_u_wire = rmd_first_left_sample_u;
+                    rmd_recon_val_v_wire = rmd_first_left_sample_v;
                 end else begin
                     rmd_recon_val_wire = 10'd512;
+                    rmd_recon_val_u_wire = 10'd512;
+                    rmd_recon_val_v_wire = 10'd512;
                 end
             end else if (rmd_ref_idx <= rmd_ref_half) begin
                 // Top row
@@ -1870,12 +1957,27 @@ module hevc_encoder_top #(
                     if (rmd_latched_pu_y > 0) begin
                         rmd_recon_rd_addr = {rmd_latched_pu_y - 6'd1, rmd_top_col_clamped};
                         rmd_recon_val_wire = recon_y_ram[rmd_recon_rd_addr];
-                    end else if (rmd_latched_ctu_y > 0)
+                        if (rmd_ref_idx <= rmd_N) begin
+                            rmd_recon_val_u_wire = recon_u_ram[{rmd_latched_pu_y_c - 5'd1, rmd_top_col_c_clamped}];
+                            rmd_recon_val_v_wire = recon_v_ram[{rmd_latched_pu_y_c - 5'd1, rmd_top_col_c_clamped}];
+                        end
+                    end else if (rmd_latched_ctu_y > 0) begin
                         rmd_recon_val_wire = line_buf_y[rmd_abs_ref_top_x];
+                        if (rmd_ref_idx <= rmd_N) begin
+                            rmd_recon_val_u_wire = line_buf_u[rmd_abs_ref_top_x_c];
+                            rmd_recon_val_v_wire = line_buf_v[rmd_abs_ref_top_x_c];
+                        end
+                    end
                 end else if (rmd_left_available) begin
                     rmd_recon_val_wire = rmd_first_left_sample;
+                    if (rmd_ref_idx <= rmd_N) begin
+                        rmd_recon_val_u_wire = rmd_first_left_sample_u;
+                        rmd_recon_val_v_wire = rmd_first_left_sample_v;
+                    end
                 end else begin
                     rmd_recon_val_wire = 10'd512;
+                    rmd_recon_val_u_wire = 10'd512;
+                    rmd_recon_val_v_wire = 10'd512;
                 end
             end else begin
                 // Left column
@@ -1883,48 +1985,73 @@ module hevc_encoder_top #(
                     if (rmd_latched_pu_x > 0) begin
                         rmd_recon_rd_addr = {rmd_left_row_clamped, rmd_latched_pu_x - 6'd1};
                         rmd_recon_val_wire = recon_y_ram[rmd_recon_rd_addr];
-                    end else if (rmd_latched_ctu_x > 0)
+                        if (rmd_ref_idx <= (rmd_N << 1)) begin
+                            rmd_recon_val_u_wire = recon_u_ram[{rmd_left_row_c_clamped, rmd_latched_pu_x_c - 5'd1}];
+                            rmd_recon_val_v_wire = recon_v_ram[{rmd_left_row_c_clamped, rmd_latched_pu_x_c - 5'd1}];
+                        end
+                    end else if (rmd_latched_ctu_x > 0) begin
                         rmd_recon_val_wire = col_buf_y[rmd_latched_ctu_x[1:0] - 2'd1][rmd_left_row_clamped];
+                        if (rmd_ref_idx <= (rmd_N << 1)) begin
+                            rmd_recon_val_u_wire = col_buf_u[rmd_latched_ctu_x[1:0] - 2'd1][rmd_left_row_c_clamped];
+                            rmd_recon_val_v_wire = col_buf_v[rmd_latched_ctu_x[1:0] - 2'd1][rmd_left_row_c_clamped];
+                        end
+                    end
                 end else if (rmd_top_available) begin
                     rmd_recon_val_wire = rmd_first_top_sample;
+                    if (rmd_ref_idx <= (rmd_N << 1)) begin
+                        rmd_recon_val_u_wire = rmd_first_top_sample_u;
+                        rmd_recon_val_v_wire = rmd_first_top_sample_v;
+                    end
                 end else begin
                     rmd_recon_val_wire = 10'd512;
+                    rmd_recon_val_u_wire = 10'd512;
+                    rmd_recon_val_v_wire = 10'd512;
                 end
             end
         end
     end
 
     // Pipeline for RMD ref samples (1-cycle SRAM latency)
+    reg [9:0] rmd_recon_u_ram_q, rmd_recon_v_ram_q;
     always @(posedge clk) begin
         rmd_recon_ram_q       <= rmd_recon_val_wire;
+        rmd_recon_u_ram_q     <= rmd_recon_val_u_wire;
+        rmd_recon_v_ram_q     <= rmd_recon_val_v_wire;
         rmd_recon_rd_valid_q <= rmd_recon_rd_valid;
         rmd_ref_active_q     <= rmd_ref_active;
         rmd_ref_idx_q        <= rmd_ref_idx;
         rmd_ref_last_q       <= (rmd_ref_idx == rmd_ref_max);
     end
 
-    wire [9:0] rmd_ref_sample = rmd_recon_rd_valid_q ? rmd_recon_ram_q : 10'd512;
-
-
+    wire [9:0] rmd_ref_sample   = rmd_recon_rd_valid_q ? rmd_recon_ram_q   : 10'd512;
+    wire [9:0] rmd_ref_sample_u = rmd_recon_rd_valid_q ? rmd_recon_u_ram_q : 10'd512;
+    wire [9:0] rmd_ref_sample_v = rmd_recon_rd_valid_q ? rmd_recon_v_ram_q : 10'd512;
 
     // Intra RMD instance (uses its own ref feeding, not TU ref feeding)
     intra_rmd u_intra_rmd (
-        .clk           (clk),
-        .rst_n         (rst_n),
-        .start         (eval_intra_start),
-        .pu_x          (rmd_latched_pu_x),
-        .pu_y          (rmd_latched_pu_y),
-        .pu_size_log2  (rmd_pu_size_log2),
-        .orig_rd_addr  (rmd_orig_rd_addr),
-        .rmd_active    (rmd_active),
-        .orig_rd_data  (rmd_orig_data),
-        .ref_valid     (rmd_ref_active_q),
-        .ref_sample    (rmd_ref_sample),
-        .ref_idx       (rmd_ref_idx_q),
-        .ref_last      (rmd_ref_last_q),
-        .rmd_done      (rmd_done),
-        .best_mode     (rmd_best_mode),
-        .best_cost     (rmd_best_cost)
+        .clk                   (clk),
+        .rst_n                 (rst_n),
+        .start                 (eval_intra_start),
+        .pu_x                  (rmd_latched_pu_x),
+        .pu_y                  (rmd_latched_pu_y),
+        .pu_size_log2          (rmd_pu_size_log2),
+        .orig_rd_addr          (rmd_orig_rd_addr),
+        .rmd_active            (rmd_active),
+        .orig_rd_data          (rmd_orig_data),
+        .orig_c_rd_addr        (rmd_orig_c_rd_addr),
+        .orig_u_rd_data        (orig_u_data_q),
+        .orig_v_rd_data        (orig_v_data_q),
+        .ref_valid             (rmd_ref_active_q),
+        .ref_sample            (rmd_ref_sample),
+        .ref_idx               (rmd_ref_idx_q),
+        .ref_last              (rmd_ref_last_q),
+        .ref_sample_u          (rmd_ref_sample_u),
+        .ref_sample_v          (rmd_ref_sample_v),
+        .rmd_done              (rmd_done),
+        .best_mode             (rmd_best_mode),
+        .best_cost             (rmd_best_cost),
+        .best_chroma_pred_mode (rmd_best_chroma_pred_mode),
+        .best_chroma_dir       (rmd_best_chroma_dir)
     );
 
     //-------------------------------------------------------------------------
@@ -2240,11 +2367,13 @@ module hevc_encoder_top #(
     // intra_out_x, etc moved to top
     wire        intra_out_ready;
 
+    wire [5:0] active_tu_intra_mode = (reg_tu_comp == 2'd0) ? latched_cu_intra_mode : latched_cu_chroma_dir;
+
     intra_pred_top u_intra_pred (
         .clk              (clk),
         .rst_n            (rst_n),
         .pu_size_log2     (reg_tu_size_log2),
-        .intra_mode       (latched_cu_intra_mode), // Derived from Mode Decision
+        .intra_mode       (active_tu_intra_mode), // Derived from Mode Decision
         .is_luma          (reg_tu_comp == 2'd0),
         
         .ref_valid        (intra_ref_active_q),
@@ -2312,13 +2441,15 @@ module hevc_encoder_top #(
       // Derive scan_mode from intra mode per HEVC spec (diagonal=0, horiz=1, vert=2)
       // HEVC Clause 6.5.3: Only 4x4 and 8x8 Intra TUs can use horizontal/vertical scan. 16x16 and 32x32 are always Diagonal (0).
 `ifdef REMEDIATION
-    // MDCS applies to Intra TUs: 4x4 and 8x8 for Luma, and 4x4 for Chroma (4:2:0 format)
+    // MDCS applies to Intra TUs: 4x4 and 8x8 for Luma, and 4x4 for Chroma (4:2:0 format) per Clause 7.4.9.11
     wire tu_mdcs_eligible = latched_cu_is_intra && 
                             ((reg_tu_comp == 2'd0 && dct_out_tu_size_log2 <= 3'd3) ||
                              (reg_tu_comp != 2'd0 && dct_out_tu_size_log2 == 3'd2));
 
-    wire [1:0] scan_mode = (tu_mdcs_eligible && latched_cu_intra_mode >= 6 && latched_cu_intra_mode <= 14) ? 2'd2 :
-                           (tu_mdcs_eligible && latched_cu_intra_mode >= 22 && latched_cu_intra_mode <= 30) ? 2'd1 : 2'd0; 
+    wire [5:0] mdcs_pred_mode_intra = (reg_tu_comp == 2'd0) ? latched_cu_intra_mode : latched_cu_chroma_dir;
+
+    wire [1:0] scan_mode = (tu_mdcs_eligible && mdcs_pred_mode_intra >= 6'd6  && mdcs_pred_mode_intra <= 6'd14) ? 2'd2 :
+                           (tu_mdcs_eligible && mdcs_pred_mode_intra >= 6'd22 && mdcs_pred_mode_intra <= 6'd30) ? 2'd1 : 2'd0; 
 `else
     wire [1:0] scan_mode = 2'd0;
 `endif 
@@ -2644,11 +2775,47 @@ module hevc_encoder_top #(
     wire [14:0] sao_band_pos_out;
     wire [59:0] sao_bo_offset_out;
 
-    wire [5:0]  eff_sao_type      = (cfg_sao_enable && (sao_type_out == 6'd0)) ? 6'b10_10_10 : sao_type_out;
-    wire [5:0]  eff_sao_eo_class  = sao_eo_class_out;
-    wire [74:0] eff_sao_eo_offset = sao_eo_offset_out;
-    wire [14:0] eff_sao_band_pos  = (cfg_sao_enable && (sao_type_out == 6'd0)) ? {3{5'd31}} : sao_band_pos_out;
-    wire [59:0] eff_sao_bo_offset = (cfg_sao_enable && (sao_type_out == 6'd0)) ? {3{15'd0, 5'sd1}} : sao_bo_offset_out;
+    reg        sao_stats_done_latched;
+    reg [5:0]  latched_sao_type;
+    reg [5:0]  latched_sao_eo_class;
+    reg [74:0] latched_sao_eo_offset;
+    reg [14:0] latched_sao_band_pos;
+    reg [59:0] latched_sao_bo_offset;
+    reg [`CTU_COORD_WIDTH-1:0] sao_latched_ctu_x;
+    reg [`CTU_COORD_WIDTH-1:0] sao_latched_ctu_y;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            sao_stats_done_latched <= 1'b0;
+            latched_sao_type       <= 6'd0;
+            latched_sao_eo_class   <= 6'd0;
+            latched_sao_eo_offset  <= 75'd0;
+            latched_sao_band_pos   <= 15'd0;
+            latched_sao_bo_offset  <= 60'd0;
+            sao_latched_ctu_x      <= 0;
+            sao_latched_ctu_y      <= 0;
+        end else if (ctu_frame_start) begin
+            sao_stats_done_latched <= 1'b0;
+            latched_sao_type       <= 6'd0;
+            latched_sao_eo_class   <= 6'd0;
+            latched_sao_eo_offset  <= 75'd0;
+            latched_sao_band_pos   <= 15'd0;
+            latched_sao_bo_offset  <= 60'd0;
+            sao_latched_ctu_x      <= 0;
+            sao_latched_ctu_y      <= 0;
+        end else if (ctu_both_done) begin
+            sao_stats_done_latched <= 1'b0;
+        end else if (inloop_sao_stats_done) begin
+            sao_stats_done_latched <= 1'b1;
+            latched_sao_type       <= sao_type_out;
+            latched_sao_eo_class   <= sao_eo_class_out;
+            latched_sao_eo_offset  <= sao_eo_offset_out;
+            latched_sao_band_pos   <= sao_band_pos_out;
+            latched_sao_bo_offset  <= sao_bo_offset_out;
+            sao_latched_ctu_x      <= ctu_x;
+            sao_latched_ctu_y      <= ctu_y;
+        end
+    end
 
     //-------------------------------------------------------------------------
     // Frame Completion Synchronization (actual logic)
@@ -2740,7 +2907,7 @@ module hevc_encoder_top #(
         .orig_in_u        (orig_u_data_q),
         .orig_in_v        (orig_v_data_q),
         .sao_enable       (cfg_sao_enable),
-        .sao_stats_done   (),
+        .sao_stats_done   (inloop_sao_stats_done),
         .map_update_valid (map_update_valid_r),
         .map_update_cbf_only(map_update_cbf_only_r),
         .map_update_x     (map_update_x_r),
@@ -2940,10 +3107,9 @@ module hevc_encoder_top #(
     // CABAC Engine FSM
     // Orchestrates CU/Prediction/Coeff coding
     // =========================================================================
-    reg ctu_sao_emitted;
+    assign cabac_bin_drain_en = (cabac_state == CABAC_DRAIN_CTU_BINS);
 
-    wire wire_cu_req = ((cabac_state == CABAC_IDLE) && trigger_cu && (!cfg_sao_enable || ctu_sao_emitted))
-                    || (cabac_state == CABAC_WAIT_SAO_DONE && cabac_sao_done);
+    wire wire_cu_req = (cabac_state == CABAC_IDLE) && trigger_cu;
     wire wire_pred_req = (cabac_state == CABAC_WAIT_PRED);
     wire wire_coeff_req = (cabac_state == CABAC_WAIT_COEFF) && cabac_coeff_ready;
 
@@ -2966,28 +3132,14 @@ module hevc_encoder_top #(
         if (!rst_n) begin
             cabac_state     <= CABAC_IDLE;
             cabac_sao_req_r <= 1'b0;
-            ctu_sao_emitted <= 1'b0;
         end else if (ctu_frame_start) begin
             cabac_state     <= CABAC_IDLE;
             cabac_sao_req_r <= 1'b0;
-            ctu_sao_emitted <= 1'b0;
         end else begin
             cabac_sao_req_r <= 1'b0;
             case (cabac_state)
                 CABAC_IDLE: begin
                     if (trigger_cu) begin
-                        if (cfg_sao_enable && !ctu_sao_emitted) begin
-                            cabac_sao_req_r <= 1'b1;
-                            ctu_sao_emitted <= 1'b1;
-                            cabac_state     <= CABAC_WAIT_SAO_DONE;
-                        end else begin
-                            cabac_state     <= CABAC_WAIT_CU_DONE;
-                        end
-                    end
-                end
-                CABAC_WAIT_SAO_DONE: begin
-                    cabac_sao_req_r <= 1'b0;
-                    if (cabac_sao_done) begin
                         cabac_state <= CABAC_WAIT_CU_DONE;
                     end
                 end
@@ -2997,7 +3149,7 @@ module hevc_encoder_top #(
                             cabac_state <= CABAC_IDLE;
                         end else if (current_cu_skip) begin
                             if (cabac_cu_is_last_in_ctu) begin
-                                cabac_state <= CABAC_TRM_CTU;
+                                cabac_state <= cfg_sao_enable ? CABAC_WAIT_SAO_STATS : CABAC_TRM_CTU;
                             end else cabac_state <= CABAC_IDLE;
                         end else if (latched_cu_merge) begin
                             cabac_state <= CABAC_WAIT_COEFF;
@@ -3023,21 +3175,37 @@ module hevc_encoder_top #(
                     if (cabac_coeff_done) begin
                         if (!latched_cu_is_intra && !latched_cu_merge && !cu_cbf_latched) begin
                             if (cabac_cu_is_last_in_ctu) begin
-                                cabac_state <= CABAC_TRM_CTU;
+                                cabac_state <= cfg_sao_enable ? CABAC_WAIT_SAO_STATS : CABAC_TRM_CTU;
                             end else cabac_state <= CABAC_IDLE;
                         end else if (!reg_tu_is_last_in_cu) begin
                             cabac_state <= CABAC_WAIT_COEFF;
                         end else begin
                             if (cabac_cu_is_last_in_ctu) begin
-                                cabac_state <= CABAC_TRM_CTU;
+                                cabac_state <= cfg_sao_enable ? CABAC_WAIT_SAO_STATS : CABAC_TRM_CTU;
                             end else cabac_state <= CABAC_IDLE;
                         end
                     end
                 end
+                CABAC_WAIT_SAO_STATS: begin
+                    if (sao_stats_done_latched || inloop_sao_stats_done) begin
+                        cabac_sao_req_r <= 1'b1;
+                        cabac_state     <= CABAC_WAIT_SAO_DONE;
+                    end
+                end
+                CABAC_WAIT_SAO_DONE: begin
+                    cabac_sao_req_r <= 1'b0;
+                    if (cabac_sao_done) begin
+                        cabac_state <= cfg_sao_enable ? CABAC_DRAIN_CTU_BINS : CABAC_TRM_CTU;
+                    end
+                end
+                CABAC_DRAIN_CTU_BINS: begin
+                    if (cabac_bin_drain_done && !cabac_enc_busy) begin
+                        cabac_state <= CABAC_TRM_CTU;
+                    end
+                end
                 CABAC_TRM_CTU: begin
                     if (!cabac_enc_busy) begin
-                        cabac_state     <= CABAC_IDLE;
-                        ctu_sao_emitted <= 1'b0;
+                        cabac_state <= CABAC_IDLE;
                     end
                 end
             endcase
@@ -3107,6 +3275,30 @@ module hevc_encoder_top #(
     wire ctu_trm_pulse     = (cabac_state == CABAC_TRM_CTU && !cabac_enc_busy);
     wire top_trm_req       = ctu_trm_pulse;
     wire top_trm_bin_val   = is_last_slice_ctu; // 1 for the last CTU in slice, 0 for others
+
+    reg inloop_done_pending;
+    reg cabac_done_pending;
+
+    assign ctu_both_done = (inloop_ctu_done || inloop_done_pending) && 
+                           (ctu_trm_pulse   || cabac_done_pending);
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            inloop_done_pending <= 1'b0;
+            cabac_done_pending  <= 1'b0;
+        end else if (ctu_frame_start) begin
+            inloop_done_pending <= 1'b0;
+            cabac_done_pending  <= 1'b0;
+        end else if (ctu_both_done) begin
+            inloop_done_pending <= 1'b0;
+            cabac_done_pending  <= 1'b0;
+        end else begin
+            if (inloop_ctu_done)
+                inloop_done_pending <= 1'b1;
+            if (ctu_trm_pulse)
+                cabac_done_pending <= 1'b1;
+        end
+    end
     
     wire cabac_flush_pulse = (cabac_flush_state == 2'd2 && cabac_idle_timer == 8'd99);
 
@@ -3326,6 +3518,7 @@ module hevc_encoder_top #(
         .cu_split_ctx     (cabac_in_cu_split_ctx),
         .cu_pred_intra    (latched_cu_is_intra),
         .cu_intra_mode    (latched_cu_intra_mode),
+        .cu_chroma_pred_mode (latched_cu_chroma_pred_mode),
         .cu_left_intra_mode (cu_left_intra_mode),
         .cu_above_intra_mode(cu_above_intra_mode),
         .cu_cbf           (cu_cbf_latched),
@@ -3370,15 +3563,20 @@ module hevc_encoder_top #(
         .coeff_rd_data       (coeff_buf_rdata),
 
         // SAO syntax
-        .ctu_x               (ctu_x),
-        .ctu_y               (ctu_y),
+        .ctu_x               (sao_latched_ctu_x),
+        .ctu_y               (sao_latched_ctu_y),
         .sao_req             (cabac_sao_req_r),
         .sao_done            (cabac_sao_done),
-        .sao_type            (eff_sao_type),
-        .sao_eo_class        (eff_sao_eo_class),
-        .sao_eo_offset       (eff_sao_eo_offset),
-        .sao_band_pos        (eff_sao_band_pos),
-        .sao_bo_offset       (eff_sao_bo_offset),
+        .sao_type            (latched_sao_type),
+        .sao_eo_class        (latched_sao_eo_class),
+        .sao_eo_offset       (latched_sao_eo_offset),
+        .sao_band_pos        (latched_sao_band_pos),
+        .sao_bo_offset       (latched_sao_bo_offset),
+
+        // CTU Delay / Drain
+        .ctu_sao_delay_en    (cfg_sao_enable),
+        .ctu_bin_drain_en    (cabac_bin_drain_en),
+        .ctu_bin_drain_done  (cabac_bin_drain_done),
 
         // Flush
         .trm_req          (top_trm_req),

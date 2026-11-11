@@ -399,6 +399,11 @@ module deblock_top (
         .modified(chr_modified)
     );
 
+    // Forward declarations for FSM debug probes
+    wire [5:0] ec = edge_col;
+    wire [5:0] er = edge_row;
+    wire [2:0] sg = sample_grp;
+
     //-------------------------------------------------------------------------
     // Main FSM
     //-------------------------------------------------------------------------
@@ -616,18 +621,12 @@ module deblock_top (
     wire [2:0] px_idx;
     wire       loading_q;
     wire [2:0] q_idx;
-    wire [5:0] ec, er;
-    wire [2:0] sg;
     wire [2:0] wr_q_idx;
 
     assign px_idx    = resp_cnt;
     assign loading_q = is_luma ? (px_idx >= 3'd4) : (px_idx >= 3'd2);
     assign q_idx     = is_luma ? (px_idx - 3'd4) : (px_idx - 3'd2);
     assign wr_q_idx  = is_luma ? (write_cnt - 3'd3) : (write_cnt - 3'd1);
-
-    assign ec = edge_col;
-    assign er = edge_row;
-    assign sg = sample_grp;
 
     always @(*) begin
         // Defaults to prevent latches

@@ -392,28 +392,6 @@ module syntax_pred #(
                 bin_ctx_id = CTX_MVP_FLAG;
                 bin_is_ep  = 1'b0;
             end
-            S_INTRA_PREV: begin
-                bin_valid  = 1'b1;
-                bin_value  = prev_intra_r;
-                bin_ctx_id = 8'd14;
-                bin_is_ep  = 1'b0;
-            end
-            S_INTRA_MPM: begin
-                bin_valid = 1'b1;
-                bin_value = (eg_symbol == 0) ? (mpm_idx_r != 2'd0) : (mpm_idx_r == 2'd2);
-                bin_is_ep = 1'b1;
-            end
-            S_INTRA_REM: begin
-                bin_valid = 1'b1;
-                bin_value = rem_intra_r[4 - eg_symbol];
-                bin_is_ep = 1'b1;
-            end
-            S_INTRA_CHROMA: begin
-                bin_valid  = 1'b1;
-                bin_value  = (chroma_mode_r == 3'd4) ? 1'b0 : 1'b1;
-                bin_ctx_id = 8'd16;
-                bin_is_ep  = 1'b0;
-            end
             default: begin
                 bin_valid = 1'b0;
             end

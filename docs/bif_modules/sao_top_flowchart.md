@@ -124,13 +124,13 @@ flowchart TD
 
 ---
 
-## 5. End-to-End Bit-Exact Band Offset & CABAC Synchronization
+## 5. End-to-End Bit-Exact Dynamic Multi-Mode SAO & CTU-Delayed CABAC Serialization (`T3-13`)
 
-### 5.1. Pointwise Filtering vs. Boundary Hazards
-In CTU-by-CTU hardware architectures, Edge Offset (EO) requires reading neighboring boundary pixels ($n_0, n_1$) that may cross CTU boundaries or undergo in-place write modification within internal SRAM buffers, creating spatial inter-CTU race hazards. 
+### 5.1. 2-Phase Single-Port BRAM Neighbor Read & Post-Deblocked Border Cache
+In CTU-by-CTU hardware architectures, Edge Offset (EO) requires reading neighboring boundary pixels ($n_0, n_1$) that may cross CTU boundaries or undergo in-place write modification within single-port SRAM buffers.
 
-To achieve **100% bit-exact reconstruction (`max_diff == 0`)** against the HM 18.0 reference decoder across multi-frame sequences (I, P, B):
-1. **Pointwise Band Offset (`sao_type = 6'b10_10_10`)**: Pointwise classification (`sao_band_offset.v`) depends purely on the sample's own 10-bit value ($p \gg 5$), completely eliminating boundary neighbor fetching and cross-CTU dependencies.
-2. **Deterministic Parameter Derivation (`sao_stats.v`)**: In `S_DERIVE`, `sao_stats.v` selects Band Offset with `band_pos = {3{5'd31}}` and `bo_offset = {3{15'd0, 5'sd1}}` (+1 offset for band 31), while maintaining the full 48-read SRAM classification cycle budget.
-3. **CTU-Start Synchronization (`hevc_encoder_top.v` & `cabac_enc_top.v`)**: HEVC Clause 7.3.8.1 mandates that `sao(rx, ry)` syntax must be encoded at the start of each CTU before `coding_quadtree()`. To ensure CTU `(0,0)` CABAC syntax and `u_sao` filtering match prior to the first execution of `sao_stats`, `hevc_encoder_top.v` supplies synchronized default parameters (`eff_sao_*`), guaranteeing zero-drift bit-exact parity between arithmetic syntax parsing and in-loop hardware reconstruction.
+To achieve **100% bit-exact reconstruction (`max_diff == 0`)** across all 3 frames (`I`, `P`, `B`) while dynamically switching between `OFF`, `EO` ($0^\circ, 90^\circ, 135^\circ, 45^\circ$), and `BO`:
+1. **2-Phase Single-Port BRAM EO Read (`SINGLE_PORT_BRAM_MODE = 1`)**: `sao_top.v` sequences `S_REQ_PIX` (reading center pixel $c$ and any cross-CTU $n_0$) $\to$ `S_REQ_N1` (reading $n_1$ from single-port BRAM while caching unmodified intra-CTU $n_0$ in `pre_sao_row_buf`, `cur_row_left`, and `prev_row_left_d`) $\to$ `S_WAIT_PIX`.
+2. **Post-Deblocked Neighbor Border Update**: In `decoder_inloop_filters.v`, whenever cross-CTU deblocking (`db_pix_wr_neighbor`) modifies a border pixel during `S_DB`, `col_buf_*`, `line_buf_*`, and `corner_buf_*` are updated in-place with the post-deblocked sample $p'_0$ so `S_SAO` sees the exact same boundary samples as `HM 18.0 TAppDecoder.exe`.
+3. **CTU-Delayed Bitstream Serialization (`ctu_bin_ram`, `SINGLE_PASS_CAUSAL_SYNC = 0`)**: HEVC Clause 7.3.8.2 mandates that `sao(rx, ry)` syntax must be emitted at the start of each CTU before `coding_quadtree()`. During `S_FILL`, `cabac_enc_top.v` buffers the CTU's `coding_quadtree()` bins (`syntax_cu`, `syntax_pred`, `syntax_coeff`) into `ctu_bin_ram` (`8192 x 10-bit` BRAM). Once `sao_stats_done` asserts after `S_STATS`, `syntax_sao.v` emits `sao(rx, ry)` **first** with the dynamic `EO`/`BO`/`OFF` RDO decision, and `ctu_bin_ram` then drains into `bin_encoder` $\to$ `range_coder` with a 1-cycle lookahead synchronous read handshake.
 

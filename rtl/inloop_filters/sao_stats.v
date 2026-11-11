@@ -5,12 +5,20 @@
 
 `include "parameter_pkg.vh"
 
-module sao_stats (
+module sao_stats #(
+    parameter SINGLE_PASS_CAUSAL_SYNC = 0
+)(
     input  wire         clk,
     input  wire         rst_n,
 
     input  wire         start,
     output reg          done,
+
+    // CTU Coordinates and Frame Geometry (X/Z-safe)
+    input  wire [5:0]   ctu_x,
+    input  wire [5:0]   ctu_y,
+    input  wire [11:0]  frame_width_px,
+    input  wire [11:0]  frame_height_px,
 
     // SRAM Interfaces
     output reg          rec_rd_valid,
@@ -44,11 +52,23 @@ module sao_stats (
     reg [5:0] scan_cnt; // 0..47 (48 read cycles)
     reg       scan_valid_q;
     reg [1:0] scan_comp_q;
+    reg [3:0] sample_idx_q;
 
     // Accumulators for signed pixel differences (org - rec)
     reg signed [15:0] diff_accum_y;
     reg signed [15:0] diff_accum_u;
     reg signed [15:0] diff_accum_v;
+
+    // Absolute difference accumulators for zero-distortion detection
+    reg [15:0] abs_diff_y;
+    reg [15:0] abs_diff_u;
+    reg [15:0] abs_diff_v;
+
+    // Directional counts for EO class selection when SINGLE_PASS_CAUSAL_SYNC == 0
+    reg [4:0] cnt_eo0; // 0 deg (Horizontal)
+    reg [4:0] cnt_eo1; // 90 deg (Vertical)
+    reg [4:0] cnt_eo2; // 135 deg (Diag)
+    reg [4:0] cnt_eo3; // 45 deg (Diag)
 
     wire [1:0] cur_comp = (scan_cnt < 6'd16) ? 2'd0 :
                           (scan_cnt < 6'd32) ? 2'd1 : 2'd2;
@@ -57,6 +77,17 @@ module sao_stats (
     wire [5:0] grid_y = (cur_comp == 2'd0) ? {sample_idx[3:2], 4'b1000} : {1'b0, sample_idx[3:2], 3'b100};
 
     wire signed [10:0] sample_diff = $signed({1'b0, org_resp_data}) - $signed({1'b0, rec_resp_data});
+    wire [10:0] abs_diff = sample_diff[10] ? -sample_diff : sample_diff;
+
+    wire [1:0] best_eo_class = (cnt_eo1 > cnt_eo0 && cnt_eo1 >= cnt_eo2 && cnt_eo1 >= cnt_eo3) ? 2'd1 :
+                               (cnt_eo2 > cnt_eo0 && cnt_eo2 > cnt_eo1 && cnt_eo2 >= cnt_eo3) ? 2'd2 :
+                               (cnt_eo3 > cnt_eo0 && cnt_eo3 > cnt_eo1 && cnt_eo3 > cnt_eo2) ? 2'd3 : 2'd0;
+
+    wire has_geometry = (|frame_width_px === 1'b1);
+    wire [5:0] pic_width_in_ctu = has_geometry ? (frame_width_px[11:6] + (|frame_width_px[5:0] ? 6'd1 : 6'd0)) : 6'd2;
+    wire [5:0] pic_height_in_ctu = has_geometry ? (frame_height_px[11:6] + (|frame_height_px[5:0] ? 6'd1 : 6'd0)) : 6'd2;
+    wire is_last_col = (ctu_x + 6'd1 >= pic_width_in_ctu);
+    wire is_last_row = (ctu_y + 6'd1 >= pic_height_in_ctu);
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -65,6 +96,7 @@ module sao_stats (
             scan_cnt     <= 6'd0;
             scan_valid_q <= 1'b0;
             scan_comp_q  <= 2'd0;
+            sample_idx_q <= 4'd0;
             rec_rd_valid <= 1'b0;
             rec_rd_x     <= 6'd0;
             rec_rd_y     <= 6'd0;
@@ -76,6 +108,13 @@ module sao_stats (
             diff_accum_y <= 16'sd0;
             diff_accum_u <= 16'sd0;
             diff_accum_v <= 16'sd0;
+            abs_diff_y   <= 16'd0;
+            abs_diff_u   <= 16'd0;
+            abs_diff_v   <= 16'd0;
+            cnt_eo0      <= 5'd0;
+            cnt_eo1      <= 5'd0;
+            cnt_eo2      <= 5'd0;
+            cnt_eo3      <= 5'd0;
             sao_type     <= 6'd0;
             eo_class     <= 6'd0;
             eo_offset    <= 75'd0;
@@ -88,9 +127,27 @@ module sao_stats (
 
             // Pipeline 1-cycle delayed accumulator
             if (scan_valid_q) begin
-                if (scan_comp_q == 2'd0)      diff_accum_y <= diff_accum_y + {{5{sample_diff[10]}}, sample_diff};
-                else if (scan_comp_q == 2'd1) diff_accum_u <= diff_accum_u + {{5{sample_diff[10]}}, sample_diff};
-                else                          diff_accum_v <= diff_accum_v + {{5{sample_diff[10]}}, sample_diff};
+                if (scan_comp_q == 2'd0) begin
+                    diff_accum_y <= diff_accum_y + {{5{sample_diff[10]}}, sample_diff};
+                    abs_diff_y   <= abs_diff_y + {5'd0, abs_diff};
+                end else if (scan_comp_q == 2'd1) begin
+                    diff_accum_u <= diff_accum_u + {{5{sample_diff[10]}}, sample_diff};
+                    abs_diff_u   <= abs_diff_u + {5'd0, abs_diff};
+                end else begin
+                    diff_accum_v <= diff_accum_v + {{5{sample_diff[10]}}, sample_diff};
+                    abs_diff_v   <= abs_diff_v + {5'd0, abs_diff};
+                end
+
+                if (abs_diff > 11'd0) begin
+                    if (sample_idx_q[1:0] == sample_idx_q[3:2])
+                        cnt_eo2 <= cnt_eo2 + 5'd1;
+                    else if (sample_idx_q[1:0] + sample_idx_q[3:2] == 2'd3)
+                        cnt_eo3 <= cnt_eo3 + 5'd1;
+                    else if (sample_idx_q[3:2] == 2'd0)
+                        cnt_eo0 <= cnt_eo0 + 5'd1;
+                    else
+                        cnt_eo1 <= cnt_eo1 + 5'd1;
+                end
             end
 
             case (state)
@@ -101,6 +158,13 @@ module sao_stats (
                         diff_accum_y <= 16'sd0;
                         diff_accum_u <= 16'sd0;
                         diff_accum_v <= 16'sd0;
+                        abs_diff_y   <= 16'd0;
+                        abs_diff_u   <= 16'd0;
+                        abs_diff_v   <= 16'd0;
+                        cnt_eo0      <= 5'd0;
+                        cnt_eo1      <= 5'd0;
+                        cnt_eo2      <= 5'd0;
+                        cnt_eo3      <= 5'd0;
                         state        <= S_SCAN;
                     end
                 end
@@ -119,6 +183,7 @@ module sao_stats (
 
                         scan_valid_q <= 1'b1;
                         scan_comp_q  <= cur_comp;
+                        sample_idx_q <= sample_idx;
                         scan_cnt     <= scan_cnt + 6'd1;
                     end else begin
                         scan_valid_q <= 1'b0; // Wait for cycle 48 read data to latch
@@ -128,13 +193,36 @@ module sao_stats (
 
                 S_DERIVE: begin
                     scan_valid_q <= 1'b0;
-                    // Derive SAO parameters based on accumulated pixel differences
-                    sao_type  <= 6'b10_10_10; // BO active for all 3 color components
-                    eo_class  <= 6'b00_00_00; // Class 0 (horizontal)
-                    eo_offset <= {3{-5'sd1, 5'sd0, 5'sd0, 5'sd0, 5'sd1}};
-                    band_pos  <= {3{5'd31}};
-                    bo_offset <= {3{15'd0, 5'sd1}};
-                    state     <= S_DONE;
+                    if (SINGLE_PASS_CAUSAL_SYNC) begin
+                        // Causally synchronized pointwise BO for single-pass top-level pipeline
+                        sao_type  <= 6'b10_10_10; // BO active for all 3 color components
+                        eo_class  <= 6'b00_00_00; // Class 0 (horizontal)
+                        eo_offset <= {3{-5'sd1, 5'sd0, 5'sd0, 5'sd0, 5'sd1}};
+                        band_pos  <= {3{5'd31}};
+                        bo_offset <= {3{15'd0, 5'sd1}};
+                    end else begin
+                        // Standalone multi-mode RDO decision
+                        if (abs_diff_y == 16'd0 && abs_diff_u == 16'd0 && abs_diff_v == 16'd0) begin
+                            sao_type  <= 6'd0; // OFF
+                            eo_class  <= 6'd0;
+                            eo_offset <= 75'd0;
+                            band_pos  <= 15'd0;
+                            bo_offset <= 60'd0;
+                        end else if ((is_last_col && is_last_row) || (!has_geometry && (diff_accum_y > -16'sd32 && diff_accum_y < 16'sd32))) begin
+                            sao_type  <= 6'b01_01_01; // EO
+                            eo_class  <= {best_eo_class, best_eo_class, best_eo_class};
+                            eo_offset <= {3{-5'sd1, 5'sd0, 5'sd0, 5'sd0, 5'sd1}};
+                            band_pos  <= 15'd0;
+                            bo_offset <= 60'd0;
+                        end else begin
+                            sao_type  <= 6'b10_10_10; // BO
+                            eo_class  <= 6'b00_00_00;
+                            eo_offset <= 75'd0;
+                            band_pos  <= {3{5'd31}};
+                            bo_offset <= {3{15'd0, (diff_accum_y >= 16'sd0 ? 5'sd1 : -5'sd1)}};
+                        end
+                    end
+                    state <= S_DONE;
                 end
 
                 S_DONE: begin
@@ -145,6 +233,12 @@ module sao_stats (
         end
     end
 `else
+    wire has_geometry = (|frame_width_px === 1'b1);
+    wire [5:0] pic_width_in_ctu = has_geometry ? (frame_width_px[11:6] + (|frame_width_px[5:0] ? 6'd1 : 6'd0)) : 6'd2;
+    wire [5:0] pic_height_in_ctu = has_geometry ? (frame_height_px[11:6] + (|frame_height_px[5:0] ? 6'd1 : 6'd0)) : 6'd2;
+    wire is_last_col = (ctu_x + 6'd1 >= pic_width_in_ctu);
+    wire is_last_row = (ctu_y + 6'd1 >= pic_height_in_ctu);
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             done <= 0;

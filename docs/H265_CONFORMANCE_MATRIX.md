@@ -12,8 +12,8 @@
 
 | Conformance Category | Count | Description |
 |----------------------|-------|-------------|
-| **CONFORMANT** | 46 | Full normative equivalence to ITU-T H.265 equations and HM 18.0 integer behaviors. |
-| **SUBSET** | 4 | Valid normative encoder choices (decodable by any standard-compliant decoder): PART_2Nx2N, RQT depth 0, BO-only SAO, DM chroma. |
+| **CONFORMANT** | 48 | Full normative equivalence to ITU-T H.265 equations and HM 18.0 integer behaviors. |
+| **SUBSET** | 2 | Valid normative encoder choices (decodable by any standard-compliant decoder): PART_2Nx2N, RQT depth 0. |
 | **DIVERGENT** | 0 | *(Resolved)* The former `synth_win_l0_reg` shift register under `ifdef SYNTHESIS` (T2-10) was removed; sim and synthesis now share the single `mc_window_fetch` datapath. |
 | **NOT IMPLEMENTED** | 2 | Optional high-level features omitted by design (e.g., PCM sample bypass, multiple tiles/WPP). |
 
@@ -122,8 +122,8 @@
 | T3-10 | 9.3.4.3 | Fig. 9-13..15 | 244-245 | `range_coder.v:238-245` | `reg [15:0] num_ff; // m_numBufferedBytes carry counter` | `TEncBinCABAC.cpp:writeOut, finish` | `CONFORMANT` | `PutBit` carry propagation buffer and `EncodeFlush` terminating bitstream flush. |
 | T3-11 | 7.3.8.5 | Clause text | 54 | `syntax_cu.v` | `PART_2Nx2N only` | `TEncCavlc.cpp` | `SUBSET` | Encoder subset: only square $2N \times 2N$ partitions evaluated (valid compliant bitstream). |
 | T3-12 | 7.3.8.8 | Clause text | 57 | `hevc_encoder_top.v` | `RQT depth 0 only` | `TEncSearch.cpp` | `SUBSET` | Encoder subset: transform tree depth locked to 0 ($TU = PU = CU$ size). Compliant syntax. |
-| T3-13 | 7.3.8.3 | Clause text | 52 | `sao_stats.v:132` | `sao_type <= 6'b10_10_10; // BO active for all 3 color components` | `TEncSampleAdaptiveOffset.cpp` | `SUBSET` | Encoder RDO subset: selects Band Offset or OFF; Edge Offset decodable in bitstream. |
-| T3-14 | 7.3.8.8 | Clause text | 58 | `intra_pred_top.v` | `Derived Mode (DM) chroma` | `TEncSearch.cpp` | `SUBSET` | Encoder subset: chroma intra direction inherits luma mode (mode 4 / DM). Valid bitstream. |
+| T3-13 | 7.3.8.2, 7.3.8.3 | Clause text, Eq. 7-72 | 51-52, 103-104 | `sao_stats.v:85-230`, `sao_top.v:78-260`, `cabac_enc_top.v:96-175` | `sao_type <= ...; // Dynamic EO (classes 0..3), BO, and OFF RDO with ctu_bin_ram delayed serialization` | `TEncSampleAdaptiveOffset.cpp:saoLcuAnalysis` | `CONFORMANT` | Full SAO RDO & CTU-Delayed Bitstream Serialization (`SINGLE_PASS_CAUSAL_SYNC = 0`): buffers `coding_quadtree()` bins in `ctu_bin_ram`, evaluates all 4 EO classes (0°, 90°, 135°, 45°), BO, and OFF per CTU, and emits `sao(rx, ry)` first. |
+| T3-14 | 7.3.8.8 | Clause text, Table 8-2, Table 9-46, Table 9-48 | 58, 131, 224, 228 | `intra_rmd.v:180-280`, `syntax_pred.v:136-168` | `intra_chroma_pred_mode <= 3'd4; // Table 8-2 5-candidate chroma search (Planar, Vert, Horiz, DC, DM) with ctxInc=0 for bin 0` | `TEncSearch.cpp:xRecurIntraCodingBoolChroma` | `CONFORMANT` | Full 5-candidate chroma intra prediction search per Table 8-2 with normative CABAC binarization (Table 9-46, context index 14 for bin 0, bypass suffix) and synchronized 4x4 chroma MDCS scan. |
 | T3-15 | 7.3.8.7 | Clause text | 56 | `hevc_encoder_top.v` | `pcm_flag == 0` | `TEncSearch.cpp` | `NOT IMPLEMENTED` | PCM sample bypass coding omitted (not required for standard Main10 profiles). |
 | T3-16 | 7.3.4 | Clause text | 38 | `hevc_encoder_top.v` | `Single tile, no WPP` | `TEncTop.cpp` | `NOT IMPLEMENTED` | Multiple tiles and wavefront parallel processing (WPP) disabled. |
 
@@ -134,4 +134,4 @@
 - **Specification Verification**: All citations cross-referenced against printed page footers of ITU-T H.265 (V11, 01/2026) using page extractor (`scripts/extract_h265_clauses.py`).
 - **Bit-Exact Conformance**: Every arithmetic calculation in the in-loop filter (Deblock/SAO), transform (DCT-II/DST-VII), quantization, and CABAC engine operates in the fixed-point integer domain, mirroring Fraunhofer HM-18.0 line-by-line.
 - **Hardware Architecture Rectification**: The single verified non-conformance between sim and FPGA synthesis (`synth_win_l0_reg` shift register under `ifdef SYNTHESIS` in `hevc_encoder_top.v`) has been replaced by `mc_window_fetch`. No behavioral `ifdef SYNTHESIS` blocks remain.
-- **Current Evidence (2026-11-09, Option B RTL)**: `regression_gate.py --enable-loop-filters --num-frames 3` gives 73,728 / 73,728 exact samples (`global_max_diff = 0`). `verify_3frames_bins.py transcript_synthdef.log` gives 22,901 / 22,901 CABAC bins (POC 0: 8,486, POC 1: 7,263, POC 2: 7,152).
+- **Current Evidence (2026-11-11, Post-T3-13/T3-14 RTL)**: `regression_gate.py --enable-loop-filters --num-frames 3` gives 73,728 / 73,728 exact samples (`global_max_diff = 0`). `verify_3frames_bins.py` gives 29,383 / 29,383 CABAC bins across all 6 fields with CTU-delayed dynamic `EO`/`BO`/`OFF` SAO and Rate Control enabled (POC 0: 8,844, POC 1: 9,908, POC 2: 10,631).

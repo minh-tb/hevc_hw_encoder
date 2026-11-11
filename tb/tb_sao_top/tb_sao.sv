@@ -36,13 +36,13 @@ module tb_sao;
     logic         pix_resp_valid, pix_resp_ready;
     logic [`PIXEL_WIDTH-1:0] pix_resp_data;
     logic         n0_rd_valid, n0_rd_ready;
-    logic [5:0]   n0_rd_x, n0_rd_y;
+    logic signed [7:0] n0_rd_x, n0_rd_y;
     logic [1:0]   n0_rd_comp;
     logic         n0_resp_valid, n0_resp_ready;
     logic [`PIXEL_WIDTH-1:0] n0_resp_data;
 
     logic         n1_rd_valid, n1_rd_ready;
-    logic [5:0]   n1_rd_x, n1_rd_y;
+    logic signed [7:0] n1_rd_x, n1_rd_y;
     logic [1:0]   n1_rd_comp;
     logic         n1_resp_valid, n1_resp_ready;
     logic [`PIXEL_WIDTH-1:0] n1_resp_data;
@@ -57,6 +57,7 @@ module tb_sao;
     sao_top dut (
         .clk(clk), .rst_n(rst_n),
         .ctu_valid(ctu_valid), .ctu_ready(ctu_ready), .ctu_x(10'd0), .ctu_y(10'd0),
+        .frame_width_px(12'd128), .frame_height_px(12'd128),
         .sao_type(sao_type), .eo_class(eo_class), .eo_offset(eo_offset),
         .band_pos(band_pos), .bo_offset(bo_offset),
         
@@ -101,6 +102,7 @@ module tb_sao;
         int t_stype, t_eocls, t_bpos, t_eoff, t_boff, r;
         
         fd = $fopen("sao_in.dat", "r");
+        if (!fd) fd = $fopen("tb/tb_sao_top/sao_in.dat", "r");
         if (!fd) begin $display("ERROR: Cannot open sao_in.dat"); $finish; end
         for(int y=0; y<64; y++) for(int x=0; x<64; x++) begin r = $fscanf(fd, "%d", val); mem_in_y[y][x] = val; end
         for(int y=0; y<32; y++) for(int x=0; x<32; x++) begin r = $fscanf(fd, "%d", val); mem_in_cb[y][x] = val; end
@@ -108,6 +110,7 @@ module tb_sao;
         $fclose(fd);
 
         fd = $fopen("sao_out_golden.dat", "r");
+        if (!fd) fd = $fopen("tb/tb_sao_top/sao_out_golden.dat", "r");
         if (!fd) begin $display("ERROR: Cannot open sao_out_golden.dat"); $finish; end
         for (int c=0; c<3; c++) begin
             r = $fscanf(fd, "%d %d %d", t_stype, t_eocls, t_bpos);
@@ -159,9 +162,13 @@ module tb_sao;
             // N0 Pixel
             if (n0_rd_valid && !n0_resp_valid) begin
                 n0_resp_valid <= 1'b1;
-                if      (n0_rd_comp == 0) n0_resp_data <= mem_in_y[n0_rd_y][n0_rd_x];
-                else if (n0_rd_comp == 1) n0_resp_data <= mem_in_cb[n0_rd_y][n0_rd_x];
-                else                      n0_resp_data <= mem_in_cr[n0_rd_y][n0_rd_x];
+                if (n0_rd_x >= 0 && n0_rd_y >= 0 && ((n0_rd_comp == 0 && n0_rd_x < 64 && n0_rd_y < 64) || (n0_rd_comp != 0 && n0_rd_x < 32 && n0_rd_y < 32))) begin
+                    if      (n0_rd_comp == 0) n0_resp_data <= mem_in_y[n0_rd_y][n0_rd_x];
+                    else if (n0_rd_comp == 1) n0_resp_data <= mem_in_cb[n0_rd_y][n0_rd_x];
+                    else                      n0_resp_data <= mem_in_cr[n0_rd_y][n0_rd_x];
+                end else begin
+                    n0_resp_data <= 10'd0;
+                end
             end else if (n0_resp_valid && n0_resp_ready) begin
                 n0_resp_valid <= 1'b0;
             end
@@ -169,9 +176,13 @@ module tb_sao;
             // N1 Pixel
             if (n1_rd_valid && !n1_resp_valid) begin
                 n1_resp_valid <= 1'b1;
-                if      (n1_rd_comp == 0) n1_resp_data <= mem_in_y[n1_rd_y][n1_rd_x];
-                else if (n1_rd_comp == 1) n1_resp_data <= mem_in_cb[n1_rd_y][n1_rd_x];
-                else                      n1_resp_data <= mem_in_cr[n1_rd_y][n1_rd_x];
+                if (n1_rd_x >= 0 && n1_rd_y >= 0 && ((n1_rd_comp == 0 && n1_rd_x < 64 && n1_rd_y < 64) || (n1_rd_comp != 0 && n1_rd_x < 32 && n1_rd_y < 32))) begin
+                    if      (n1_rd_comp == 0) n1_resp_data <= mem_in_y[n1_rd_y][n1_rd_x];
+                    else if (n1_rd_comp == 1) n1_resp_data <= mem_in_cb[n1_rd_y][n1_rd_x];
+                    else                      n1_resp_data <= mem_in_cr[n1_rd_y][n1_rd_x];
+                end else begin
+                    n1_resp_data <= 10'd0;
+                end
             end else if (n1_resp_valid && n1_resp_ready) begin
                 n1_resp_valid <= 1'b0;
             end

@@ -160,5 +160,5 @@ $$\text{Low} \leftarrow (\text{Low} \ll 1) + (\text{bin} ? \text{Range} : 0)$$
 $$\text{Range} \leftarrow \text{Range}$$
 
 ### Conformance Verification & Synthesis Footprint
-- **Bit-Exact Bin Conformance**: The CABAC engine achieves **100.00% bit-exact conformance across all 22,691 bins** (`POC 0`: `8,486/8,486`, `POC 1`: `7,193/7,193`, `POC 2`: `7,012/7,012`) against HM 18.0 reference decoder traces (`TAppDecoder.exe`) across all frame types ($I$, $P$, $B$).
-- **UltraScale+ Synthesis Footprint (`xczu19eg-ffvb1517-2-e`)**: `cabac_enc_top` synthesizes to **5,300 CLB LUTs** and **2,320 Flip-Flops** (`0 DSPs`) with zero timing violations (`u_sc`: `2,683 LUTs, 717 FFs`; `u_ctx`: `1,240 LUTs, 1,335 FFs`; `u_rc`: `765 LUTs, 109 FFs`; `u_sp`: `302 LUTs, 109 FFs`; `u_be`: `233 LUTs, 10 FFs`).
+- **Bit-Exact Bin Conformance**: The CABAC engine achieves **100.00% bit-exact conformance across all 29,383 bins** (`POC 0`: `8,844/8,844`, `POC 1`: `9,908/9,908`, `POC 2`: `10,631/10,631` with CTU-delayed dynamic `EO`/`BO`/`OFF` SAO and Rate Control enabled) against HM 18.0 reference decoder traces (`TAppDecoder.exe`) across all frame types ($I$, $P$, $B$).
+- **UltraScale+ Synthesis Footprint (`xczu19eg-ffvb1517-2-e`)**: `cabac_enc_top` synthesizes to **5,372 CLB LUTs**, **2,358 Flip-Flops**, and **2 RAMB36 + 1 RAMB18 (`ctu_bin_ram`)** (`0 DSPs`) with zero timing violations (`u_sc`: `2,688 LUTs, 717 FFs`; `u_ctx`: `1,248 LUTs, 1,335 FFs`; `u_rc`: `784 LUTs, 109 FFs`; `u_sp`: `296 LUTs, 112 FFs`; `u_be`: `253 LUTs, 18 FFs`; `u_ssao`: `73 LUTs, 29 FFs`).

@@ -25,6 +25,12 @@ module tb_syntax_pred;
     logic                  mvp_flag_l1;
     logic signed [MVD_W-1:0] mvd_l1_x;
     logic signed [MVD_W-1:0] mvd_l1_y;
+    logic                  cu_pred_intra;
+    logic                  prev_intra_luma_pred_flag;
+    logic [1:0]            mpm_idx;
+    logic [4:0]            rem_intra_luma_pred_mode;
+    logic [2:0]            intra_chroma_pred_mode;
+
     logic                  bin_valid;
     logic                  bin_value;
     logic [CTX_ID_W-1:0]   bin_ctx_id;
@@ -114,36 +120,45 @@ module tb_syntax_pred;
         end
     endtask
 
-    task automatic test_mvd(int mvd);
-        int abs_mvd = (mvd < 0) ? -mvd : mvd;
-        logic sign = (mvd < 0) ? 1 : 0;
+    task automatic test_mvd_interleaved(int mvdx, int mvdy);
+        int abs_x = (mvdx < 0) ? -mvdx : mvdx;
+        int abs_y = (mvdy < 0) ? -mvdy : mvdy;
+        logic sign_x = (mvdx < 0);
+        logic sign_y = (mvdy < 0);
 
-        if (abs_mvd > 0) begin
-            expect_bin(1, 27, 0); // GT0 flag
-            if (abs_mvd > 1) begin
-                expect_bin(1, 28, 0); // GT1 flag
-                expect_eg(abs_mvd - 2);
-            end else begin
-                expect_bin(0, 28, 0);
-            end
-            expect_bin(sign, 0, 1); // Sign flag (bypass)
-        end else begin
-            expect_bin(0, 27, 0);
+        // GT0
+        expect_bin(abs_x > 0, 26, 0);
+        expect_bin(abs_y > 0, 26, 0);
+
+        // GT1
+        if (abs_x > 0) expect_bin(abs_x > 1, 27, 0);
+        if (abs_y > 0) expect_bin(abs_y > 1, 27, 0);
+
+        // X EG & Sign
+        if (abs_x > 0) begin
+            if (abs_x > 1) expect_eg(abs_x - 2);
+            expect_bin(sign_x, 0, 1);
         end
-   endtask
+
+        // Y EG & Sign
+        if (abs_y > 0) begin
+            if (abs_y > 1) expect_eg(abs_y - 2);
+            expect_bin(sign_y, 0, 1);
+        end
+    endtask
 
     task automatic test_ref(int ref_idx);
         if (ref_idx > 0) begin
-           expect_bin(1, 23, 0);
+            expect_bin(1, 24, 0);
             if (ref_idx > 1) begin
-                expect_bin(1, 24, 0);
+                expect_bin(1, 25, 0);
                 for (int i = 2; i < ref_idx; i++) expect_bin(1, 0, 1);
                 expect_bin(0, 0, 1);
             end else begin
-                expect_bin(0, 24, 0);
+                expect_bin(0, 25, 0);
             end
         end else begin
-            expect_bin(0, 23, 0);
+            expect_bin(0, 24, 0);
         end
     endtask
 
@@ -152,21 +167,22 @@ module tb_syntax_pred;
         logic is_b, logic [1:0] depth, logic [1:0] idir,
         logic [2:0] r0, logic mvp0, int mvd0x, int mvd0y,
         logic [2:0] r1, logic mvp1, int mvd1x, int mvd1y
-   );
+    );
         // 1. Build expectations
         // B-Slices send inter_pred_idc (1 or 2 bins). P-Slices send nothing.
         if (is_b) begin
-            expect_bin(idir == 2, 18 + depth, 0); // Bin 0: Bi-dir vs Univariate
-            if (idir != 2) expect_bin(idir == 1, 18 + depth, 0); // Bin 1: L1 vs L0
+            expect_bin(idir == 2, 19 + depth, 0); // Bin 0: Bi-dir vs Univariate
+            if (idir != 2) expect_bin(idir == 1, 19 + 4, 0); // Bin 1: L1 vs L0
         end
 
-        test_ref(r0); test_mvd(mvd0x); test_mvd(mvd0y); expect_bin(mvp0, 0, 1);
+        test_ref(r0); test_mvd_interleaved(mvd0x, mvd0y); expect_bin(mvp0, 180, 0);
 
         if (is_b && idir != 0) begin
-            test_ref(r1); test_mvd(mvd1x); test_mvd(mvd1y); expect_bin(mvp1, 0, 1);
+            test_ref(r1); test_mvd_interleaved(mvd1x, mvd1y); expect_bin(mvp1, 180, 0);
         end
 
         // 2. Drive DUT
+        cu_pred_intra = 0;
         slice_is_b = is_b; cu_depth = depth; inter_dir = idir;
         ref_idx_l0 = r0; mvp_flag_l0 = mvp0; mvd_l0_x = mvd0x; mvd_l0_y = mvd0y;
         ref_idx_l1 = r1; mvp_flag_l1 = mvp1; mvd_l1_x = mvd1x; mvd_l1_y = mvd1y;
@@ -187,6 +203,57 @@ module tb_syntax_pred;
         end
     endtask
 
+    // --- Intra Driver Task ---
+    task automatic run_intra_test(
+        logic prev_flag,
+        logic [1:0] mpm,
+        logic [4:0] rem_mode,
+        logic [2:0] c_mode
+    );
+        // 1. Build expectations
+        expect_bin(prev_flag, 13, 0);
+        if (prev_flag) begin
+            expect_bin(mpm != 0, 0, 1);
+            if (mpm != 0) begin
+                expect_bin(mpm == 2, 0, 1);
+            end
+        end else begin
+            for (int i = 4; i >= 0; i--) begin
+                expect_bin(rem_mode[i], 0, 1);
+            end
+        end
+
+        // Intra chroma (Clause 9.3.3.8 & Table 9-46)
+        expect_bin(c_mode != 4, 14, 0);
+        if (c_mode != 4) begin
+            expect_bin(c_mode[1], 0, 1);
+            expect_bin(c_mode[0], 0, 1);
+        end
+
+        // 2. Drive DUT
+        cu_pred_intra             = 1'b1;
+        prev_intra_luma_pred_flag = prev_flag;
+        mpm_idx                   = mpm;
+        rem_intra_luma_pred_mode  = rem_mode;
+        intra_chroma_pred_mode    = c_mode;
+
+        @(posedge clk) pred_valid = 1;
+        @(posedge clk) pred_valid = 0;
+
+        // 3. Wait for DUT to finish
+        while (!pred_done) @(posedge clk);
+        @(posedge clk);
+        cu_pred_intra = 1'b0;
+
+        if (expected_bins.size() > 0) begin
+            $display("[ERROR] %0t | Missing %0d expected bins!", $time, expected_bins.size());
+            total_errors++;
+            expected_bins.delete();
+        end else begin
+            $display("[PASS] Intra test finished correctly (prev=%0d, mpm=%0d, chroma=%0d).", prev_flag, mpm, c_mode);
+        end
+    endtask
+
     // =========================================================================
     // Test Sequence
     // =========================================================================
@@ -194,6 +261,11 @@ module tb_syntax_pred;
         rst_n = 0; pred_valid = 0;
         
         // Default safe values
+        cu_pred_intra = 0;
+        prev_intra_luma_pred_flag = 0;
+        mpm_idx = 0;
+        rem_intra_luma_pred_mode = 0;
+        intra_chroma_pred_mode = 0;
         slice_is_b = 0; cu_depth = 0; inter_dir = 0;
         ref_idx_l0 = 0; mvp_flag_l0 = 0; mvd_l0_x = 0; mvd_l0_y = 0;
         ref_idx_l1 = 0; mvp_flag_l1 = 0; mvd_l1_x = 0; mvd_l1_y = 0;
@@ -215,6 +287,21 @@ module tb_syntax_pred;
 
         $display("Test 4: B-Slice (Bi-Dir), Mixed MVDs");
         run_test(1, 3, 2,  0, 1, 5, 0,  2, 0, 0, -42);
+
+        $display("Test 5: Intra MPM 0, Chroma 4 (DM_CHROMA -> bin '0')");
+        run_intra_test(1, 0, 0, 4);
+
+        $display("Test 6: Intra MPM 1, Chroma 0 (Planar -> bins '1 0 0')");
+        run_intra_test(1, 1, 0, 0);
+
+        $display("Test 7: Intra MPM 2, Chroma 1 (Vertical -> bins '1 0 1')");
+        run_intra_test(1, 2, 0, 1);
+
+        $display("Test 8: Intra REM 15, Chroma 2 (Horizontal -> bins '1 1 0')");
+        run_intra_test(0, 0, 5'd15, 2);
+
+        $display("Test 9: Intra REM 31, Chroma 3 (DC -> bins '1 1 1')");
+        run_intra_test(0, 0, 5'd31, 3);
 
         $display("\n--- Simulation Complete ---");
         if (total_errors == 0)

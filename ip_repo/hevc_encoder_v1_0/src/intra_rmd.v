@@ -16,16 +16,29 @@ module intra_rmd (
     // Original memory read data (1 cycle latency)
     input  wire [`PIXEL_WIDTH-1:0] orig_rd_data,
 
+    // Chroma original memory read interface (1 pixel/cycle, synchronous BRAM read)
+    output reg  [9:0]               orig_c_rd_addr,
+    input  wire [`PIXEL_WIDTH-1:0]  orig_u_rd_data,
+    input  wire [`PIXEL_WIDTH-1:0]  orig_v_rd_data,
+
     // Reference memory load
     input  wire         ref_valid,
     input  wire [`PIXEL_WIDTH-1:0] ref_sample,
     input  wire [7:0]   ref_idx,
     input  wire         ref_last,
 
+    // Sequential chroma reference load (1 pixel/cycle during S_LOAD_REF)
+    input  wire [`PIXEL_WIDTH-1:0]  ref_sample_u,
+    input  wire [`PIXEL_WIDTH-1:0]  ref_sample_v,
+
     // Outputs to mode_decision
     output reg          rmd_done,
     output reg  [5:0]   best_mode,
-    output reg  [31:0]  best_cost
+    output reg  [31:0]  best_cost,
+
+    // Chroma Intra RDO outputs (ITU-T H.265 Clause 8.4.3 Table 8-2)
+    output reg  [2:0]   best_chroma_pred_mode,
+    output reg  [5:0]   best_chroma_dir
 );
 
 `ifdef REMEDIATION
@@ -44,18 +57,29 @@ module intra_rmd (
     reg [2:0] state, next_state;
 
     // Reference array (max 129 samples for N=32)
-    reg [`PIXEL_WIDTH-1:0] ref_buf [0:128];
+    reg [`PIXEL_WIDTH-1:0] ref_buf   [0:128];
+    // Chroma reference arrays (max 65 samples for N_C=16)
+    reg [`PIXEL_WIDTH-1:0] ref_buf_u [0:64];
+    reg [`PIXEL_WIDTH-1:0] ref_buf_v [0:64];
 
 `ifndef SYNTHESIS
     integer rmd_init_i;
     initial begin
         for (rmd_init_i = 0; rmd_init_i <= 128; rmd_init_i = rmd_init_i + 1)
             ref_buf[rmd_init_i] = 10'd512;
+        for (rmd_init_i = 0; rmd_init_i <= 64; rmd_init_i = rmd_init_i + 1) begin
+            ref_buf_u[rmd_init_i] = 10'd512;
+            ref_buf_v[rmd_init_i] = 10'd512;
+        end
     end
     always @(posedge clk) begin
         if (!rst_n) begin
             for (rmd_init_i = 0; rmd_init_i <= 128; rmd_init_i = rmd_init_i + 1)
                 ref_buf[rmd_init_i] <= 10'd512;
+            for (rmd_init_i = 0; rmd_init_i <= 64; rmd_init_i = rmd_init_i + 1) begin
+                ref_buf_u[rmd_init_i] <= 10'd512;
+                ref_buf_v[rmd_init_i] <= 10'd512;
+            end
         end
     end
 `endif
@@ -73,11 +97,17 @@ module intra_rmd (
 
     // Accumulators
     reg [31:0] sad_planar, sad_dc, sad_hor, sad_ver;
+    reg [31:0] sad_c_planar, sad_c_dc, sad_c_hor, sad_c_ver, sad_c_34;
+    reg        eval_c_q;
+
+    // Chroma reference / size helpers
+    wire [7:0] N_C = N >> 1;
 
     // DC Prediction (Average of N top + N left reference samples)
     // top:  ref[1..N]
     // left: ref[2N+1..3N]
     reg [15:0] dc_sum;
+    reg [15:0] dc_sum_u, dc_sum_v;
     always @(posedge clk) begin
         if (state == S_LOAD_REF && ref_valid) begin
             // Top row: ref[1..N]
@@ -88,8 +118,20 @@ module intra_rmd (
             if (ref_idx >= (N<<1) + 8'd1 && ref_idx <= (N<<1) + N[7:0]) begin
                 dc_sum <= dc_sum + ref_sample;
             end
+            // Chroma top: ref_u/v[1..N_C]
+            if (ref_idx >= 8'd1 && ref_idx <= N_C) begin
+                dc_sum_u <= dc_sum_u + ref_sample_u;
+                dc_sum_v <= dc_sum_v + ref_sample_v;
+            end
+            // Chroma left: ref_u/v[2N_C+1..3N_C] = [N+1..N+N_C]
+            if (ref_idx >= N + 8'd1 && ref_idx <= N + N_C) begin
+                dc_sum_u <= dc_sum_u + ref_sample_u;
+                dc_sum_v <= dc_sum_v + ref_sample_v;
+            end
         end else if (state == S_IDLE) begin
-            dc_sum <= 0;
+            dc_sum   <= 16'd0;
+            dc_sum_u <= 16'd0;
+            dc_sum_v <= 16'd0;
         end
     end
     
@@ -97,13 +139,29 @@ module intra_rmd (
     wire [15:0] dc_val = (dc_sum + {8'd0, N}) >> (pu_size_log2 + 1);
     wire [`PIXEL_WIDTH-1:0] pred_dc = dc_val[`PIXEL_WIDTH-1:0];
 
+    // Chroma DC: 2*N_C = N samples, rounded divide by N: (dc_sum + N_C) >> pu_size_log2
+    wire [15:0] dc_val_u = (dc_sum_u + {8'd0, N_C}) >> pu_size_log2;
+    wire [15:0] dc_val_v = (dc_sum_v + {8'd0, N_C}) >> pu_size_log2;
+    wire [`PIXEL_WIDTH-1:0] pred_dc_u = dc_val_u[`PIXEL_WIDTH-1:0];
+    wire [`PIXEL_WIDTH-1:0] pred_dc_v = dc_val_v[`PIXEL_WIDTH-1:0];
+
     // Horizontal Prediction
     wire [7:0] idx_left = (N << 1) + 8'd1 + {2'd0, cy_q};
     wire [`PIXEL_WIDTH-1:0] pred_hor = ref_buf[idx_left];
 
+    // Chroma Horizontal Prediction (mode 10)
+    wire [7:0] idx_left_c = N + 8'd1 + {3'd0, cy_q[4:0]};
+    wire [`PIXEL_WIDTH-1:0] pred_hor_u = ref_buf_u[idx_left_c[6:0]];
+    wire [`PIXEL_WIDTH-1:0] pred_hor_v = ref_buf_v[idx_left_c[6:0]];
+
     // Vertical Prediction
     wire [7:0] idx_top = 8'd1 + {2'd0, cx_q};
     wire [`PIXEL_WIDTH-1:0] pred_ver = ref_buf[idx_top];
+
+    // Chroma Vertical Prediction (mode 26)
+    wire [7:0] idx_top_c = 8'd1 + {3'd0, cx_q[4:0]};
+    wire [`PIXEL_WIDTH-1:0] pred_ver_u = ref_buf_u[idx_top_c[6:0]];
+    wire [`PIXEL_WIDTH-1:0] pred_ver_v = ref_buf_v[idx_top_c[6:0]];
 
     // Planar Prediction
     wire [`PIXEL_WIDTH-1:0] refL_y = ref_buf[idx_left];
@@ -112,6 +170,35 @@ module intra_rmd (
     wire [7:0] idx_refL_N = (N << 1) + 8'd1 + N[7:0];  // Bottom-left corner = ref_buf[2N+1+N]
     wire [`PIXEL_WIDTH-1:0] refT_N = ref_buf[idx_refT_N];
     wire [`PIXEL_WIDTH-1:0] refL_N = ref_buf[idx_refL_N];
+
+    // Chroma Planar Prediction (mode 0)
+    wire [7:0] idx_refT_Nc = 8'd1 + N_C;
+    wire [7:0] idx_refL_Nc = N + 8'd1 + N_C;
+    wire [`PIXEL_WIDTH-1:0] refT_N_u = ref_buf_u[idx_refT_Nc[6:0]];
+    wire [`PIXEL_WIDTH-1:0] refL_N_u = ref_buf_u[idx_refL_Nc[6:0]];
+    wire [`PIXEL_WIDTH-1:0] refT_N_v = ref_buf_v[idx_refT_Nc[6:0]];
+    wire [`PIXEL_WIDTH-1:0] refL_N_v = ref_buf_v[idx_refL_Nc[6:0]];
+
+    wire [17:0] wL_u = (N_C - 8'd1 - {3'd0, cx_q[4:0]}) * pred_hor_u;
+    wire [17:0] wR_u = ({3'd0, cx_q[4:0]} + 8'd1) * refT_N_u;
+    wire [17:0] wT_u = (N_C - 8'd1 - {3'd0, cy_q[4:0]}) * pred_ver_u;
+    wire [17:0] wB_u = ({3'd0, cy_q[4:0]} + 8'd1) * refL_N_u;
+    wire [17:0] planar_sum_u = wL_u + wR_u + wT_u + wB_u + {10'd0, N_C};
+    wire [17:0] raw_pred_planar_u = planar_sum_u >> pu_size_log2;
+    wire [`PIXEL_WIDTH-1:0] pred_planar_u = (raw_pred_planar_u > 18'd1023) ? 10'd1023 : raw_pred_planar_u[`PIXEL_WIDTH-1:0];
+
+    wire [17:0] wL_v = (N_C - 8'd1 - {3'd0, cx_q[4:0]}) * pred_hor_v;
+    wire [17:0] wR_v = ({3'd0, cx_q[4:0]} + 8'd1) * refT_N_v;
+    wire [17:0] wT_v = (N_C - 8'd1 - {3'd0, cy_q[4:0]}) * pred_ver_v;
+    wire [17:0] wB_v = ({3'd0, cy_q[4:0]} + 8'd1) * refL_N_v;
+    wire [17:0] planar_sum_v = wL_v + wR_v + wT_v + wB_v + {10'd0, N_C};
+    wire [17:0] raw_pred_planar_v = planar_sum_v >> pu_size_log2;
+    wire [`PIXEL_WIDTH-1:0] pred_planar_v = (raw_pred_planar_v > 18'd1023) ? 10'd1023 : raw_pred_planar_v[`PIXEL_WIDTH-1:0];
+
+    // Chroma Diagonal 34 Prediction (mode 34: ref_top[x + y + 2])
+    wire [6:0] idx_34 = {2'd0, cx_q[4:0]} + {2'd0, cy_q[4:0]} + 7'd2;
+    wire [`PIXEL_WIDTH-1:0] pred_34_u = ref_buf_u[idx_34];
+    wire [`PIXEL_WIDTH-1:0] pred_34_v = ref_buf_v[idx_34];
     
 `ifdef REMEDIATION
     wire [17:0] wL = (N[7:0] - 8'd1 - {2'd0, cx_q}) * refL_y;
@@ -189,7 +276,70 @@ module intra_rmd (
     wire [31:0] ad_hor    = (orig_rd_data > pred_hor)    ? (orig_rd_data - pred_hor)    : (pred_hor - orig_rd_data);
     wire [31:0] ad_ver    = (orig_rd_data > pred_ver)    ? (orig_rd_data - pred_ver)    : (pred_ver - orig_rd_data);
 
+    // Chroma Absolute Differences
+    wire [31:0] ad_u_planar = (orig_u_rd_data > pred_planar_u) ? (orig_u_rd_data - pred_planar_u) : (pred_planar_u - orig_u_rd_data);
+    wire [31:0] ad_u_dc     = (orig_u_rd_data > pred_dc_u)     ? (orig_u_rd_data - pred_dc_u)     : (pred_dc_u - orig_u_rd_data);
+    wire [31:0] ad_u_hor    = (orig_u_rd_data > pred_hor_u)    ? (orig_u_rd_data - pred_hor_u)    : (pred_hor_u - orig_u_rd_data);
+    wire [31:0] ad_u_ver    = (orig_u_rd_data > pred_ver_u)    ? (orig_u_rd_data - pred_ver_u)    : (pred_ver_u - orig_u_rd_data);
+    wire [31:0] ad_u_34     = (orig_u_rd_data > pred_34_u)     ? (orig_u_rd_data - pred_34_u)     : (pred_34_u - orig_u_rd_data);
+
+    wire [31:0] ad_v_planar = (orig_v_rd_data > pred_planar_v) ? (orig_v_rd_data - pred_planar_v) : (pred_planar_v - orig_v_rd_data);
+    wire [31:0] ad_v_dc     = (orig_v_rd_data > pred_dc_v)     ? (orig_v_rd_data - pred_dc_v)     : (pred_dc_v - orig_v_rd_data);
+    wire [31:0] ad_v_hor    = (orig_v_rd_data > pred_hor_v)    ? (orig_v_rd_data - pred_hor_v)    : (pred_hor_v - orig_v_rd_data);
+    wire [31:0] ad_v_ver    = (orig_v_rd_data > pred_ver_v)    ? (orig_v_rd_data - pred_ver_v)    : (pred_ver_v - orig_v_rd_data);
+    wire [31:0] ad_v_34     = (orig_v_rd_data > pred_34_v)     ? (orig_v_rd_data - pred_34_v)     : (pred_34_v - orig_v_rd_data);
+
     assign rmd_active = (state == S_EVAL);
+
+    // Winning Luma Mode derivation for Table 8-2
+    wire [5:0] luma_mode_sad = (sad_planar <= sad_dc && sad_planar <= sad_hor && sad_planar <= sad_ver) ? `INTRA_PLANAR :
+                               (sad_dc <= sad_hor && sad_dc <= sad_ver) ? `INTRA_DC :
+                               (sad_hor <= sad_ver) ? 6'd10 : 6'd26;
+
+`ifdef REMEDIATION
+    wire [5:0] win_luma_mode = (pu_size_log2 == 3'd2) ? best_mode : luma_mode_sad;
+`else
+    wire [5:0] win_luma_mode = luma_mode_sad;
+`endif
+
+    // ITU-T H.265 Clause 8.4.3 Table 8-2 candidate directions
+    wire [5:0] dir_cand0 = (win_luma_mode == `INTRA_PLANAR) ? 6'd34 : `INTRA_PLANAR;
+    wire [5:0] dir_cand1 = (win_luma_mode == 6'd26)         ? 6'd34 : 6'd26;
+    wire [5:0] dir_cand2 = (win_luma_mode == 6'd10)         ? 6'd34 : 6'd10;
+    wire [5:0] dir_cand3 = (win_luma_mode == `INTRA_DC)     ? 6'd34 : `INTRA_DC;
+    wire [5:0] dir_cand4 = win_luma_mode; // DM_CHROMA
+
+    localparam CHROMA_RATE_LAMBDA = 32'd8;
+    wire [31:0] sad_cand0 = (dir_cand0 == `INTRA_PLANAR) ? sad_c_planar :
+                            (dir_cand0 == `INTRA_DC)     ? sad_c_dc :
+                            (dir_cand0 == 6'd10)         ? sad_c_hor :
+                            (dir_cand0 == 6'd26)         ? sad_c_ver : sad_c_34;
+
+    wire [31:0] sad_cand1 = (dir_cand1 == `INTRA_PLANAR) ? sad_c_planar :
+                            (dir_cand1 == `INTRA_DC)     ? sad_c_dc :
+                            (dir_cand1 == 6'd10)         ? sad_c_hor :
+                            (dir_cand1 == 6'd26)         ? sad_c_ver : sad_c_34;
+
+    wire [31:0] sad_cand2 = (dir_cand2 == `INTRA_PLANAR) ? sad_c_planar :
+                            (dir_cand2 == `INTRA_DC)     ? sad_c_dc :
+                            (dir_cand2 == 6'd10)         ? sad_c_hor :
+                            (dir_cand2 == 6'd26)         ? sad_c_ver : sad_c_34;
+
+    wire [31:0] sad_cand3 = (dir_cand3 == `INTRA_PLANAR) ? sad_c_planar :
+                            (dir_cand3 == `INTRA_DC)     ? sad_c_dc :
+                            (dir_cand3 == 6'd10)         ? sad_c_hor :
+                            (dir_cand3 == 6'd26)         ? sad_c_ver : sad_c_34;
+
+    wire [31:0] sad_cand4 = (dir_cand4 == `INTRA_PLANAR) ? sad_c_planar :
+                            (dir_cand4 == `INTRA_DC)     ? sad_c_dc :
+                            (dir_cand4 == 6'd10)         ? sad_c_hor :
+                            (dir_cand4 == 6'd26)         ? sad_c_ver : sad_c_34;
+
+    wire [31:0] cost_cand0 = sad_cand0 + CHROMA_RATE_LAMBDA;
+    wire [31:0] cost_cand1 = sad_cand1 + CHROMA_RATE_LAMBDA;
+    wire [31:0] cost_cand2 = sad_cand2 + CHROMA_RATE_LAMBDA;
+    wire [31:0] cost_cand3 = sad_cand3 + CHROMA_RATE_LAMBDA;
+    wire [31:0] cost_cand4 = sad_cand4;
 
     // FSM
     always @(posedge clk or negedge rst_n) begin
@@ -200,6 +350,11 @@ module intra_rmd (
             cx_q <= 0; cy_q <= 0;
             eval_q <= 0;
             sad_planar <= 0; sad_dc <= 0; sad_hor <= 0; sad_ver <= 0;
+            sad_c_planar <= 32'd0; sad_c_dc <= 32'd0; sad_c_hor <= 32'd0; sad_c_ver <= 32'd0; sad_c_34 <= 32'd0;
+            eval_c_q <= 1'b0;
+            orig_c_rd_addr <= 10'd0;
+            best_chroma_pred_mode <= 3'd4;
+            best_chroma_dir <= 6'd0;
             lat_pu_x <= 0; lat_pu_y <= 0;
             orig_rd_addr <= 0;
 `ifdef REMEDIATION
@@ -220,18 +375,30 @@ module intra_rmd (
                             rmd_done <= 1;
                             best_cost <= 32'hFFFFFFFF;
                             best_mode <= 6'd0;
+                            best_chroma_pred_mode <= 3'd4;
+                            best_chroma_dir <= 6'd0;
                         end else begin
                             cx <= 0; cy <= 0;
                             sad_planar <= 0; sad_dc <= 0; sad_hor <= 0; sad_ver <= 0;
+                            sad_c_planar <= 32'd0; sad_c_dc <= 32'd0; sad_c_hor <= 32'd0; sad_c_ver <= 32'd0; sad_c_34 <= 32'd0;
                             eval_q <= 0;
+                            eval_c_q <= 0;
                             lat_pu_x <= pu_x;
                             lat_pu_y <= pu_y;
+                            best_chroma_pred_mode <= 3'd4;
+                            best_chroma_dir <= 6'd0;
                         end
                     end
                 end
                 
                 S_LOAD_REF: begin
-                    if (ref_valid) ref_buf[ref_idx] <= ref_sample;
+                    if (ref_valid) begin
+                        ref_buf[ref_idx] <= ref_sample;
+                        if (ref_idx <= (N << 1)) begin
+                            ref_buf_u[ref_idx[6:0]] <= ref_sample_u;
+                            ref_buf_v[ref_idx[6:0]] <= ref_sample_v;
+                        end
+                    end
                 end
                 
                 S_EVAL: begin
@@ -245,11 +412,15 @@ module intra_rmd (
                             cx <= cx + 1;
                         end
                     end
+                    if (cy < N_C && cx < N_C) begin
+                        orig_c_rd_addr <= { (lat_pu_y[5:1] + cy[4:0]), (lat_pu_x[5:1] + cx[4:0]) };
+                    end
                     
                     // Pipeline
                     cx_q <= cx;
                     cy_q <= cy;
                     eval_q <= (cy < N[5:0]);
+                    eval_c_q <= (cy < N_C && cx < N_C);
                     
                     // Accumulate
                     if (eval_q) begin
@@ -265,6 +436,13 @@ module intra_rmd (
                             diff_ver_buf   [{cy_q[1:0], cx_q[1:0]}] <= diff_v;
                         end
 `endif
+                    end
+                    if (eval_c_q) begin
+                        sad_c_planar <= sad_c_planar + ad_u_planar + ad_v_planar;
+                        sad_c_dc     <= sad_c_dc     + ad_u_dc     + ad_v_dc;
+                        sad_c_hor    <= sad_c_hor    + ad_u_hor    + ad_v_hor;
+                        sad_c_ver    <= sad_c_ver    + ad_u_ver    + ad_v_ver;
+                        sad_c_34     <= sad_c_34     + ad_u_34     + ad_v_34;
                     end
 `ifdef REMEDIATION
                     if (!eval_q && cy == N && pu_size_log2 == 3'd2) begin
@@ -333,6 +511,23 @@ module intra_rmd (
                         best_cost <= sad_ver;
                     end
 `endif
+                    // ITU-T H.265 Clause 8.4.3 Table 8-2 Chroma Intra Mode Selection
+                    if (cost_cand4 <= cost_cand0 && cost_cand4 <= cost_cand1 && cost_cand4 <= cost_cand2 && cost_cand4 <= cost_cand3) begin
+                        best_chroma_pred_mode <= 3'd4;
+                        best_chroma_dir       <= dir_cand4;
+                    end else if (cost_cand0 <= cost_cand1 && cost_cand0 <= cost_cand2 && cost_cand0 <= cost_cand3) begin
+                        best_chroma_pred_mode <= 3'd0;
+                        best_chroma_dir       <= dir_cand0;
+                    end else if (cost_cand1 <= cost_cand2 && cost_cand1 <= cost_cand3) begin
+                        best_chroma_pred_mode <= 3'd1;
+                        best_chroma_dir       <= dir_cand1;
+                    end else if (cost_cand2 <= cost_cand3) begin
+                        best_chroma_pred_mode <= 3'd2;
+                        best_chroma_dir       <= dir_cand2;
+                    end else begin
+                        best_chroma_pred_mode <= 3'd3;
+                        best_chroma_dir       <= dir_cand3;
+                    end
                 end
             endcase
         end

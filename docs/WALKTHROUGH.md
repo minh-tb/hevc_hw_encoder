@@ -44,10 +44,10 @@ The legacy behavioral/synthesis discrepancy in inter-prediction motion compensat
 - **Command:** `HM\bin\mgwmake\gcc-mingw-14.2\x86_64\release\TAppDecoder.exe -b str_b_frame.bin -o dec_out.yuv -d 10`
 - **Result:** Clean decode of all 3 frames with exit code 0.
 - **CABAC Bin Conformance (`scripts/verify_3frames_bins.py`):**
-  - Total Bins: **22,901 / 22,901 bins (100.00% BIT-EXACT)** across all 6 fields (`bin`, `type`, `range`, `pstate`, `valmps`, `ctx`).
-  - POC 0: 8,486 / 8,486 bins (100.00%).
-  - POC 1: 7,263 / 7,263 bins (100.00%).
-  - POC 2: 7,152 / 7,152 bins (100.00%).
+  - Total Bins (with CTU-delayed dynamic `EO`/`BO`/`OFF` SAO and Rate Control enabled): **29,383 / 29,383 bins (100.00% BIT-EXACT)** across all 6 fields (`bin`, `type`, `range`, `pstate`, `valmps`, `ctx`):
+    - POC 0: 8,844 / 8,844 bins (100.00%).
+    - POC 1: 9,908 / 9,908 bins (100.00%).
+    - POC 2: 10,631 / 10,631 bins (100.00%).
 
 ### Gate G4: Flaw Testbench Regression Suite (`scripts/run_all_flaw_tb.py`)
 - **Command:** `python scripts/run_all_flaw_tb.py`
@@ -69,6 +69,8 @@ The legacy behavioral/synthesis discrepancy in inter-prediction motion compensat
 
 ### Gate G5: Unit & Subsystem Test Suites
 - **SoC Integration AXI Top (`tb/run_tb_axi.do`):** ALL 9 TESTS PASSED.
+- **Prediction Syntax Binarizer (`tb/tb_syntax_pred/tb_syntax_pred.sv`):** ALL 9 TESTS PASSED (interleaved MVD + 5 Chroma Intra modes with context 14).
+- **SAO Multi-Mode RDO (`tb/tb_sao_top/tb_sao_stats.sv` & `tb_sao.sv`):** ALL 3 RDO TESTS PASSED (`OFF`, `BO`, `EO 0..3`) and 15,376 / 15,376 samples match HM C++ golden reference.
 - **Inter Prediction Unit (`tb/tb_inter/run.do`):** Bi-Prediction Motion Compensation Unit Verification PASSED.
 - **Deblocking Filter (`tb/tb_deblock/run.do`):** 6,144 / 6,144 samples match HM reference, cross-CTU boundary filtering PASSED.
 - **Spatial Availability (`tb/tb_spatial_availability/run.do`):** 2,720 / 2,720 vector checks PASSED (100% Clause 6.4.1 conformant, 0 failures).
@@ -81,16 +83,16 @@ The legacy behavioral/synthesis discrepancy in inter-prediction motion compensat
 ### Gate G7: AMD Vivado 2026.1 Synthesis & Timing Closure
 - **Target Part:** AMD Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`
 - **Target Clock:** 50.00 MHz ($T = 20.000\text{ ns}$)
-- **Setup Timing Slack (WNS):** **+10.497 ns (MET)**
-- **Total Negative Slack (TNS):** **0.000 ns (0 failing endpoints out of 327,424)**
-- **Estimated Maximum Frequency ($F_{\max}$):** **105.23 MHz**
-- **CLB LUTs:** **193,485 / 522,720 (37.02%)**
-  - Logic LUTs: 187,646
-  - Memory LUTs (LUTRAM + SRL): 5,839 (5,808 LUTRAM + 31 SRL)
-- **CLB Registers (FFs):** **123,443 / 1,045,440 (11.81%)**
+- **Setup Timing Slack (WNS):** **+10.121 ns (MET)**
+- **Total Negative Slack (TNS):** **0.000 ns (0 failing endpoints out of 348,790)**
+- **Estimated Maximum Frequency ($F_{\max}$):** **101.22 MHz**
+- **CLB LUTs:** **223,429 / 522,720 (42.74%)**
+  - Logic LUTs: 215,670
+  - Memory LUTs (LUTRAM + SRL): 7,759 (7,728 LUTRAM + 31 SRL)
+- **CLB Registers (FFs):** **126,387 / 1,045,440 (12.09%)**
 - **Unintended Latches (`LDCE`):** **0 (0.00%)**
-- **Block RAM (BRAM Tile):** **36.5 Tiles (3.71%)**
-  - RAMB36/FIFO: 30 / 984 (3.05%)
-  - RAMB18: 13 / 1,968 (0.66%)
-- **DSP Slices:** **53 / 1,968 (2.69%)**
-- **Power Estimation:** **2.005 W Total** (0.892 W Dynamic, 1.113 W Static)
+- **Block RAM (BRAM Tile):** **41.5 Tiles (4.22%)**
+  - RAMB36/FIFO: 33 / 984 (3.35%)
+  - RAMB18: 17 / 1,968 (0.86%)
+- **DSP Slices:** **61 / 1,968 (3.10%)**
+- **Power Estimation:** **2.077 W Total** (0.963 W Dynamic, 1.114 W Static)

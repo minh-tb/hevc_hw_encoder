@@ -29,9 +29,14 @@ module tb_entropy_chain;
     logic       cu_skip, cu_merge;
     logic [2:0] cu_merge_idx;
     logic       cu_pred_intra;
+    logic [5:0] cu_intra_mode = 0;
+    logic [2:0] cu_chroma_pred_mode = 3'd4;
+    logic [5:0] cu_left_intra_mode = 0;
+    logic [5:0] cu_above_intra_mode = 0;
     logic [1:0] cu_part_mode;
     logic       cu_cbf;
     logic [1:0] cu_skip_ctx;
+    logic [1:0] cu_split_ctx = 0;
 
     // Pred Req
     logic       pred_req, pred_done;
@@ -48,11 +53,35 @@ module tb_entropy_chain;
     logic       coeff_req, coeff_done;
     logic [1:0] coeff_comp;
     logic       coeff_is_intra;
+    logic [2:0] coeff_tu_size_log2 = 3'd2;
+    logic       coeff_tu_cbf = 1'b1;
+    logic [9:0] coeff_last_sig_pos = 10'd2;
+    logic [1:0] coeff_scan_mode = 2'd0;
+    logic       coeff_rd_en;
+    logic [11:0] coeff_rd_addr;
+    logic signed [COEFF_W-1:0] coeff_rd_data;
     logic [COEFF_W*N_COEFF-1:0] coeff_flat;
+
+    // SAO Req
+    logic [5:0]  ctu_x = 0;
+    logic [5:0]  ctu_y = 0;
+    logic        sao_req = 0;
+    logic        sao_done;
+    logic [5:0]  sao_type = 0;
+    logic [5:0]  sao_eo_class = 0;
+    logic [74:0] sao_eo_offset = 0;
+    logic [14:0] sao_band_pos = 0;
+    logic [59:0] sao_bo_offset = 0;
 
     // End of Slice / Flush
     logic       trm_req;
+    logic       trm_bin_val = 1'b1;
     logic       flush_req, flush_done;
+
+    // SAO Delay Buffering
+    logic       ctu_sao_delay_en = 0;
+    logic       ctu_bin_drain_en = 0;
+    logic       ctu_bin_drain_done;
 
     // Outputs
     logic       byte_valid;
@@ -119,12 +148,12 @@ module tb_entropy_chain;
                 expected_char = $fgetc(output_file);
                 if (expected_char == -1) begin
                     $error("[FAIL] Bitstream generated MORE bytes than the HM reference file!");
-                    $stop;
+                    $finish;
                 end
                 
                 if (byte_out !== expected_char[7:0]) begin
                     $error("[FAIL] Byte %0d Mismatch! Expected: 0x%02X, Got: 0x%02X", byte_count, expected_char[7:0], byte_out);
-                    $stop;
+                    $finish;
                 end
             end
         end
@@ -168,6 +197,10 @@ module tb_entropy_chain;
         coeff_req <= 1'b1;
         coeff_comp <= comp;
         coeff_is_intra <= intra;
+        coeff_tu_size_log2 <= 3'd2;
+        coeff_tu_cbf <= 1'b1;
+        coeff_last_sig_pos <= 10'd2;
+        coeff_scan_mode <= 2'd0;
         foreach (blk[i]) coeff_flat[i*COEFF_W +: COEFF_W] <= blk[i];
         @(posedge clk);
         coeff_req <= 1'b0;
@@ -180,12 +213,13 @@ module tb_entropy_chain;
         trm_req <= 1'b1; // Send the end_of_slice_flag (1)
         @(posedge clk);
         trm_req <= 1'b0;
-        
+        repeat (2) @(posedge clk);
+        wait(!enc_busy);
         @(posedge clk);
         flush_req <= 1'b1; // Flush range coder internal buffers
         @(posedge clk);
         flush_req <= 1'b0;
-        wait(flush_done);
+        while (!flush_done) @(posedge clk);
         @(posedge clk);
     endtask
 
@@ -193,6 +227,11 @@ module tb_entropy_chain;
     // Main Stimulus
     // =========================================================================
     logic signed [COEFF_W-1:0] test_blk [N_COEFF];
+
+    always_ff @(posedge clk) begin
+        if (coeff_rd_en)
+            coeff_rd_data <= test_blk[coeff_rd_addr[3:0]];
+    end
     
     initial begin
         // Init all inputs
@@ -234,7 +273,7 @@ module tb_entropy_chain;
         finish_slice();
 
         $display("\n>>> TEST COMPLETE. Wrote %0d bytes. <<<", byte_count);
-        $stop;
+        $finish;
     end
 
 endmodule

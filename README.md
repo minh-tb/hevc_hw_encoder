@@ -7,9 +7,9 @@ An RTL implementation of a high-throughput, pipelined **HEVC (ITU-T H.265 / ISO/
 ## Conformance & Performance Scorecard
 
 - **Bit-Exact Conformance:** **100.00% sample-by-sample match (`max_diff == 0`)** across all frames ($Y, Cb, Cr$) against Fraunhofer **HM 18.0** reference decoder across multi-QP sweeps ($QP \in \{22, 27, 32, 37\}$).
-- **Entropy Coding Conformance:** Standard-compliant CABAC bitstream output verified symbol-by-symbol (**22,901 / 22,901 bins, 100.00% bit-exact** across POC 0: 8,486, POC 1: 7,263, POC 2: 7,152) against the normative HM decoder without a single syntax desynchronization.
-- **Physical Synthesis Convergence & Timing Closure:** Fully synthesized in **AMD Vivado 2026.1 Enterprise** on **Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`** with complete timing closure (**WNS = +10.497 ns, Fmax = 105.23 MHz @ 50 MHz target**, 0 failing endpoints out of 327,424, **0 `LUTAR-1` warnings**, and **0 unintended latches**).
-- **PPA Optimization:** Area optimized to **193,485 LUTs (37.02%)** (-255,431 LUTs / -56.90% vs. initial baseline), **123,443 FFs (11.81%)** (-220,587 FFs / -64.12% vs. initial baseline), **30 RAMB36 + 13 RAMB18 Blocks**, and **53 DSPs (2.69%)** (-867 DSPs / -94.24% vs. initial baseline), with total on-chip power at **2.005 W** (**0.892 W** Dynamic, **1.113 W** Static).
+- **Entropy Coding Conformance:** Standard-compliant CABAC bitstream output verified symbol-by-symbol (**29,383 / 29,383 bins, 100.00% bit-exact** across POC 0: 8,844, POC 1: 9,908, POC 2: 10,631 with CTU-delayed dynamic `EO`/`BO`/`OFF` SAO and Rate Control enabled) against the normative HM decoder without a single syntax desynchronization.
+- **Physical Synthesis Convergence & Timing Closure:** Fully synthesized in **AMD Vivado 2026.1 Enterprise** on **Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`** with complete timing closure (**WNS = +10.121 ns, Fmax = 101.22 MHz @ 50 MHz target**, 0 failing endpoints out of 348,790, **0 `LUTAR-1` warnings**, and **0 unintended latches**).
+- **PPA Optimization:** Area optimized to **223,429 LUTs (42.74%)** (-225,487 LUTs / -50.23% vs. initial baseline), **126,387 FFs (12.09%)** (-217,643 FFs / -63.26% vs. initial baseline), **33 RAMB36 + 17 RAMB18 Blocks (41.5 BRAM Tiles)**, and **61 DSPs (3.10%)** (-859 DSPs / -93.37% vs. initial baseline), with total on-chip power at **2.077 W** (**0.963 W** Dynamic, **1.114 W** Static).
 - **Regression & IP Parity Suite:** **100% Convergence** across all **14 / 14** dual-state algorithmic flaw testbenches (`scripts/run_all_flaw_tb.py`), **9 / 9** AXI4-Lite/AXI4 SoC integration tests (`tb/tb_axi_top.sv`), **Full 3-Frame Post-Filter Conformance (`max_diff = 0` across all 73,728 samples in Frames 0, 1, and 2)** via `regression_gate.py`, and **63 / 63** SHA-256 synchronized IP-XACT source files (`ip_repo/hevc_encoder_v1_0/src/`).
 
 ---
@@ -20,18 +20,18 @@ Out-of-context synthesis executed with `SYNTHESIS=1 REMEDIATION=1` on top-level 
 
 | Resource Type | Initial Baseline | Phase 2 Optimized | Sign-Off Final | Available | Final Utilization % | Net Reduction vs. Baseline |
 |---|---:|---:|---:|---:|---|---|
-| **CLB LUTs** | 448,916 | 225,933 | **193,485** | 522,720 | **37.02%** | **-255,431 LUTs (-56.90%)** |
-| *-- Logic LUTs* | 441,925 | 218,942 | **187,646** | 522,720 | **35.90%** | **-254,279 LUTs (-57.54%)** |
-| *-- Memory LUTs (LUTRAM + SRL)* | 6,991 | 6,991 | **5,839** | 161,280 | **3.62%** | 5,808 LUTRAM + 31 SRL |
-| **CLB Registers (FF)** | 344,030 | 249,980 | **123,443** | 1,045,440 | **11.81%** | **-220,587 FFs (-64.12%)** |
+| **CLB LUTs** | 448,916 | 225,933 | **223,429** | 522,720 | **42.74%** | **-225,487 LUTs (-50.23%)** |
+| *-- Logic LUTs* | 441,925 | 218,942 | **215,670** | 522,720 | **41.26%** | **-226,255 LUTs (-51.20%)** |
+| *-- Memory LUTs (LUTRAM + SRL)* | 6,991 | 6,991 | **7,759** | 161,280 | **4.81%** | 7,728 LUTRAM + 31 SRL |
+| **CLB Registers (FF)** | 344,030 | 249,980 | **126,387** | 1,045,440 | **12.09%** | **-217,643 FFs (-63.26%)** |
 | **Register as Latch (`LDCE`)** | 0 | 0 | **0** | 1,045,440 | **0.00%** | 0 unintended latches |
-| **Unique Control Sets** | 14,641 | 10,733 | **7,259** | 130,680 | **5.55%** | **-7,382 sets (-50.42%)** |
-| **Block RAM** | 12.5 Tiles | 30.0 Tiles | **30 RAMB36 + 13 RAMB18** | 984 Tiles | **3.71%** | **+24.0 BRAM Units** |
-| *-- RAMB36/FIFO* | 11 | 27 | **30** | 984 | **3.05%** | +19 `RAMB36E2` |
-| *-- RAMB18* | 3 | 6 | **13** | 1,968 | **0.66%** | +10 `RAMB18E2` |
-| **DSP48E2 Slices** | 920 | 209 | **53** | 1,968 | **2.69%** | **-867 DSPs (-94.24%)** |
-| **Estimated $F_{\max}$** | 96.36 MHz | 105.33 MHz | **105.23 MHz** | 50.00 MHz | **2.10× margin** | **WNS: +10.497 ns (MET)**, TNS: 0.000 ns (0 / 327,424 failing) |
-| **Total On-Chip Power** | 2.910 W | 1.943 W | **2.005 W** | — | — | **Dynamic: 0.892 W**, Device Static: 1.113 W |
+| **Unique Control Sets** | 14,641 | 10,733 | **7,414** | 130,680 | **5.67%** | **-7,227 sets (-49.36%)** |
+| **Block RAM** | 12.5 Tiles | 30.0 Tiles | **33 RAMB36 + 17 RAMB18** | 984 Tiles | **4.22%** | **+29.0 BRAM Tiles (41.5 Tiles)** |
+| *-- RAMB36/FIFO* | 11 | 27 | **33** | 984 | **3.35%** | +22 `RAMB36E2` |
+| *-- RAMB18* | 3 | 6 | **17** | 1968 | **0.86%** | +14 `RAMB18E2` |
+| **DSP48E2 Slices** | 920 | 209 | **61** | 1,968 | **3.10%** | **-859 DSPs (-93.37%)** |
+| **Estimated $F_{\max}$** | 96.36 MHz | 105.33 MHz | **101.22 MHz** | 50.00 MHz | **2.02× margin** | **WNS: +10.121 ns (MET)**, TNS: 0.000 ns (0 / 348,790 failing) |
+| **Total On-Chip Power** | 2.910 W | 1.943 W | **2.077 W** | — | — | **Dynamic: 0.963 W**, Device Static: 1.114 W |
 | **Methodology `LUTAR-1`** | 1 Advisory | 1 Advisory | **0 Advisories** | — | **0 Warnings** | Synchronous reset register `core_rst_n_reg` |
 
 ---
@@ -58,8 +58,8 @@ Evaluated on **Foreman 128x128 10-bit** (3 frames: POC 0 I-Slice, POC 1 P-Slice,
 
 ### 1. Prediction & Motion Estimation
 - **Intra Prediction (`rtl/intra/`):**
-  - **Rough Mode Decision (RMD):** 35 prediction modes (Planar, DC, and 33 Angular directions).
-  - Parallel SATD (Sum of Absolute Transformed Differences) calculation across 4x4 to 32x32 block sizes.
+  - **Rough Mode Decision (RMD):** 35 Luma prediction modes (Planar, DC, and 33 Angular directions) plus normative 5-candidate Chroma Intra RDO search (`Planar, Vertical, Horizontal, DC, DM_CHROMA`) per ITU-T H.265 Table 8-2 with sequential 1-pixel/cycle reference loading (`T3-14`).
+  - Parallel SATD (Sum of Absolute Transformed Differences) calculation across 4x4 to 32x32 block sizes and synchronized $4\times4$ Chroma MDCS scan (`Clause 7.4.9.11`).
 - **Inter Prediction (`rtl/inter/`):**
   - **Integer Motion Estimation (IME):** Hardware-optimized Test Zone Search (TZ-Search) algorithm with diamond and raster search patterns.
   - **Fractional Motion Estimation (FME):** Half-pel and quarter-pel interpolation filters (8-tap luma, 4-tap chroma).
@@ -79,9 +79,11 @@ Evaluated on **Foreman 128x128 10-bit** (3 frames: POC 0 I-Slice, POC 1 P-Slice,
   - Boundary strength (BS) calculation for luma and chroma edges.
   - Normal and strong filtering paths with threshold adaptivity.
 - **Sample Adaptive Offset (SAO):**
-  - Band Offset (BO) and Edge Offset (EO) classification datapaths with window buffering. *Encoder subset:* `sao_stats.v` currently selects only BO or OFF per CTU (`sao_type <= 6'b10_10_10`); EO is implemented in the filter but not chosen (see T3-13 in the conformance matrix).
+  - Band Offset (BO) and Edge Offset (EO) classification datapaths (`0°, 90°, 135°, 45°`) with 2-phase single-port BRAM neighbor read (`S_REQ_PIX -> S_REQ_N1 -> S_WAIT_PIX`), `pre_sao_row_buf` line caching in [`sao_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v), post-deblocked neighbor border updates in [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), and dynamic full-frame multi-mode RDO (`EO`, `BO`, `OFF`, `SINGLE_PASS_CAUSAL_SYNC = 0`) in [`sao_stats.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v) (`T3-13`).
 
 ### 4. CABAC Arithmetic Entropy Encoder
+- **CTU-Delayed Bitstream Serialization (`rtl/entropy/cabac_enc_top.v`):**
+  - Synchronous Block RAM bin queue (`ctu_bin_ram`, `8192 x 10-bit`, `2 RAMB36E2 + 1 RAMB18E2`) with 1-cycle lookahead read handshakes buffers `coding_quadtree()` syntax bins during CTU reconstruction so `sao(rx, ry)` is normatively emitted first after `sao_stats` finishes (`Clause 7.3.8.2`).
 - **Binary Arithmetic Range Coder (`rtl/entropy/range_coder.v`):**
   - Fully pipelined renormalization engine emitting standard-compliant byte streams with 16-bit carry-propagation protection.
 - **Context Modeling (`rtl/entropy/ctx_model_store.v`):**

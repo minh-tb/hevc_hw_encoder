@@ -672,7 +672,7 @@
         <spirit:parameters>
           <spirit:parameter>
             <spirit:name>viewChecksum</spirit:name>
-            <spirit:value>ede198c5</spirit:value>
+            <spirit:value>24a0096a</spirit:value>
           </spirit:parameter>
         </spirit:parameters>
       </spirit:view>
@@ -688,7 +688,7 @@
         <spirit:parameters>
           <spirit:parameter>
             <spirit:name>viewChecksum</spirit:name>
-            <spirit:value>4523fa1a</spirit:value>
+            <spirit:value>0f9d5d1a</spirit:value>
           </spirit:parameter>
         </spirit:parameters>
       </spirit:view>
@@ -2646,14 +2646,14 @@
       <xilinx:vendorDisplayName>UIT</xilinx:vendorDisplayName>
       <xilinx:vendorURL>https://uit.edu.vn</xilinx:vendorURL>
       <xilinx:coreRevision>1</xilinx:coreRevision>
-      <xilinx:coreCreationDateTime>2026-11-09T15:56:52Z</xilinx:coreCreationDateTime>
+      <xilinx:coreCreationDateTime>2026-11-11T13:33:00Z</xilinx:coreCreationDateTime>
     </xilinx:coreExtensions>
     <xilinx:packagingInfo>
       <xilinx:xilinxVersion>2026.1</xilinx:xilinxVersion>
       <xilinx:checksum xilinx:scope="busInterfaces" xilinx:value="45de688c"/>
       <xilinx:checksum xilinx:scope="addressSpaces" xilinx:value="69bc2842"/>
       <xilinx:checksum xilinx:scope="memoryMaps" xilinx:value="238fe90c"/>
-      <xilinx:checksum xilinx:scope="fileGroups" xilinx:value="e995418a"/>
+      <xilinx:checksum xilinx:scope="fileGroups" xilinx:value="1c290cf5"/>
       <xilinx:checksum xilinx:scope="ports" xilinx:value="5084528c"/>
       <xilinx:checksum xilinx:scope="hdlParameters" xilinx:value="29b0a8c8"/>
       <xilinx:checksum xilinx:scope="parameters" xilinx:value="e6e20369"/>

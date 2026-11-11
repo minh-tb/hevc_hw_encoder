@@ -116,7 +116,7 @@ def main():
     print("\n[Step 2/5] Running ModelSim simulation (tb_b_frame_encoder)...")
     log_file = os.path.join(WORKSPACE, "transcript_3frames.log").replace("\\", "/")
     vsim_cmd = f'"{VSIM}" -c +nospecify -nosva -noimmedassert -l "{log_file}" -do "run -all; quit -f" work.tb_b_frame_encoder'
-    res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True)
+    res = subprocess.run(vsim_cmd, shell=True, cwd=WORKSPACE, capture_output=True, text=True, errors='replace')
     if res.returncode != 0:
         print(f"[FAIL] vsim simulation failed with code {res.returncode}")
         sys.exit(1)
