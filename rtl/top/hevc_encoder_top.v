@@ -2907,6 +2907,7 @@ module hevc_encoder_top #(
         .orig_in_u        (orig_u_data_q),
         .orig_in_v        (orig_v_data_q),
         .sao_enable       (cfg_sao_enable),
+        .ctu_qp           (ctu_qp),
         .sao_stats_done   (inloop_sao_stats_done),
         .map_update_valid (map_update_valid_r),
         .map_update_cbf_only(map_update_cbf_only_r),

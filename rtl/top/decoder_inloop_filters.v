@@ -69,6 +69,7 @@ module decoder_inloop_filters (
 
     // SAO Control & Status
     input  wire         sao_enable,
+    input  wire [5:0]   ctu_qp,
     output wire         sao_stats_done,
 
     // Done
@@ -381,15 +382,18 @@ module decoder_inloop_filters (
     // 1-cycle pipeline delay for input coordinates to match orig_in_valid (1-cycle SRAM read)
     reg [5:0] in_x_d, in_y_d;
     reg [1:0] in_comp_d;
+    reg       in_valid_fill_d;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            in_x_d    <= 6'd0;
-            in_y_d    <= 6'd0;
-            in_comp_d <= 2'd0;
+            in_x_d          <= 6'd0;
+            in_y_d          <= 6'd0;
+            in_comp_d       <= 2'd0;
+            in_valid_fill_d <= 1'b0;
         end else begin
-            in_x_d    <= in_x;
-            in_y_d    <= in_y;
-            in_comp_d <= in_comp;
+            in_x_d          <= in_x;
+            in_y_d          <= in_y;
+            in_comp_d       <= in_comp;
+            in_valid_fill_d <= in_valid && (filter_state == S_FILL);
         end
     end
 
@@ -397,8 +401,8 @@ module decoder_inloop_filters (
     // Fill Logic (Original Pixels for SAO stats)
     //=========================================================================
     always @(posedge clk) begin
-        // Store original pixels for SAO stats
-        if (orig_in_valid && filter_state == S_FILL) begin
+        // Store original pixels for SAO stats (allow 1-cycle post-S_FILL tail for last pixel 6143)
+        if (orig_in_valid && (filter_state == S_FILL || in_valid_fill_d)) begin
             case (in_comp_d)
                 2'd0: orig_y_ram[{in_y_d[5:0], in_x_d[5:0]}] <= orig_in_y;
                 2'd1: orig_u_ram[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_u;
@@ -523,6 +527,7 @@ module decoder_inloop_filters (
         .ctu_y          (cur_ctu_y),
         .frame_width_px (frame_width_px),
         .frame_height_px(frame_height_px),
+        .ctu_qp         (ctu_qp),
         .rec_rd_valid   (stats_rec_rd_valid),
         .rec_rd_x       (stats_rec_rd_x),
         .rec_rd_y       (stats_rec_rd_y),
@@ -646,6 +651,35 @@ module decoder_inloop_filters (
             db_rd_pending <= 1'b0;  // clear after 1 cycle (data now valid)
     end
 
+    wire [5:0] pic_width_in_ctu = (frame_width_px > 12'd0)
+                                ? (frame_width_px[11:6] + (|frame_width_px[5:0] ? 6'd1 : 6'd0))
+                                : 6'd2;
+    wire       has_right_ctu    = ({1'b0, cur_ctu_x} + 7'd1 < {1'b0, pic_width_in_ctu});
+
+    wire signed [7:0] sao_n0_max_dim = (sao_n0_rd_comp == 2'd0) ? 8'sd63 : 8'sd31;
+    wire signed [7:0] sao_n1_max_dim = (sao_n1_rd_comp == 2'd0) ? 8'sd63 : 8'sd31;
+
+    wire sao_n0_top_right = (sao_n0_rd_y < 8'sd0) && (sao_n0_rd_x > sao_n0_max_dim);
+    wire sao_n1_top_right = (sao_n1_rd_y < 8'sd0) && (sao_n1_rd_x > sao_n1_max_dim);
+
+    wire sao_n0_oob = (filter_state == S_SAO) && sao_n0_rd_valid && (
+        ((sao_n0_rd_x < 8'sd0) && (cur_ctu_x == 0)) ||
+        ((sao_n0_rd_y < 8'sd0) && (cur_ctu_y == 0)) ||
+        ((sao_n0_rd_x > sao_n0_max_dim) && ((sao_n0_rd_y >= 8'sd0) || !has_right_ctu)) ||
+        (sao_n0_rd_y > sao_n0_max_dim)
+    );
+    wire sao_n1_oob = (filter_state == S_SAO) && sao_n1_rd_valid && (
+        ((sao_n1_rd_x < 8'sd0) && (cur_ctu_x == 0)) ||
+        ((sao_n1_rd_y < 8'sd0) && (cur_ctu_y == 0)) ||
+        ((sao_n1_rd_x > sao_n1_max_dim) && ((sao_n1_rd_y >= 8'sd0) || !has_right_ctu)) ||
+        (sao_n1_rd_y > sao_n1_max_dim)
+    );
+
+    wire sao_n0_is_nbr = (filter_state == S_SAO) && sao_n0_rd_valid && !sao_n0_oob &&
+                         (sao_n0_rd_x < 8'sd0 || sao_n0_rd_y < 8'sd0);
+    wire sao_n1_is_nbr = (filter_state == S_SAO) && sao_n1_rd_valid && !sao_n1_oob &&
+                         (sao_n1_rd_x < 8'sd0 || sao_n1_rd_y < 8'sd0);
+
     // db_pix_rd_ready pulses for 1 cycle when we accept the request
     always @(*) begin
         rd_x = 6'd0; rd_y = 6'd0; rd_comp = 2'd0;
@@ -661,16 +695,16 @@ module decoder_inloop_filters (
                 rd_x = stats_rec_rd_x; rd_y = stats_rec_rd_y; rd_comp = stats_rec_rd_comp;
             end
             S_SAO: begin
-                rd_x    = sao_n1_rd_valid ? sao_n1_rd_x[5:0] : sao_pix_rd_x;
-                rd_y    = sao_n1_rd_valid ? sao_n1_rd_y[5:0] : sao_pix_rd_y;
-                rd_comp = sao_n1_rd_valid ? sao_n1_rd_comp   : sao_pix_rd_comp;
+                rd_x    = (sao_n1_rd_valid && !sao_n1_oob) ? sao_n1_rd_x[5:0] : sao_pix_rd_x;
+                rd_y    = (sao_n1_rd_valid && !sao_n1_oob) ? sao_n1_rd_y[5:0] : sao_pix_rd_y;
+                rd_comp = (sao_n1_rd_valid && !sao_n1_oob) ? sao_n1_rd_comp   : sao_pix_rd_comp;
             end
             default: ;
         endcase
     end
 
-    wire db_rd_from_corner = db_pix_rd_corner && (rd_comp == 2'd0 ? (rd_y >= 6'd60) : (rd_y >= 5'd30));
-    wire db_rd_from_col    = db_pix_rd_corner ? (rd_comp == 2'd0 ? (rd_y < 6'd60) : (rd_y < 5'd30)) : db_pix_rd_is_vert;
+    wire db_rd_from_corner = db_pix_rd_corner && (rd_comp == 2'd0 ? (rd_y >= 6'd60) : (rd_y >= 6'd30));
+    wire db_rd_from_col    = db_pix_rd_corner ? (rd_comp == 2'd0 ? (rd_y < 6'd60) : (rd_y < 6'd30)) : db_pix_rd_is_vert;
 
     // Unified synchronous read addresses for Block RAM inference (S_DB / S_STATS / S_SAO / S_DUMP)
     wire [11:0] syn_luma_rd_addr = (filter_state == S_DUMP) ? dump_rd_addr[11:0] : {rd_y[5:0], rd_x[5:0]};
@@ -693,9 +727,8 @@ module decoder_inloop_filters (
     reg [9:0] sao_nbr_n1_q;
     reg       sao_n0_is_nbr_q;
     reg       sao_n1_is_nbr_q;
-
-    wire sao_n0_is_nbr = (filter_state == S_SAO) && sao_n0_rd_valid && (sao_n0_rd_x < 8'sd0 || sao_n0_rd_y < 8'sd0);
-    wire sao_n1_is_nbr = (filter_state == S_SAO) && sao_n1_rd_valid && (sao_n1_rd_x < 8'sd0 || sao_n1_rd_y < 8'sd0);
+    reg       sao_n0_oob_q;
+    reg       sao_n1_oob_q;
 
     wire dump_stall = (filter_state == S_DUMP) && dump_valid_q && !out_ready;
 
@@ -731,6 +764,8 @@ module decoder_inloop_filters (
         // SAO cross-CTU neighbor synchronous read from post-deblocked buffers
         sao_n0_is_nbr_q <= sao_n0_is_nbr;
         sao_n1_is_nbr_q <= sao_n1_is_nbr;
+        sao_n0_oob_q    <= sao_n0_oob;
+        sao_n1_oob_q    <= sao_n1_oob;
         if (sao_n0_is_nbr) begin
             if (sao_n0_rd_x < 8'sd0 && sao_n0_rd_y < 8'sd0) begin
                 case (sao_n0_rd_comp)
@@ -746,6 +781,13 @@ module decoder_inloop_filters (
                     2'd2: sao_nbr_n0_q <= col_buf_cr[sao_n0_rd_y[4:0]][sao_n0_rd_x[1:0]];
                     default: sao_nbr_n0_q <= 10'd0;
                 endcase
+            end else if (sao_n0_top_right) begin
+                case (sao_n0_rd_comp)
+                    2'd0: sao_nbr_n0_q <= line_buf_luma[sao_n0_rd_y[1:0]][({7'd0, cur_ctu_x} << 6) + {5'd0, sao_n0_rd_x[6:0]}];
+                    2'd1: sao_nbr_n0_q <= line_buf_cb[sao_n0_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {6'd0, sao_n0_rd_x[5:0]}];
+                    2'd2: sao_nbr_n0_q <= line_buf_cr[sao_n0_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {6'd0, sao_n0_rd_x[5:0]}];
+                    default: sao_nbr_n0_q <= 10'd0;
+                endcase
             end else begin
                 case (sao_n0_rd_comp)
                     2'd0: sao_nbr_n0_q <= line_buf_luma[sao_n0_rd_y[1:0]][({7'd0, cur_ctu_x} << 6) + {1'b0, sao_n0_rd_x[5:0]}];
@@ -757,11 +799,25 @@ module decoder_inloop_filters (
         end
 
         if (sao_n1_is_nbr) begin
-            if (sao_n1_rd_x < 8'sd0) begin
+            if (sao_n1_rd_x < 8'sd0 && sao_n1_rd_y < 8'sd0) begin
+                case (sao_n1_rd_comp)
+                    2'd0: sao_nbr_n1_q <= corner_buf_luma[sao_n1_rd_y[1:0]][sao_n1_rd_x[1:0]];
+                    2'd1: sao_nbr_n1_q <= corner_buf_cb[sao_n1_rd_y[0]][sao_n1_rd_x[1:0]];
+                    2'd2: sao_nbr_n1_q <= corner_buf_cr[sao_n1_rd_y[0]][sao_n1_rd_x[1:0]];
+                    default: sao_nbr_n1_q <= 10'd0;
+                endcase
+            end else if (sao_n1_rd_x < 8'sd0) begin
                 case (sao_n1_rd_comp)
                     2'd0: sao_nbr_n1_q <= col_buf_luma[sao_n1_rd_y[5:0]][sao_n1_rd_x[1:0]];
                     2'd1: sao_nbr_n1_q <= col_buf_cb[sao_n1_rd_y[4:0]][sao_n1_rd_x[1:0]];
                     2'd2: sao_nbr_n1_q <= col_buf_cr[sao_n1_rd_y[4:0]][sao_n1_rd_x[1:0]];
+                    default: sao_nbr_n1_q <= 10'd0;
+                endcase
+            end else if (sao_n1_top_right) begin
+                case (sao_n1_rd_comp)
+                    2'd0: sao_nbr_n1_q <= line_buf_luma[sao_n1_rd_y[1:0]][({7'd0, cur_ctu_x} << 6) + {5'd0, sao_n1_rd_x[6:0]}];
+                    2'd1: sao_nbr_n1_q <= line_buf_cb[sao_n1_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {6'd0, sao_n1_rd_x[5:0]}];
+                    2'd2: sao_nbr_n1_q <= line_buf_cr[sao_n1_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {6'd0, sao_n1_rd_x[5:0]}];
                     default: sao_nbr_n1_q <= 10'd0;
                 endcase
             end else begin
@@ -806,8 +862,8 @@ module decoder_inloop_filters (
             sao_pix_resp_data   = cr_rd_q;
             stats_rec_resp_data = cr_rd_q;
         end
-        sao_n0_resp_data = sao_n0_is_nbr_q ? sao_nbr_n0_q : db_pix_resp_data;
-        sao_n1_resp_data = sao_n1_is_nbr_q ? sao_nbr_n1_q : db_pix_resp_data;
+        sao_n0_resp_data = sao_n0_oob_q ? 10'd0 : (sao_n0_is_nbr_q ? sao_nbr_n0_q : db_pix_resp_data);
+        sao_n1_resp_data = sao_n1_oob_q ? 10'd0 : (sao_n1_is_nbr_q ? sao_nbr_n1_q : db_pix_resp_data);
 
         if (stats_org_rd_comp_q == 2'd0)
             stats_org_resp_data = orig_y_rd_q;
@@ -913,13 +969,13 @@ module decoder_inloop_filters (
                                 corner_buf_luma[db_pix_wr_y[1:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                         end
                         2'd1: begin
-                            if (db_pix_wr_y < 5'd30)
+                            if (db_pix_wr_y < 6'd30)
                                 col_buf_cb[db_pix_wr_y[4:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                             else
                                 corner_buf_cb[db_pix_wr_y[0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                         end
                         2'd2: begin
-                            if (db_pix_wr_y < 5'd30)
+                            if (db_pix_wr_y < 6'd30)
                                 col_buf_cr[db_pix_wr_y[4:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                             else
                                 corner_buf_cr[db_pix_wr_y[0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
@@ -938,7 +994,7 @@ module decoder_inloop_filters (
                         end
                         2'd1: begin
                             col_buf_cb[db_pix_wr_y[4:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
-                            if (db_pix_wr_y >= 5'd30 && cur_ctu_x > 0) begin
+                            if (db_pix_wr_y >= 6'd30 && cur_ctu_x > 0) begin
                                 line_buf_cb[db_pix_wr_y[0]][({6'd0, cur_ctu_x - 1'b1} << 5) + {1'b0, db_pix_wr_x[4:0]}] <= db_pix_wr_data;
                                 if (cur_ctu_y == 0)
                                     corner_buf_cb[db_pix_wr_y[0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
@@ -946,7 +1002,7 @@ module decoder_inloop_filters (
                         end
                         2'd2: begin
                             col_buf_cr[db_pix_wr_y[4:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
-                            if (db_pix_wr_y >= 5'd30 && cur_ctu_x > 0) begin
+                            if (db_pix_wr_y >= 6'd30 && cur_ctu_x > 0) begin
                                 line_buf_cr[db_pix_wr_y[0]][({6'd0, cur_ctu_x - 1'b1} << 5) + {1'b0, db_pix_wr_x[4:0]}] <= db_pix_wr_data;
                                 if (cur_ctu_y == 0)
                                     corner_buf_cr[db_pix_wr_y[0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
@@ -1009,14 +1065,43 @@ module decoder_inloop_filters (
     end
 
     //=========================================================================
+    // Cross-CTU Neighbor BO Parameter Latches (for post-DB neighbor writes)
+    //=========================================================================
+    reg [5:0]  left_sao_type;
+    reg [14:0] left_sao_band_pos;
+    reg [59:0] left_sao_bo_offset;
+    reg [5:0]  top_left_sao_type;
+    reg [14:0] top_left_sao_band_pos;
+    reg [59:0] top_left_sao_bo_offset;
+    reg [5:0]  top_sao_type      [0:63];
+    reg [14:0] top_sao_band_pos  [0:63];
+    reg [59:0] top_sao_bo_offset [0:63];
+    integer    sao_lat_i;
+
+    wire [5:0]  dump_eff_sao_type = sao_enable ? out_sao_type  : 6'd0;
+    wire [14:0] dump_eff_band_pos = sao_enable ? out_band_pos  : 15'd0;
+    wire [59:0] dump_eff_bo_off   = sao_enable ? out_bo_offset : 60'd0;
+
+    //=========================================================================
     // Main FSM
     //=========================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            filter_state <= S_FILL;
-            pixel_count  <= 13'd0;
-            cur_ctu_x    <= 0;
-            cur_ctu_y    <= 0;
+            filter_state           <= S_FILL;
+            pixel_count            <= 13'd0;
+            cur_ctu_x              <= 0;
+            cur_ctu_y              <= 0;
+            left_sao_type          <= 6'd0;
+            left_sao_band_pos      <= 15'd0;
+            left_sao_bo_offset     <= 60'd0;
+            top_left_sao_type      <= 6'd0;
+            top_left_sao_band_pos  <= 15'd0;
+            top_left_sao_bo_offset <= 60'd0;
+            for (sao_lat_i = 0; sao_lat_i < 64; sao_lat_i = sao_lat_i + 1) begin
+                top_sao_type[sao_lat_i]      <= 6'd0;
+                top_sao_band_pos[sao_lat_i]  <= 15'd0;
+                top_sao_bo_offset[sao_lat_i] <= 60'd0;
+            end
         end else begin
             case (filter_state)
                 S_FILL: begin
@@ -1059,15 +1144,30 @@ module decoder_inloop_filters (
                 end
                 S_DUMP: begin
                     if (out_ready && dump_valid_q && (dump_count_q == 13'd6143)) begin
-                        filter_state <= S_FILL;
+                        filter_state                 <= S_FILL;
+                        top_sao_type[cur_ctu_x]      <= dump_eff_sao_type;
+                        top_sao_band_pos[cur_ctu_x]  <= dump_eff_band_pos;
+                        top_sao_bo_offset[cur_ctu_x] <= dump_eff_bo_off;
                         if (cur_ctu_x == (frame_width_px >> 6) - 1) begin
-                            cur_ctu_x <= 0;
+                            cur_ctu_x              <= 0;
+                            left_sao_type          <= 6'd0;
+                            left_sao_band_pos      <= 15'd0;
+                            left_sao_bo_offset     <= 60'd0;
+                            top_left_sao_type      <= 6'd0;
+                            top_left_sao_band_pos  <= 15'd0;
+                            top_left_sao_bo_offset <= 60'd0;
                             if (cur_ctu_y == (frame_height_px >> 6) - 1)
                                 cur_ctu_y <= 0;
                             else
                                 cur_ctu_y <= cur_ctu_y + 1;
                         end else begin
-                            cur_ctu_x <= cur_ctu_x + 1;
+                            cur_ctu_x              <= cur_ctu_x + 1;
+                            left_sao_type          <= dump_eff_sao_type;
+                            left_sao_band_pos      <= dump_eff_band_pos;
+                            left_sao_bo_offset     <= dump_eff_bo_off;
+                            top_left_sao_type      <= top_sao_type[cur_ctu_x];
+                            top_left_sao_band_pos  <= top_sao_band_pos[cur_ctu_x];
+                            top_left_sao_bo_offset <= top_sao_bo_offset[cur_ctu_x];
                         end
                         // synthesis translate_off
                         $display("Time=%0t: [INLOOP_FILTERS] Dump complete for CTU (%0d,%0d).", $time, cur_ctu_x, cur_ctu_y);
@@ -1083,7 +1183,7 @@ module decoder_inloop_filters (
     //=========================================================================
     // Absolute frame coordinates for neighbor writes during deblock
     wire db_wr_is_top_ctu = db_pix_wr_corner ? 
-                            (db_pix_wr_y >= (db_pix_wr_comp == 2'd0 ? 6'd60 : 5'd30)) :
+                            (db_pix_wr_y >= (db_pix_wr_comp == 2'd0 ? 6'd60 : 6'd30)) :
                             (!db_pix_wr_is_vert);
     wire db_wr_is_left_ctu = db_pix_wr_corner ? 
                              1'b1 :
@@ -1098,6 +1198,51 @@ module decoder_inloop_filters (
                                ((db_nbr_ctu_y << 6) + {6'd0, db_pix_wr_y[5:0]}) :
                                ((db_nbr_ctu_y << 5) + {7'd0, db_pix_wr_y[4:0]});
 
+    // Apply neighbor CTU BO on DPB-bound post-DB neighbor writes (while col/line/corner SRAMs remain pre-SAO)
+    wire [5:0]  db_nbr_sao_type_w = (db_wr_is_top_ctu && db_wr_is_left_ctu) ? top_left_sao_type :
+                                    db_wr_is_top_ctu                        ? top_sao_type[cur_ctu_x] :
+                                    db_wr_is_left_ctu                       ? left_sao_type : 6'd0;
+    wire [14:0] db_nbr_band_pos_w = (db_wr_is_top_ctu && db_wr_is_left_ctu) ? top_left_sao_band_pos :
+                                    db_wr_is_top_ctu                        ? top_sao_band_pos[cur_ctu_x] :
+                                    db_wr_is_left_ctu                       ? left_sao_band_pos : 15'd0;
+    wire [59:0] db_nbr_bo_off_w   = (db_wr_is_top_ctu && db_wr_is_left_ctu) ? top_left_sao_bo_offset :
+                                    db_wr_is_top_ctu                        ? top_sao_bo_offset[cur_ctu_x] :
+                                    db_wr_is_left_ctu                       ? left_sao_bo_offset : 60'd0;
+
+    wire [1:0]  db_nbr_comp_type  = (db_pix_wr_comp == 2'd0) ? db_nbr_sao_type_w[1:0] :
+                                    (db_pix_wr_comp == 2'd1) ? db_nbr_sao_type_w[3:2] : db_nbr_sao_type_w[5:4];
+    wire [4:0]  db_nbr_comp_bp    = (db_pix_wr_comp == 2'd0) ? db_nbr_band_pos_w[4:0] :
+                                    (db_pix_wr_comp == 2'd1) ? db_nbr_band_pos_w[9:5] : db_nbr_band_pos_w[14:10];
+    wire [19:0] db_nbr_comp_bo    = (db_pix_wr_comp == 2'd0) ? db_nbr_bo_off_w[19:0] :
+                                    (db_pix_wr_comp == 2'd1) ? db_nbr_bo_off_w[39:20] : db_nbr_bo_off_w[59:40];
+
+    wire [4:0]  db_nbr_band_diff  = db_pix_wr_data[9:5] - db_nbr_comp_bp;
+    wire        db_nbr_bo_match   = sao_enable && (db_nbr_comp_type == 2'd2) && (db_nbr_band_diff < 5'd4);
+    reg signed [4:0]  db_nbr_sel_off;
+    reg signed [11:0] db_nbr_sao_sum;
+    reg [9:0]         db_nbr_sao_pixel;
+
+    always @(*) begin
+        case (db_nbr_band_diff[1:0])
+            2'd0: db_nbr_sel_off = db_nbr_comp_bo[4:0];
+            2'd1: db_nbr_sel_off = db_nbr_comp_bo[9:5];
+            2'd2: db_nbr_sel_off = db_nbr_comp_bo[14:10];
+            2'd3: db_nbr_sel_off = db_nbr_comp_bo[19:15];
+        endcase
+        if (db_nbr_bo_match) begin
+            db_nbr_sao_sum = $signed({2'b00, db_pix_wr_data}) + $signed({{7{db_nbr_sel_off[4]}}, db_nbr_sel_off});
+            if (db_nbr_sao_sum < 12'sd0)
+                db_nbr_sao_pixel = 10'd0;
+            else if (db_nbr_sao_sum > 12'sd1023)
+                db_nbr_sao_pixel = 10'd1023;
+            else
+                db_nbr_sao_pixel = db_nbr_sao_sum[9:0];
+        end else begin
+            db_nbr_sao_sum   = $signed({2'b00, db_pix_wr_data});
+            db_nbr_sao_pixel = db_pix_wr_data;
+        end
+    end
+
     always @(*) begin
         out_valid = 1'b0;
         out_comp  = 2'd0;
@@ -1108,7 +1253,7 @@ module decoder_inloop_filters (
         if (filter_state == S_DB && db_pix_wr_valid && db_pix_wr_neighbor) begin
             out_valid = 1'b1;
             out_comp  = db_pix_wr_comp;
-            out_pixel = db_pix_wr_data;
+            out_pixel = db_nbr_sao_pixel;
             out_abs_x = db_nbr_abs_x;
             out_abs_y = db_nbr_abs_y;
         end else if (dump_valid_q) begin

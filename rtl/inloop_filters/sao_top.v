@@ -300,11 +300,11 @@ module sao_top #(
                                     end
                                 end
                                 2'd3: begin // (x+1, y-1)
-                                    if (scan_y == 6'd0) begin
+                                    if (scan_y == 6'd0 || scan_x == max_dim) begin
                                         n0_rd_valid <= 1'b1;
                                         n0_rd_comp  <= comp_idx;
                                         n0_rd_x     <= $signed({2'b00, scan_x}) + 8'sd1;
-                                        n0_rd_y     <= -8'sd1;
+                                        n0_rd_y     <= $signed({2'b00, scan_y}) - 8'sd1;
                                     end else begin
                                         n0_rd_valid <= 1'b0;
                                     end
