@@ -193,7 +193,7 @@ def run_rate_control_test(force=False):
 
 def restore_default_compilation():
     """Restore default 3-frame Foreman compilation in work library and refresh rec_before_filter.yuv."""
-    vlog_cmd = f"vlog -sv {VLOG_OPTS} +define+CFG_TOTAL_FRAMES=3 {TB_PATH}"
+    vlog_cmd = f"vlog -sv {VLOG_OPTS} +define+ENABLE_RC +define+CFG_SAO_ENABLE +define+CFG_TOTAL_FRAMES=3 {TB_PATH}"
     subprocess.run(vlog_cmd, shell=True, cwd=WORKSPACE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     std_bin = os.path.join(WORKSPACE, "str_b_frame.bin")
     std_dec = os.path.join(WORKSPACE, "dec_foreman.yuv")

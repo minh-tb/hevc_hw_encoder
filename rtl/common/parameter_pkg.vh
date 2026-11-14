@@ -249,7 +249,7 @@
 //-----------------------------------------------------------------------------
 // 13. CABAC / ENTROPY
 //-----------------------------------------------------------------------------
-`define NUM_CTX_MODELS      154         // HEVC main10 context model count
+`define NUM_CTX_MODELS      186         // HEVC main10 context model count (0..185)
 `define CTX_STATE_WIDTH     7           // 64-state MPS: 6-bit state + 1-bit MPS
 `define CABAC_REG_WIDTH     16          // Range/offset register width
 

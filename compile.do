@@ -1,6 +1,6 @@
 vlib work
 vmap work work
-vlog -sv +define+REMEDIATION+CFG_TOTAL_FRAMES=3 +libext+.v \
+vlog -sv +define+REMEDIATION+ENABLE_RC+CFG_SAO_ENABLE+CFG_TOTAL_FRAMES=3 +libext+.v \
   -y rtl/top -y rtl/entropy -y rtl/common -y rtl/partition -y rtl/transform \
   -y rtl/intra -y rtl/recon -y rtl/inter -y rtl/rate_control \
   -y rtl/inloop_filters -y rtl/quant -y rtl/input_output \

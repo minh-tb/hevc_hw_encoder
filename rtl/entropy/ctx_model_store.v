@@ -1,12 +1,12 @@
 //=============================================================================
 // ctx_model_store.v
-// HEVC CABAC Context Model Store — 154 contexts, 7-bit state each
+// HEVC CABAC Context Model Store — 186 contexts, 7-bit state each
 //
 // Mapped from HM source:
 //   TLibCommon/ContextModel.h       :: ContextModel class, m_ucState
 //   TLibCommon/ContextModel.cpp     :: init(), update()
 //                                      m_aucNextStateMPS[64], m_aucNextStateLPS[64]
-//   TLibCommon/ContextTables.h      :: INIT_* tables (154 × 3 slice-type initValues)
+//   TLibCommon/ContextTables.h      :: INIT_* tables (186 × 3 slice-type initValues)
 //   TLibCommon/ContextModel3DBuffer :: initBuffer() slice-init sequencer
 //
 // HEVC CABAC state encoding (HM m_ucState convention):
@@ -29,35 +29,39 @@
 //   state      = (initState >= 64) ? ((initState-64)<<1)|1
 //                                  : ((63-initState)<<1)
 //
-// Context variable map — HEVC Main profile (154 total):
+// Context variable map — HEVC Main profile / HM init_tables.vh (186 total):
 //   [  0..  2] SPLIT_CODING_UNIT_FLAG          (3)
-//   [  3..  3] CU_TRANSQUANT_BYPASS_FLAG        (1)
-//   [  4..  6] CU_SKIP_FLAG                     (3)
-//   [  7..  7] MERGE_FLAG                       (1)
-//   [  8..  8] MERGE_IDX                        (1)
-//   [  9..  9] PRED_MODE_FLAG                   (1)
-//   [ 10.. 13] PART_SIZE                        (4)
-//   [ 14.. 15] PREV_INTRA_LUMA_PRED_FLAG        (2)
-//   [ 16.. 17] INTRA_CHROMA_PRED_MODE           (2)
-//   [ 18.. 22] INTER_PRED_IDC                   (5)
-//   [ 23.. 24] REF_IDX_LX                       (2)
-//   [ 25.. 25] MVP_LX_FLAG                      (1)
-//   [ 26.. 28] DELTA_QP / NO_RESIDUAL_DATA_FLAG (3)
-//   [ 29.. 37] LAST_SIG_COEFF_X_PREFIX luma     (9)
-//   [ 38.. 46] LAST_SIG_COEFF_Y_PREFIX luma     (9)
-//   [ 47.. 51] LAST_SIG_COEFF_X_PREFIX chroma   (5)
-//   [ 52.. 56] LAST_SIG_COEFF_Y_PREFIX chroma   (5)
-//   [ 57.. 66] CODED_SUB_BLOCK_FLAG             (10)
-//   [ 67..102] SIG_COEFF_FLAG luma + chroma     (36)
-//   [103..122] COEFF_ABS_LEVEL_GREATER1 luma    (16, 4 ctx × 4 coeff sets)
-//   [119..122] COEFF_ABS_LEVEL_GREATER2 luma    (4,  1 ctx × 4 coeff sets)
-//   [123..140] COEFF_ABS GREATER1/2 chroma      (18)
-//   [141..153] SAO, transform_skip, misc        (13)
-//   Total: 154
+//   [  3..  5] CU_SKIP_FLAG                    (3)
+//   [  6..  6] MERGE_FLAG                      (1)
+//   [  7..  7] MERGE_IDX                       (1)
+//   [  8.. 11] PART_SIZE                       (4; 10..11 CNU=154)
+//   [ 12.. 12] PRED_MODE_FLAG                  (1)
+//   [ 13.. 13] PREV_INTRA_LUMA_PRED_FLAG       (1)
+//   [ 14.. 15] INTRA_CHROMA_PRED_MODE          (2)
+//   [ 16.. 18] DELTA_QP                        (3; CNU=154, unused)
+//   [ 19.. 23] INTER_PRED_IDC                  (5)
+//   [ 24.. 25] REF_IDX_LX                      (2)
+//   [ 26.. 27] MVD                             (2)
+//   [ 28.. 37] QT_CBF                          (10; luma 28..29+CNU 30..32, chroma 33..35+CNU 36..37)
+//   [ 38.. 40] TRANS_SUBDIV_FLAG               (3)
+//   [ 41.. 41] QT_ROOT_CBF                     (1)
+//   [ 42.. 45] CODED_SUB_BLOCK_FLAG            (4; luma 42..43, chroma 44..45)
+//   [ 46.. 89] SIG_COEFF_FLAG                  (44; luma 46..73, chroma 74..89)
+//   [ 90..119] LAST_SIG_COEFF_X_PREFIX         (30; luma 90..104, chroma 105..107, CNU 108..119)
+//   [120..149] LAST_SIG_COEFF_Y_PREFIX         (30; luma 120..134, chroma 135..137, CNU 138..149)
+//   [150..173] COEFF_ABS_LEVEL_GREATER1        (24; luma 150..165, chroma 166..173)
+//   [174..179] COEFF_ABS_LEVEL_GREATER2        (6; luma 174..177, chroma 178..179)
+//   [180..180] MVP_LX_FLAG                     (1)
+//   [181..181] SAO_MERGE_FLAG                  (1)
+//   [182..182] SAO_TYPE_IDX                    (1)
+//   [183..184] TRANSFORM_SKIP_FLAG             (2; unused when TRANSFORM_SKIP=0)
+//   [185..185] CU_TRANSQUANT_BYPASS_FLAG       (1; HM CNU=154, unused when TRANSQUANT_BYPASS=0)
+//   Total: 186 entries [0..185] (151 non-CNU initialized; 35 HM CNU=154 slots incl. 185;
+//   146 indices statically referenced by syntax_* across [0..182])
 //
 // Architecture:
-//   - 154 × 7-bit state registers (~135 FFs or single LUTRAM block)
-//   - Init sequencer: 154-cycle reset on slice_init pulse
+//   - 186 × 7-bit state registers (1,302 state bits; FFs or LUTRAM block)
+//   - Init sequencer: 186-cycle reset on slice_init pulse
 //   - Init formula computed in RTL (supports any QP via qp_in port)
 //   - Read port:  combinational, zero latency (bin_encoder critical path)
 //   - Update port: single-cycle write-back (from bin_encoder each bin)
@@ -96,7 +100,7 @@ module ctx_model_store #(
     input  wire                  upd_bin,      // the bin value just coded
 
     // ── Status ───────────────────────────────────────────────────────────
-    output reg                   init_busy     // high during 154-cycle init sequence
+    output reg                   init_busy     // high during 186-cycle init sequence
 );
 
     // =========================================================================
@@ -184,14 +188,14 @@ module ctx_model_store #(
     endfunction
 
     // =========================================================================
-    // Context model state SRAM — 154 × 7-bit
-    // (~135 FFs; small enough to be registers, infers LUTRAM in FPGA targets)
+    // Context model state SRAM — 186 × 7-bit
+    // (1,302 state bits; small enough to be registers, infers LUTRAM in FPGA targets)
     // =========================================================================
     reg [CTX_W-1:0] ctx_mem [0:N_CTX-1];
 
     // =========================================================================
     // Init sequencer — writes computed initial state for one context per cycle
-    // Runs for exactly N_CTX=154 cycles after slice_init pulse
+    // Runs for exactly N_CTX=186 cycles after slice_init pulse
     // init_busy blocks all updates during this window
     // =========================================================================
     reg [CTX_ID_W-1:0] init_cnt;

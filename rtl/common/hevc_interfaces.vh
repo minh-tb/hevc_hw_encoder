@@ -300,7 +300,7 @@
 //
 // Signal            Width   Description
 // bin               1       The binary symbol to encode
-// ctx_idx           8       Context model index (0..153, or bypass flag)
+// ctx_idx           8       Context model index (0..185, or bypass flag)
 // bypass            1       1 = bypass (equiprobable) mode
 // term              1       1 = terminate (flush) bin
 // valid             1

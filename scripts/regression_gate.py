@@ -104,7 +104,7 @@ def compare_yuvs(hw_yuv="hw_recon.yuv", dec_yuv="dec_gate.yuv", width=128, heigh
     else:
         print(f"\nPASS: Full {frames_checked}-frame 100.00% bit-exact match against HM 18.0 across all components Y, Cb, Cr (global_max_diff = 0)!")
 
-def parse_transcript(transcript_file="transcript"):
+def parse_transcript(transcript_file="transcript_3frames.log"):
     if transcript_file == "transcript" and os.path.exists("transcript_3frames.log"):
         has_encoder_log = False
         if os.path.exists(transcript_file):
@@ -229,7 +229,7 @@ def main():
     parser.add_argument("--hw-yuv", default="hw_recon.yuv", help="Hardware reconstructed YUV")
     parser.add_argument("--dec-yuv", default=None,
                         help="Decoder output YUV (default: dec_gate.yuv, or dec_gate_nofilter.yuv with --disable-loop-filters)")
-    parser.add_argument("--transcript", default="transcript", help="Simulation transcript")
+    parser.add_argument("--transcript", default="transcript_3frames.log", help="Simulation transcript (default: transcript_3frames.log)")
     parser.add_argument("--phase1", action="store_true", help="Deprecated (unmasked full verification is now standard)")
     parser.add_argument("--num-frames", type=int, default=3, help="Number of frames (default: 3)")
     args = parser.parse_args()

@@ -83,7 +83,7 @@ RTL_SOURCES = [
 def main():
     print("================================================================================")
     print(" HEVC HARDWARE ENCODER: RATE CONTROL + SAO 3-FRAME INTEGRATION RUNNER")
-    print(" Modes: Rate Control (CBR 250 kbps) + SAO Band Offset (Pointwise Bit-Exact)")
+    print(" Modes: Rate Control (CBR 250 kbps) + SAO Dynamic EO/BO/OFF RDO (Pointwise Bit-Exact)")
     print(" Sequence: Foreman 128x128 10-bit (3 frames: I, P, B)")
     print("================================================================================")
 

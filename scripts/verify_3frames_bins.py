@@ -46,13 +46,12 @@ def parse_enc_bins(log_file):
                 })
     return bins_by_poc
 
-def select_default_enc_log(candidates=('transcript', 'transcript_synthdef.log', 'transcript_3frames.log')):
+def select_default_enc_log(candidates=('transcript_3frames.log', 'transcript_synthdef.log')):
     """Pick the newest candidate log that has ENC_BIN entries for EVERY POC.
 
-    The generic 'transcript' file is overwritten by every ModelSim run (including
-    unit testbenches and aborted runs), so it may hold no or only partial encoder
-    bins. Preferring the newest *complete* log avoids a false FAIL. If no log is
-    complete, fall back to the log with the most bins.
+    Prefer named 3-frame encoder logs over the generic 'transcript' file, which
+    is overwritten by every ModelSim run (including unit testbenches and aborted
+    runs). Only fall back to 'transcript' if neither named log has any bins.
     """
     complete, partial = None, None
     for path in candidates:
@@ -67,15 +66,22 @@ def select_default_enc_log(candidates=('transcript', 'transcript_synthdef.log', 
                 complete = (path, bins)
         elif partial is None or total > sum(len(b) for b in partial[1].values()):
             partial = (path, bins)
-    return complete or partial
+    if complete or partial:
+        return complete or partial
+    if os.path.exists('transcript'):
+        bins = parse_enc_bins('transcript')
+        if sum(len(b) for b in bins.values()) > 0:
+            return ('transcript', bins)
+    return None
 
 if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
     enc_log_path = sys.argv[1]
     enc_bins_by_poc = parse_enc_bins(enc_log_path)
+    print(f"Using encoder log: {enc_log_path}")
 else:
     selected = select_default_enc_log()
     if selected is None:
-        enc_log_path = 'transcript'
+        enc_log_path = 'transcript_3frames.log'
         enc_bins_by_poc = parse_enc_bins(enc_log_path)
     else:
         enc_log_path, enc_bins_by_poc = selected

@@ -182,11 +182,11 @@ def run_hw_encoder(qp, force=False):
         if not os.path.exists(work_dir):
             subprocess.run([VLIB, work_lib], cwd=WORKSPACE, capture_output=True, text=True)
 
-        # 1. Compile ALL explicit RTL sources + testbench with REMEDIATION, SWEEP_QP_{qp}, and CFG_TOTAL_FRAMES=3
+        # 1. Compile ALL explicit RTL sources + testbench with REMEDIATION, SWEEP_QP_{qp}, CFG_SAO_ENABLE, and CFG_TOTAL_FRAMES=3
         # Passing explicit RTL files completely eliminates ModelSim -y library caching issues!
         sources_str = " ".join(RTL_SOURCES)
         vlog_cmd = (
-            f'"{VLOG}" -work {work_lib} -sv +define+REMEDIATION +define+SWEEP_QP_{qp} +define+CFG_TOTAL_FRAMES={FRAMES} '
+            f'"{VLOG}" -work {work_lib} -sv +define+REMEDIATION +define+SWEEP_QP_{qp} +define+CFG_SAO_ENABLE +define+CFG_TOTAL_FRAMES={FRAMES} '
             f'+incdir+rtl/common +incdir+rtl/top {sources_str} {TB_PATH}'
         )
         print(f"  > Compiling RTL + TB explicitly for QP={qp} into {work_lib}...")
