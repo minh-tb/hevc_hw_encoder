@@ -136,7 +136,7 @@ TEST_CASES = [
                      "rtl/intra/intra_rmd.v", "tb/tb_flaw_intra_rmd/tb_flaw_intra_rmd.sv"],
         "buggy_sim": [VSIM, "-c", "work.tb_flaw_intra_rmd", "-do", "run -all; quit -f"],
         "buggy_marker": "FLAW D-04 CONFIRMED",
-        "remed_cmd": [VLOG, "-sv", "-work", "work", "+define+REMEDIATION_PATCH", "+incdir+rtl/common", "+incdir+rtl/intra",
+        "remed_cmd": [VLOG, "-sv", "-work", "work", "+define+REMEDIATION", "+incdir+rtl/common", "+incdir+rtl/intra",
                       "rtl/common/parameter_pkg.vh", "rtl/common/hadamard_satd_4x4.v",
                       "rtl/intra/intra_rmd.v", "tb/tb_flaw_intra_rmd/tb_flaw_intra_rmd.sv"],
         "remed_sim": [VSIM, "-c", "work.tb_flaw_intra_rmd", "-do", "run -all; quit -f"],
