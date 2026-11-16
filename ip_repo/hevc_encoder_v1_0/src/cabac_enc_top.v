@@ -10,7 +10,7 @@
 // Module hierarchy instantiated here:
 //
 //   cabac_enc_top
-//    ├── ctx_model_store    (154 × 7-bit state SRAM, slice init, read/write)
+//    ├── ctx_model_store    (186 × 7-bit state SRAM, slice init, read/write)
 //    ├── bin_encoder        (ctx lookup → range_coder dispatch, EP bypass)
 //    ├── range_coder        (M-coder arithmetic engine, byte output)
 //    ├── syntax_cu          (split_flag, skip, merge, pred_mode, part_mode)
@@ -19,7 +19,7 @@
 //
 // Encoding flow for one CU:
 //
-//   1. [slice_init] → ctx_model_store reset (154 cycles)
+//   1. [slice_init] → ctx_model_store reset (186 cycles)
 //   2. [cu_req]     → syntax_cu   → bins → bin_encoder → range_coder → bytes
 //   3. [pred_req]   → syntax_pred → bins → bin_encoder → range_coder → bytes
 //   4. [coeff_req]  → syntax_coeff→ bins → bin_encoder → range_coder → bytes
@@ -99,6 +99,8 @@ module cabac_enc_top #(
 `ifdef REMEDIATION
     input  wire [1:0]  coeff_scan_mode,
 `endif
+    input  wire        tu_cg_mask_en,
+    input  wire [63:0] tu_cg_nonzero_mask,
     output wire        coeff_rd_en,
     output wire [11:0] coeff_rd_addr,
     input  wire signed [COEFF_W-1:0] coeff_rd_data,
@@ -132,7 +134,7 @@ module cabac_enc_top #(
 
     // ── Status ───────────────────────────────────────────────────────────
     output wire        enc_busy,       // 1 while any syntax element being encoded
-    output wire        ctx_init_busy   // 1 during 154-cycle context initialization
+    output wire        ctx_init_busy   // 1 during 186-cycle context initialization
 );
 
     // =========================================================================
@@ -365,8 +367,10 @@ module cabac_enc_top #(
         .tu_cbf        (coeff_tu_cbf),
         .last_sig_pos  (coeff_last_sig_pos),
 `ifdef REMEDIATION
-        .scan_mode     (coeff_scan_mode),
+        .scan_mode         (coeff_scan_mode),
 `endif
+        .tu_cg_mask_en     (tu_cg_mask_en),
+        .tu_cg_nonzero_mask(tu_cg_nonzero_mask),
         .coeff_rd_en   (coeff_rd_en),
         .coeff_rd_addr (coeff_rd_addr),
         .coeff_rd_data (coeff_rd_data),
@@ -413,6 +417,7 @@ module cabac_enc_top #(
     reg  [12:0] bin_wr_ptr;
     reg  [12:0] bin_rd_ptr;
     reg  [9:0]  bin_ram_rdata_q;
+    reg         drain_prefetched_valid;
 
     wire        cu_bin_valid = sc_bin_valid | sp_bin_valid | sf_bin_valid;
     wire        cu_bin_value = sc_bin_valid ? sc_bin_value :
@@ -424,13 +429,16 @@ module cabac_enc_top #(
 
     assign      cu_bin_rdy   = eff_ctu_sao_delay_en ? (bin_wr_ptr < 13'd8191) : be_bin_rdy;
 
-    wire        bin_ram_we   = eff_ctu_sao_delay_en && cu_bin_valid && (bin_wr_ptr < 14'd8192);
+    wire        bin_ram_we   = eff_ctu_sao_delay_en && cu_bin_valid && cu_bin_rdy;
     wire [9:0]  bin_ram_wdata = {cu_bin_is_ep, cu_bin_value, cu_bin_ctx_id};
 
     wire        drain_has_data = (bin_rd_ptr < bin_wr_ptr);
-    wire        drain_bin_valid = eff_ctu_sao_delay_en && eff_ctu_bin_drain_en && drain_has_data;
+    wire        drain_bin_valid = eff_ctu_sao_delay_en && eff_ctu_bin_drain_en && !ss_bin_valid
+                                && drain_has_data && drain_prefetched_valid;
     wire        drain_bin_fire  = drain_bin_valid && be_bin_rdy;
-    assign      ctu_bin_drain_done = eff_ctu_sao_delay_en ? (eff_ctu_bin_drain_en && !drain_has_data) : 1'b1;
+    assign      ctu_bin_drain_done = eff_ctu_sao_delay_en
+                                   ? (eff_ctu_bin_drain_en && !drain_has_data && !bin_ram_we)
+                                   : 1'b1;
 
     wire [12:0] bin_rd_addr_mux = drain_bin_fire ? (bin_rd_ptr + 13'd1) : bin_rd_ptr;
 
@@ -442,16 +450,20 @@ module cabac_enc_top #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            bin_wr_ptr <= 13'd0;
-            bin_rd_ptr <= 13'd0;
+            bin_wr_ptr             <= 13'd0;
+            bin_rd_ptr             <= 13'd0;
+            drain_prefetched_valid <= 1'b0;
         end else if (slice_init || trm_req) begin
-            bin_wr_ptr <= 13'd0;
-            bin_rd_ptr <= 13'd0;
+            bin_wr_ptr             <= 13'd0;
+            bin_rd_ptr             <= 13'd0;
+            drain_prefetched_valid <= 1'b0;
         end else begin
             if (bin_ram_we)
                 bin_wr_ptr <= bin_wr_ptr + 13'd1;
             if (drain_bin_fire)
                 bin_rd_ptr <= bin_rd_ptr + 13'd1;
+            // Track when bin_ram_rdata_q holds already-committed RAM data at bin_rd_addr_mux.
+            drain_prefetched_valid <= (bin_rd_addr_mux < bin_wr_ptr);
         end
     end
 
@@ -498,6 +510,9 @@ module cabac_enc_top #(
             {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0000)
             $display("WARN [cabac_enc_top] multiple bin sources active: %b at t=%0t",
                      {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid}, $time);
+        if (eff_ctu_sao_delay_en && cu_bin_valid && !cu_bin_rdy)
+            $display("WARN [cabac_enc_top] CTU bin buffer full/backpressure: cu_bin_valid dropped at wr_ptr=%0d t=%0t",
+                     bin_wr_ptr, $time);
         if (flush_done)
             $display("INFO [cabac_enc_top] flush done — slice bitstream complete");
             

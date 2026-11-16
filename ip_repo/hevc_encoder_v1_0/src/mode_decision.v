@@ -18,7 +18,9 @@
 `include "parameter_pkg.vh"
 `include "hevc_interfaces.vh"
 
-module mode_decision (
+module mode_decision #(
+    parameter FAST_EARLY_CU_SPLIT = 0
+)(
     input  wire                     clk,
     input  wire                     rst_n,
 
@@ -213,6 +215,10 @@ module mode_decision (
                                   (cur_pu_depth == 2'd2) ? (32'd15000  + (lambda_mode_q8 >> 6)) :
                                                            32'hFFFFFFFF;
 
+    wire [31:0] split_threshold_scaled = (cur_pu_depth == 2'd3) ? 32'hFFFFFFFF :
+                                         (split_threshold + (split_threshold >> 1));
+    wire [31:0] eff_split_threshold    = FAST_EARLY_CU_SPLIT ? split_threshold_scaled : split_threshold;
+
     //=========================================================================
     // Merge candidate extraction
     //=========================================================================
@@ -257,7 +263,11 @@ module mode_decision (
         next_state = state;
         case (state)
             S_IDLE: begin
+`ifdef REMEDIATION
+                if (pu_valid) next_state = (pu_depth == 2'd0) ? S_DECIDE_SPLIT : S_EVAL_ENGINES;
+`else
                 if (pu_valid) next_state = S_EVAL_ENGINES;
+`endif
             end
             
             S_EVAL_ENGINES: begin
@@ -367,6 +377,18 @@ module mode_decision (
                         best_merge_mv_x    <= 12'd0;
                         best_merge_mv_y    <= 12'd0;
                         merge_scan_idx     <= 3'd0;
+`ifdef REMEDIATION
+                        if (pu_depth == 2'd0) begin
+                            best_rd_cost    <= 32'hFFFFFFFF;
+                            best_is_intra   <= 1'b1;
+                            best_intra_mode <= 6'd0;
+                            best_inter_mv_x <= 12'd0;
+                            best_inter_mv_y <= 12'd0;
+                            best_merge_flag <= 1'b0;
+                            best_merge_idx  <= 3'd0;
+                            best_skip_flag  <= 1'b0;
+                        end
+`endif
                     end
                 end
 
@@ -460,7 +482,7 @@ module mode_decision (
                     end else if (best_rd_cost >= 32'hFFFF0000) begin
                         // Invalid or saturated cost forces split
                         split_flag <= 1'b1;
-                    end else if (best_rd_cost > split_threshold) begin
+                    end else if (best_rd_cost > eff_split_threshold) begin
                         // Cost is too high, split quadtree deeper
                         split_flag <= 1'b1;
                     end else begin

@@ -92,6 +92,7 @@ module inter_pred_top #(
     wire [2:0] ref_req_slot = mc_ref_req_valid ? mc_ref_req_slot : ref_slot_in; // From DPB ref_l0/ref_l1
     wire signed [11:0] ref_req_x = mc_ref_req_valid ? mc_ref_req_x : (fme_ref_req_valid ? fme_ref_req_x : tz_ref_req_x);
     wire signed [11:0] ref_req_y = mc_ref_req_valid ? mc_ref_req_y : (fme_ref_req_valid ? fme_ref_req_y : tz_ref_req_y);
+    wire ref_req_is_4x4   = (!mc_ref_req_valid && !fme_ref_req_valid && tz_ref_req_valid);
     wire ref_req_valid_in = mc_ref_req_valid | fme_ref_req_valid | tz_ref_req_valid;
 
     wire [1439:0] ref_resp_y_flat; // 12x12
@@ -149,6 +150,7 @@ module inter_pred_top #(
         .ref_req_slot     (ref_req_slot),
         .ref_req_x        (ref_req_x[11:0]),
         .ref_req_y        (ref_req_y[11:0]),
+        .ref_req_is_4x4   (ref_req_is_4x4),
         
         .ref_resp_valid   (ref_resp_valid),
         .ref_resp_y_flat  (ref_resp_y_flat),

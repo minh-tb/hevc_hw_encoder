@@ -36,7 +36,7 @@ flowchart TD
     CTU["CTU Partitioning Unit<br/>(ctu_partitioner.v & pu_cu_splitter.v)<br/>MaxCU: 64x64, MaxDepth: 4 (64&rarr;32&rarr;16&rarr;8)"]:::process
 
     %% Prediction Engines
-    Intra["Intra Prediction Subsystem<br/>&bull; intra_rmd.v (35-mode SATD)<br/>&bull; ref_sample_filter.v (3-tap filter)<br/>&bull; intra_pred_top.v (Planar, DC, Angular)"]:::process
+    Intra["Intra Prediction Subsystem<br/>&bull; intra_rmd.v (4-mode Luma 4x4-tiled SATD + 5-cand Chroma)<br/>&bull; ref_sample_filter.v (3-tap filter)<br/>&bull; intra_pred_top.v (35-mode Planar, DC, Angular)"]:::process
 
     Inter["Inter Prediction Subsystem<br/>&bull; mvp_predictor.v (AMVP L0/L1)<br/>&bull; tz_search.v (Diamond/Raster Integer ME)<br/>&bull; fme_search.v (Quarter-pel Fractional ME)<br/>&bull; mc_unit.v (8-tap/4-tap Sub-pel Filter)"]:::process
 
@@ -51,7 +51,7 @@ flowchart TD
 
     %% Decoupled Entropy Branch
     CoeffBuf[("Coefficient SRAM Buffer<br/>(coeff_buffer.v)<br/>Decouples Recon from CABAC")]:::storage
-    Entropy["CABAC Entropy Coding Engine<br/>(cabac_enc_top.v & nal_writer.v)<br/>154 Contexts, M-Coder, Byte Packing"]:::process
+    Entropy["CABAC Entropy Coding Engine<br/>(cabac_enc_top.v &amp; nal_writer.v)<br/>186 Contexts, ctu_bin_ram Drain, M-Coder"]:::process
 
     %% Reconstruction Branch (Critical Path)
     IQ["Inverse Quantization<br/>(inv_quant.v)"]:::process

@@ -16,7 +16,8 @@ module hevc_encoder_top #(
     parameter GOP_STRUCTURE       = `DEFAULT_GOP_STRUCTURE,  // 0: IPP, 1: IPBB (Low-Delay B), 2: Hierarchical B
     parameter [5:0]  BASE_QP      = `QP_DEFAULT,
     parameter        RC_ENABLE    = `RATE_CONTROL,
-    parameter [15:0] TARGET_BITRATE_KBPS = `TARGET_BITRATE_DEFAULT
+    parameter [15:0] TARGET_BITRATE_KBPS = `TARGET_BITRATE_DEFAULT,
+    parameter        FAST_EARLY_CU_SPLIT = 0
 )(
     input  wire         clk,
     input  wire         rst_n,
@@ -1034,7 +1035,14 @@ module hevc_encoder_top #(
     wire        eval_intra_start;
     wire        eval_inter_start;
 
-    mode_decision u_mode_decision (
+    // Scale 4x4 SAD to CU area when FAST_EARLY_CU_SPLIT=1, or 64x64 reference baseline when 0
+    wire [31:0] md_inter_rd_cost = FAST_EARLY_CU_SPLIT
+        ? ({20'd0, search_best_sad} << ((4'd4 - {2'd0, cu_depth[1:0]}) << 1))
+        : {12'd0, search_best_sad, 8'd0};
+
+    mode_decision #(
+        .FAST_EARLY_CU_SPLIT(FAST_EARLY_CU_SPLIT)
+    ) u_mode_decision (
         .clk              (clk),
         .rst_n            (rst_n),
         .split_valid      (split_valid),
@@ -1050,8 +1058,7 @@ module hevc_encoder_top #(
         .intra_rd_cost    (rmd_best_cost),
         .intra_best_mode  (rmd_best_mode),
         .inter_cost_valid (search_done),      // From tz_search
-        // Scale 4x4 SAD to 64x64 CU area: multiply by (64/4)^2 = 256 = <<8
-        .inter_rd_cost    ({12'd0, search_best_sad, 8'd0}),
+        .inter_rd_cost    (md_inter_rd_cost),
         .inter_best_mv_x  (search_best_mv_x), // FME outputs 12-bit quarter-pel directly
         .inter_best_mv_y  (search_best_mv_y),
         
@@ -1650,7 +1657,7 @@ module hevc_encoder_top #(
     end
 
     wire [11:0] abs_top_x_raw = is_luma_comp ? ({6'd0, latched_cu_ctu_x, 6'd0} + {5'd0, top_col_effective}) :
-                                               ({7'd0, latched_cu_ctu_x, 5'd0} + {6'd0, top_col_effective[4:0]});
+                                               ({7'd0, latched_cu_ctu_x, 5'd0} + {5'd0, top_col_effective});
     wire [11:0] abs_ref_top_x = is_luma_comp ? 
         ((abs_top_x_raw < FRAME_WIDTH) ? abs_top_x_raw : (FRAME_WIDTH - 12'd1)) :
         ((abs_top_x_raw < (FRAME_WIDTH/2)) ? abs_top_x_raw : ((FRAME_WIDTH/2) - 12'd1));
@@ -1865,7 +1872,7 @@ module hevc_encoder_top #(
     wire [5:0] rmd_left_row_c_effective = rmd_left_row_c_use_unclamped ? rmd_left_row_c_unclamped : ({1'b0, rmd_latched_pu_y_c} + rmd_N_c - 6'd1);
     wire [4:0] rmd_left_row_c_clamped = (rmd_left_row_c_effective <= 6'd31) ? rmd_left_row_c_effective[4:0] : (rmd_latched_pu_y_c + rmd_N_c[4:0] - 5'd1);
 
-    wire [11:0] rmd_abs_top_x_c_raw = {7'd0, rmd_latched_ctu_x, 5'd0} + {7'd0, rmd_top_col_c_effective[4:0]};
+    wire [11:0] rmd_abs_top_x_c_raw = {7'd0, rmd_latched_ctu_x, 5'd0} + {6'd0, rmd_top_col_c_effective};
     wire [11:0] rmd_abs_ref_top_x_c = (rmd_abs_top_x_c_raw < (FRAME_WIDTH/2)) ? rmd_abs_top_x_c_raw : ((FRAME_WIDTH/2) - 12'd1);
     wire [11:0] rmd_abs_ref_corner_x_c = {7'd0, rmd_latched_ctu_x, 5'd0} + {7'd0, rmd_latched_pu_x_c} - 12'd1;
     wire [11:0] rmd_abs_ctu_corner_x_c = {7'd0, rmd_latched_ctu_x, 5'd0} - 12'd1;
@@ -2167,24 +2174,115 @@ module hevc_encoder_top #(
     end
     // synthesis translate_on
 
-    always @(posedge clk) begin
-        if (filter_out_valid && filter_out_ready) begin
-            if (filter_out_comp == 2'd0) begin
-                dpb_luma_ram_l0[{latched_wr_slot[0], filter_out_y[6:0], filter_out_x[6:0]}] <= filter_out_pixel;
-                dpb_luma_ram_l1[{latched_wr_slot[0], filter_out_y[6:0], filter_out_x[6:0]}] <= filter_out_pixel;
-            end else if (filter_out_comp == 2'd1) begin
-                dpb_cb_ram_l0[{latched_wr_slot[0], filter_out_y[5:0], filter_out_x[5:0]}] <= filter_out_pixel;
-                dpb_cb_ram_l1[{latched_wr_slot[0], filter_out_y[5:0], filter_out_x[5:0]}] <= filter_out_pixel;
-            end else if (filter_out_comp == 2'd2) begin
-                dpb_cr_ram_l0[{latched_wr_slot[0], filter_out_y[5:0], filter_out_x[5:0]}] <= filter_out_pixel;
-                dpb_cr_ram_l1[{latched_wr_slot[0], filter_out_y[5:0], filter_out_x[5:0]}] <= filter_out_pixel;
+    reg [9:0] dpb_rd_luma_l0_a, dpb_rd_luma_l1_a;
+    reg [9:0] dpb_rd_cb_l0_a,   dpb_rd_cb_l1_a;
+    reg [9:0] dpb_rd_cr_l0_a,   dpb_rd_cr_l1_a;
+    reg [9:0] dpb_rd_luma_l0_b, dpb_rd_luma_l1_b;
+    reg [9:0] dpb_rd_cb_l0_b,   dpb_rd_cb_l1_b;
+    reg [9:0] dpb_rd_cr_l0_b,   dpb_rd_cr_l1_b;
+
+    wire [13:0] mc_rd_addr_a;
+    wire [13:0] mc_rd_addr_b;
+
+    // Reference slot index from GOP controller (declared before DPB BRAM read ports)
+    wire [2:0] ref_slot_0 = ref_l0[2:0];
+    wire [2:0] ref_slot_1 = ref_l1[2:0];
+
+    // 1-cycle registered DPB write pipeline breaks the deblock->SAO->DPB BRAM critical path
+    // and works with Port-A time-multiplexed R/W to eliminate DPB BRAM replication.
+    reg        dpb_wr_luma_d1;
+    reg        dpb_wr_cb_d1;
+    reg        dpb_wr_cr_d1;
+    reg        dpb_wr_slot_d1;
+    reg [9:0]  dpb_wr_pixel_d1;
+    reg [6:0]  dpb_wr_x_d1;
+    reg [6:0]  dpb_wr_y_d1;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            dpb_wr_luma_d1  <= 1'b0;
+            dpb_wr_cb_d1    <= 1'b0;
+            dpb_wr_cr_d1    <= 1'b0;
+            dpb_wr_slot_d1  <= 1'b0;
+            dpb_wr_pixel_d1 <= 10'd0;
+            dpb_wr_x_d1     <= 7'd0;
+            dpb_wr_y_d1     <= 7'd0;
+        end else begin
+            dpb_wr_luma_d1  <= filter_out_valid && filter_out_ready && (filter_out_comp == 2'd0);
+            dpb_wr_cb_d1    <= filter_out_valid && filter_out_ready && (filter_out_comp == 2'd1);
+            dpb_wr_cr_d1    <= filter_out_valid && filter_out_ready && (filter_out_comp == 2'd2);
+            if (filter_out_valid && filter_out_ready) begin
+                dpb_wr_slot_d1  <= latched_wr_slot[0];
+                dpb_wr_pixel_d1 <= filter_out_pixel;
+                dpb_wr_x_d1     <= filter_out_x[6:0];
+                dpb_wr_y_d1     <= filter_out_y[6:0];
             end
         end
     end
 
-    // Reference slot index from GOP controller
-    wire [2:0] ref_slot_0 = ref_l0[2:0];
-    wire [2:0] ref_slot_1 = ref_l1[2:0];
+    // Single muxed Port-A address per DPB RAM enforces True Dual-Port (1W/R + 1R, 0 extra BRAMs)
+    wire [14:0] dpb_luma_addr_l0_a = dpb_wr_luma_d1
+        ? {dpb_wr_slot_d1, dpb_wr_y_d1[6:0], dpb_wr_x_d1[6:0]}
+        : {ref_slot_0[0],  mc_rd_addr_a[13:0]};
+    wire [14:0] dpb_luma_addr_l1_a = dpb_wr_luma_d1
+        ? {dpb_wr_slot_d1, dpb_wr_y_d1[6:0], dpb_wr_x_d1[6:0]}
+        : {ref_slot_1[0],  mc_rd_addr_a[13:0]};
+    wire [12:0] dpb_cb_addr_l0_a = dpb_wr_cb_d1
+        ? {dpb_wr_slot_d1, dpb_wr_y_d1[5:0], dpb_wr_x_d1[5:0]}
+        : {ref_slot_0[0],  mc_rd_addr_a[11:0]};
+    wire [12:0] dpb_cb_addr_l1_a = dpb_wr_cb_d1
+        ? {dpb_wr_slot_d1, dpb_wr_y_d1[5:0], dpb_wr_x_d1[5:0]}
+        : {ref_slot_1[0],  mc_rd_addr_a[11:0]};
+    wire [12:0] dpb_cr_addr_l0_a = dpb_wr_cr_d1
+        ? {dpb_wr_slot_d1, dpb_wr_y_d1[5:0], dpb_wr_x_d1[5:0]}
+        : {ref_slot_0[0],  mc_rd_addr_a[11:0]};
+    wire [12:0] dpb_cr_addr_l1_a = dpb_wr_cr_d1
+        ? {dpb_wr_slot_d1, dpb_wr_y_d1[5:0], dpb_wr_x_d1[5:0]}
+        : {ref_slot_1[0],  mc_rd_addr_a[11:0]};
+
+    // Port A: Time-multiplexed Write / Synchronous Read A (True Dual-Port BRAM)
+    always @(posedge clk) begin
+        if (dpb_wr_luma_d1)
+            dpb_luma_ram_l0[dpb_luma_addr_l0_a] <= dpb_wr_pixel_d1;
+        else
+            dpb_rd_luma_l0_a <= dpb_luma_ram_l0[dpb_luma_addr_l0_a];
+
+        if (dpb_wr_luma_d1)
+            dpb_luma_ram_l1[dpb_luma_addr_l1_a] <= dpb_wr_pixel_d1;
+        else
+            dpb_rd_luma_l1_a <= dpb_luma_ram_l1[dpb_luma_addr_l1_a];
+
+        if (dpb_wr_cb_d1)
+            dpb_cb_ram_l0[dpb_cb_addr_l0_a] <= dpb_wr_pixel_d1;
+        else
+            dpb_rd_cb_l0_a <= dpb_cb_ram_l0[dpb_cb_addr_l0_a];
+
+        if (dpb_wr_cb_d1)
+            dpb_cb_ram_l1[dpb_cb_addr_l1_a] <= dpb_wr_pixel_d1;
+        else
+            dpb_rd_cb_l1_a <= dpb_cb_ram_l1[dpb_cb_addr_l1_a];
+
+        if (dpb_wr_cr_d1)
+            dpb_cr_ram_l0[dpb_cr_addr_l0_a] <= dpb_wr_pixel_d1;
+        else
+            dpb_rd_cr_l0_a <= dpb_cr_ram_l0[dpb_cr_addr_l0_a];
+
+        if (dpb_wr_cr_d1)
+            dpb_cr_ram_l1[dpb_cr_addr_l1_a] <= dpb_wr_pixel_d1;
+        else
+            dpb_rd_cr_l1_a <= dpb_cr_ram_l1[dpb_cr_addr_l1_a];
+    end
+
+    // Port B: Independent Synchronous Read B (0 extra BRAM tiles)
+    always @(posedge clk) begin
+        dpb_rd_luma_l0_b <= dpb_luma_ram_l0[{ref_slot_0[0], mc_rd_addr_b[13:0]}];
+        dpb_rd_luma_l1_b <= dpb_luma_ram_l1[{ref_slot_1[0], mc_rd_addr_b[13:0]}];
+        dpb_rd_cb_l0_b   <= dpb_cb_ram_l0[{ref_slot_0[0], mc_rd_addr_b[11:0]}];
+        dpb_rd_cb_l1_b   <= dpb_cb_ram_l1[{ref_slot_1[0], mc_rd_addr_b[11:0]}];
+        dpb_rd_cr_l0_b   <= dpb_cr_ram_l0[{ref_slot_0[0], mc_rd_addr_b[11:0]}];
+        dpb_rd_cr_l1_b   <= dpb_cr_ram_l1[{ref_slot_1[0], mc_rd_addr_b[11:0]}];
+    end
+
     wire is_bi_pred = (ctu_slice_type == 2'd0); // B-slice: Average L0 and L1
 
     function automatic [9:0] clip_bd10;
@@ -2225,28 +2323,17 @@ module hevc_encoder_top #(
     // Trigger mc_window_fetch on inter TU accept (registered by 1 cycle so reg_tu_* and mc_base_* are updated)
     reg mc_fetch_start;
     wire mc_fetch_busy;
-    wire [13:0] mc_rd_addr;
-    wire [9:0]  mc_rd_data_l0;
-    wire [9:0]  mc_rd_data_l1;
+    wire [9:0]  mc_rd_data_l0_a = (reg_tu_comp == 2'd0) ? dpb_rd_luma_l0_a :
+                                  (reg_tu_comp == 2'd1) ? dpb_rd_cb_l0_a   : dpb_rd_cr_l0_a;
+    wire [9:0]  mc_rd_data_l0_b = (reg_tu_comp == 2'd0) ? dpb_rd_luma_l0_b :
+                                  (reg_tu_comp == 2'd1) ? dpb_rd_cb_l0_b   : dpb_rd_cr_l0_b;
+    wire [9:0]  mc_rd_data_l1_a = (reg_tu_comp == 2'd0) ? dpb_rd_luma_l1_a :
+                                  (reg_tu_comp == 2'd1) ? dpb_rd_cb_l1_a   : dpb_rd_cr_l1_a;
+    wire [9:0]  mc_rd_data_l1_b = (reg_tu_comp == 2'd0) ? dpb_rd_luma_l1_b :
+                                  (reg_tu_comp == 2'd1) ? dpb_rd_cb_l1_b   : dpb_rd_cr_l1_b;
 
-    // Synchronous DPB RAM read ports (1-cycle BRAM read latency)
-    reg [9:0] dpb_rd_luma_l0, dpb_rd_luma_l1;
-    reg [9:0] dpb_rd_cb_l0,   dpb_rd_cb_l1;
-    reg [9:0] dpb_rd_cr_l0,   dpb_rd_cr_l1;
-
-    always @(posedge clk) begin
-        dpb_rd_luma_l0 <= dpb_luma_ram_l0[{ref_slot_0[0], mc_rd_addr[13:0]}];
-        dpb_rd_luma_l1 <= dpb_luma_ram_l1[{ref_slot_1[0], mc_rd_addr[13:0]}];
-        dpb_rd_cb_l0   <= dpb_cb_ram_l0[{ref_slot_0[0], mc_rd_addr[11:0]}];
-        dpb_rd_cb_l1   <= dpb_cb_ram_l1[{ref_slot_1[0], mc_rd_addr[11:0]}];
-        dpb_rd_cr_l0   <= dpb_cr_ram_l0[{ref_slot_0[0], mc_rd_addr[11:0]}];
-        dpb_rd_cr_l1   <= dpb_cr_ram_l1[{ref_slot_1[0], mc_rd_addr[11:0]}];
-    end
-
-    assign mc_rd_data_l0 = (reg_tu_comp == 2'd0) ? dpb_rd_luma_l0 :
-                           (reg_tu_comp == 2'd1) ? dpb_rd_cb_l0   : dpb_rd_cr_l0;
-    assign mc_rd_data_l1 = (reg_tu_comp == 2'd0) ? dpb_rd_luma_l1 :
-                           (reg_tu_comp == 2'd1) ? dpb_rd_cb_l1   : dpb_rd_cr_l1;
+    wire [2:0]  mc_frac_x = (reg_tu_comp == 2'd0) ? {1'b0, luma_frac_x} : chroma_frac_x;
+    wire [2:0]  mc_frac_y = (reg_tu_comp == 2'd0) ? {1'b0, luma_frac_y} : chroma_frac_y;
 
     // Sliding-column window DPB fetch engine
     wire         win_valid;
@@ -2255,6 +2342,11 @@ module hevc_encoder_top #(
     wire [5:0]   win_x;
     wire [5:0]   win_y;
     wire         win_last;
+
+    // Sliding-column window DPB fetch engine (stalls Stage-1 read when Port A writes same comp)
+    wire mc_dpb_wr_collision = (reg_tu_comp == 2'd0) ? dpb_wr_luma_d1 :
+                               (reg_tu_comp == 2'd1) ? dpb_wr_cb_d1   :
+                                                       dpb_wr_cr_d1;
 
     mc_window_fetch #(
         .PW(10)
@@ -2266,9 +2358,15 @@ module hevc_encoder_top #(
         .tu_size_log2(reg_tu_size_log2),
         .base_x      (mc_base_x),
         .base_y      (mc_base_y),
-        .rd_addr     (mc_rd_addr),
-        .rd_data_l0  (mc_rd_data_l0),
-        .rd_data_l1  (mc_rd_data_l1),
+        .frac_x      (mc_frac_x),
+        .frac_y      (mc_frac_y),
+        .rd_hold     (mc_dpb_wr_collision),
+        .rd_addr_a   (mc_rd_addr_a),
+        .rd_addr_b   (mc_rd_addr_b),
+        .rd_data_l0_a(mc_rd_data_l0_a),
+        .rd_data_l0_b(mc_rd_data_l0_b),
+        .rd_data_l1_a(mc_rd_data_l1_a),
+        .rd_data_l1_b(mc_rd_data_l1_b),
         .win_valid   (win_valid),
         .win_l0_flat (win_l0_flat),
         .win_l1_flat (win_l1_flat),
@@ -2907,6 +3005,7 @@ module hevc_encoder_top #(
         .orig_in_u        (orig_u_data_q),
         .orig_in_v        (orig_v_data_q),
         .sao_enable       (cfg_sao_enable),
+        .ctu_qp           (ctu_qp),
         .sao_stats_done   (inloop_sao_stats_done),
         .map_update_valid (map_update_valid_r),
         .map_update_cbf_only(map_update_cbf_only_r),
@@ -3070,34 +3169,60 @@ module hevc_encoder_top #(
     reg         cabac_coeff_ready;
     reg         cu_cbf_latched;
     reg [9:0]   tu_last_sig_idx;
-    
+    reg [63:0]  tu_cg_nonzero_mask_y;
+    reg [15:0]  tu_cg_nonzero_mask_cb;
+    reg [15:0]  tu_cg_nonzero_mask_cr;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            cabac_coeff_ready <= 1'b0;
-            cu_cbf_latched    <= 1'b0;
-            tu_last_sig_idx   <= 10'd0;
-            tu_has_nonzero    <= 1'b0;
+            cabac_coeff_ready     <= 1'b0;
+            cu_cbf_latched        <= 1'b0;
+            tu_last_sig_idx       <= 10'd0;
+            tu_has_nonzero        <= 1'b0;
+            tu_cg_nonzero_mask_y  <= 64'd0;
+            tu_cg_nonzero_mask_cb <= 16'd0;
+            tu_cg_nonzero_mask_cr <= 16'd0;
         end else begin
-            if (trigger_leaf_cu || (cabac_state == CABAC_WAIT_COEFF_DONE && cabac_coeff_done)) begin
+            if (trigger_leaf_cu) begin
+                cabac_coeff_ready     <= 1'b0;
+                tu_last_sig_idx       <= 10'd0;
+                tu_has_nonzero        <= 1'b0;
+                cu_cbf_latched        <= 1'b0;
+                tu_cg_nonzero_mask_y  <= 64'd0;
+                tu_cg_nonzero_mask_cb <= 16'd0;
+                tu_cg_nonzero_mask_cr <= 16'd0;
+            end else if (cabac_state == CABAC_WAIT_COEFF_DONE && cabac_coeff_done) begin
                 cabac_coeff_ready <= 1'b0;
                 tu_last_sig_idx   <= 10'd0;
                 tu_has_nonzero    <= 1'b0;
                 cu_cbf_latched    <= 1'b0;
+                if (reg_tu_comp == 2'd0)      tu_cg_nonzero_mask_y  <= 64'd0;
+                else if (reg_tu_comp == 2'd1) tu_cg_nonzero_mask_cb <= 16'd0;
+                else                          tu_cg_nonzero_mask_cr <= 16'd0;
             end else if (quant_out_valid) begin
                 if (quant_out_level != 16'd0) begin
                     tu_last_sig_idx <= quant_out_scan_idx;
                     tu_has_nonzero  <= 1'b1;
-                    // $display("Time=%0t: [HEVC_TOP] Non-zero coeff! comp=%0d, scan_idx=%0d, level=%0d", $time, reg_tu_comp, quant_out_scan_idx, quant_out_level);
+                    if (reg_tu_comp == 2'd0)
+                        tu_cg_nonzero_mask_y[quant_out_scan_idx[9:4]]  <= 1'b1;
+                    else if (reg_tu_comp == 2'd1)
+                        tu_cg_nonzero_mask_cb[quant_out_scan_idx[7:4]] <= 1'b1;
+                    else
+                        tu_cg_nonzero_mask_cr[quant_out_scan_idx[7:4]] <= 1'b1;
                 end
                 cu_cbf_latched <= cu_cbf_latched | quant_out_cbf;
             end
-            
+
             if (quant_out_valid && quant_out_last) begin
                 cabac_coeff_ready <= 1'b1;
                 $display("Time=%0t: [HEVC_TOP] TU quant done! comp=%0d, has_nonzero=%0d, last_idx=%0d", $time, reg_tu_comp, tu_has_nonzero | (quant_out_level != 16'd0), (quant_out_level != 16'd0) ? quant_out_scan_idx : tu_last_sig_idx);
             end
         end
     end
+
+    wire [63:0] cabac_tu_cg_nonzero_mask = (reg_tu_comp == 2'd0) ? tu_cg_nonzero_mask_y :
+                                           (reg_tu_comp == 2'd1) ? {48'd0, tu_cg_nonzero_mask_cb} :
+                                                                   {48'd0, tu_cg_nonzero_mask_cr};
 
     // In HEVC, skip_flag=1 is exclusively for Merge mode (no residual, MV from merge list).
     // Since this encoder uses AMVP (not Merge), skip_flag must always be 0 per spec.
@@ -3558,6 +3683,8 @@ module hevc_encoder_top #(
 `ifdef REMEDIATION
         .coeff_scan_mode     (scan_mode),
 `endif
+        .tu_cg_mask_en       (1'b1),
+        .tu_cg_nonzero_mask  (cabac_tu_cg_nonzero_mask),
         .coeff_rd_en         (coeff_buf_re),
         .coeff_rd_addr       (coeff_buf_raddr),
         .coeff_rd_data       (coeff_buf_rdata),

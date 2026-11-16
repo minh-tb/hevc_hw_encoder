@@ -6,11 +6,12 @@
 
 ```
 cabac_enc_top
- ├── ctx_model_store    (154 × 7-bit dual-port SRAM, slice init, context read/write)
+ ├── ctx_model_store    (186 × 7-bit Context RAM, ctx 0..185, 186-cycle slice init, read/write)
+ ├── ctu_bin_ram        (8192 × 10-bit BRAM, 2 RAMB36 + 1 RAMB18, CTU-delayed bin queue w/ drain_prefetched_valid)
  ├── bin_encoder        (Context address lookup, MPS/LPS dispatch, bypass multiplexer)
  ├── range_coder        (M-coder arithmetic engine, renormalization, byte accumulation)
  ├── syntax_cu          (split_flag, skip_flag, merge_flag, pred_mode, part_mode)
- ├── syntax_pred        (inter_dir, ref_idx, mvp_flag, MVD binarization)
+ ├── syntax_pred        (inter_dir, ref_idx, mvp_flag, MVD binarization, 5-cand chroma intra)
  ├── syntax_coeff       (last_sig_pos, sig_coeff_map, gt1, gt2, signs, levels)
  └── syntax_sao         (sao_merge, sao_type, band_pos, bo_offsets, eo_classes)
 ```
@@ -31,7 +32,7 @@ flowchart TD
     End(["Kết thúc NALU (flush_done asserted)"])
 
     %% State 0: Init
-    InitSRAM["1. Khởi tạo Context SRAM (ctx_model_store.v):<br/>Duyệt qua 154 địa chỉ context<br/>Tính pStateIdx & valMPS từ QP và Slice Type (154 chu kỳ)"]
+    InitSRAM["1. Khởi tạo Context SRAM (ctx_model_store.v):<br/>Duyệt qua 186 địa chỉ context (ctx 0..185)<br/>Tính pStateIdx & valMPS từ QP và Slice Type (186 chu kỳ)"]
 
     WaitReq{"Trạng thái CABAC FSM<br/>(cabac_state)"}
 
@@ -54,10 +55,10 @@ flowchart TD
         DoneCoeff["Khẳng định coeff_done"]
     end
 
-    subgraph SAO_Stage ["Mã hóa Cú pháp SAO (syntax_sao.v) — Đầu CTU (Clause 7.3.8.1)"]
-        ReqSAO["Nhận sao_req tại đầu mỗi CTU trước Coding Tree"]
-        EncodeSAO["Mã hóa merge_flags (gated ctu_x/y) &rarr; sao_type &rarr; offsets &rarr; band_pos"]
-        DoneSAO["Khẳng định sao_done &rarr; Kích hoạt Root CU"]
+    subgraph SAO_Stage ["Mã hóa Cú pháp SAO &amp; Xả CTU Bin RAM (syntax_sao.v / ctu_bin_ram)"]
+        ReqSAO["Nhận sao_req sau khi xong S_STATS của CTU"]
+        EncodeSAO["Phát sao(rx, ry) trước: merge_flags (gated ctu_x/y) &rarr; sao_type &rarr; offsets &rarr; band_pos/eo_class"]
+        DoneSAO["Khẳng định sao_done &rarr; Xả ctu_bin_ram (drain_prefetched_valid) sang bin_encoder"]
     end
 
     subgraph Term_Stage ["6. Terminating & Flush (range_coder.v)"]
@@ -88,6 +89,7 @@ Arbitration across the syntax modules guarantees **zero bus conflict**:
 1. Only one `syntax_*` engine asserts `bin_valid` at any given cycle.
 2. `bin_rdy` from `range_coder` is broadcast back to all syntax units; when deasserted (e.g. during multi-cycle renormalization), the active syntax module stalls its internal bit pointer.
 3. Quantized coefficient reading from `coeff_buffer.v` uses an asynchronous prefetch address `coeff_rd_addr[11:0]` with single-cycle read latency.
+4. **CTU-Delayed Bitstream Serialization & BRAM Drain Alignment**: When `ctu_sao_delay_en` is active, `coding_quadtree()` bins from `syntax_cu`, `syntax_pred`, and `syntax_coeff` are buffered into `ctu_bin_ram` (`8192 × 10-bit`, synthesized to `2 RAMB36 + 1 RAMB18`; write enable `bin_ram_we = eff_ctu_sao_delay_en && cu_bin_valid && cu_bin_rdy`) instead of immediately driving `bin_encoder`. After `sao_stats` finishes and `syntax_sao` emits `sao(rx, ry)` first (Clause 7.3.8.1), `ctu_bin_drain_en` drains `ctu_bin_ram` through `bin_encoder` $\to$ `range_coder` with `drain_prefetched_valid` tracking valid synchronous 1-cycle BRAM read alignment (`bin_rd_addr_mux < bin_wr_ptr`, guarding `drain_bin_valid`), asserting `ctu_bin_drain_done` once `!drain_has_data && !bin_ram_we`.
 
 ---
 
@@ -96,8 +98,8 @@ Arbitration across the syntax modules guarantees **zero bus conflict**:
 | Port Group | Port Name | Dir | Width | Description |
 |:---|:---|:---:|:---:|:---|
 | **Global** | `clk`, `rst_n` | In | 1 | Clock and active-low reset. |
-| **Slice Init** | `slice_init` | In | 1 | Pulse to trigger 154-cycle context initialization. |
-| | `slice_type` | In | 2 | 0: I, 1: P, 2: B. |
+| **Slice Init** | `slice_init` | In | 1 | Pulse to trigger 186-cycle context initialization (`ctx 0..185`, `N_CTX = 186`). |
+| | `slice_type` | In | 2 | Under `` `define REMEDIATION `` (HEVC Table 7-23): `0: B`, `1: P`, `2: I` (driven by `gop_frame_slice_type`). |
 | | `qp_in` | In | 7 | Quantization parameter for context initialization. |
 | **CU Interface**| `cu_req`, `cu_done`| In/Out | 1 | Handshake for CU syntax generation. |
 | | `cu_depth`, `cu_is_split` | In | 2, 1 | CU depth and split status. |
@@ -111,8 +113,13 @@ Arbitration across the syntax modules guarantees **zero bus conflict**:
 | | `coeff_tu_size_log2` | In | 3 | TU size ($2=4\times 4..5=32\times 32$). |
 | | `coeff_tu_cbf` | In | 1 | Coded Block Flag. |
 | | `coeff_last_sig_pos` | In | 10 | Raster position of last non-zero coefficient. |
+| | `coeff_scan_mode` | In | 2 | Under `` `define REMEDIATION ``: MDCS scan (`0: diag, 1: horiz, 2: vert`). |
 | | `coeff_rd_addr`, `coeff_rd_data` | Out/In | 12, 16 | SRAM interface to on-chip `coeff_buffer.v`. |
-| **SAO Interface** | `sao_req`, `sao_done` | In/Out | 1 | Handshake for SAO parameters. |
+| **SAO & CTU Delay** | `ctu_x`, `ctu_y` | In | 6 | Current CTU coordinates gating `sao_merge_left/up_flag`. |
+| | `sao_req`, `sao_done` | In/Out | 1 | Handshake for CTU-first SAO parameters (`sao_type`, `sao_eo_class`, `sao_eo_offset`, `sao_band_pos`, `sao_bo_offset`). |
+| | `ctu_sao_delay_en`, `ctu_bin_drain_en` | In | 1 | Routes CU/Pred/Coeff bins into `ctu_bin_ram` (`8K x 10`) and enables post-SAO BRAM drain (`drain_prefetched_valid`). |
+| | `ctu_bin_drain_done` | Out | 1 | High when `ctu_bin_ram` drain completes (`!drain_has_data && !bin_ram_we`). |
 | **Term/Flush** | `trm_req`, `flush_req` | In | 1 | Terminating bin request and end-of-slice flush. |
 | | `flush_done` | Out | 1 | Strobe asserted when range coder completes final byte flush. |
 | **Byte Output** | `byte_valid`, `byte_out` | Out | 1, 8 | Encoded byte stream to `nal_writer.v`. |
+| **Status** | `enc_busy`, `ctx_init_busy` | Out | 1 | Coder busy flag and 186-cycle context initialization busy indicator. |

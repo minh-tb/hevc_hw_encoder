@@ -26,10 +26,16 @@ module tb_mc_window_fetch;
     reg [2:0]             tu_size_log2;
     reg signed [12:0]     base_x;
     reg signed [12:0]     base_y;
+    reg [2:0]             frac_x;
+    reg [2:0]             frac_y;
+    reg                   rd_hold;
 
-    wire [13:0]           rd_addr;
-    reg  [PW-1:0]         rd_data_l0;
-    reg  [PW-1:0]         rd_data_l1;
+    wire [13:0]           rd_addr_a;
+    wire [13:0]           rd_addr_b;
+    reg  [PW-1:0]         rd_data_l0_a;
+    reg  [PW-1:0]         rd_data_l0_b;
+    reg  [PW-1:0]         rd_data_l1_a;
+    reg  [PW-1:0]         rd_data_l1_b;
 
     wire                  win_valid;
     wire [PW*64-1:0]      win_l0_flat;
@@ -54,9 +60,15 @@ module tb_mc_window_fetch;
         .tu_size_log2 (tu_size_log2),
         .base_x       (base_x),
         .base_y       (base_y),
-        .rd_addr      (rd_addr),
-        .rd_data_l0   (rd_data_l0),
-        .rd_data_l1   (rd_data_l1),
+        .frac_x       (frac_x),
+        .frac_y       (frac_y),
+        .rd_hold      (rd_hold),
+        .rd_addr_a    (rd_addr_a),
+        .rd_addr_b    (rd_addr_b),
+        .rd_data_l0_a (rd_data_l0_a),
+        .rd_data_l0_b (rd_data_l0_b),
+        .rd_data_l1_a (rd_data_l1_a),
+        .rd_data_l1_b (rd_data_l1_b),
         .win_valid    (win_valid),
         .win_l0_flat  (win_l0_flat),
         .win_l1_flat  (win_l1_flat),
@@ -69,10 +81,19 @@ module tb_mc_window_fetch;
     // Clock generator: 10 ns (100 MHz)
     always #5 clk = ~clk;
 
-    // 1-cycle synchronous BRAM read model
+    // 1-cycle synchronous True Dual-Port BRAM read model (Port A corrupts to X when rd_hold=1)
     always @(posedge clk) begin
-        rd_data_l0 <= dpb_l0[rd_addr];
-        rd_data_l1 <= dpb_l1[rd_addr];
+        if (rd_hold === 1'b1) begin
+            rd_data_l0_a <= {PW{1'bx}};
+            rd_data_l1_a <= {PW{1'bx}};
+            rd_data_l0_b <= dpb_l0[rd_addr_b];
+            rd_data_l1_b <= dpb_l1[rd_addr_b];
+        end else begin
+            rd_data_l0_a <= dpb_l0[rd_addr_a];
+            rd_data_l0_b <= dpb_l0[rd_addr_b];
+            rd_data_l1_a <= dpb_l1[rd_addr_a];
+            rd_data_l1_b <= dpb_l1[rd_addr_b];
+        end
     end
 
     // Clamping helpers
@@ -220,6 +241,256 @@ module tb_mc_window_fetch;
         end
     endtask
 
+    task automatic run_tu_phase_test;
+        input [1:0]             test_comp;
+        input [2:0]             test_size_log2;
+        input signed [12:0]     test_base_x;
+        input signed [12:0]     test_base_y;
+        input [2:0]             test_fx;
+        input [2:0]             test_fy;
+        integer exp_x, exp_y, dy, dx, cyc_cnt;
+        integer n_pixels;
+        reg [PW*64-1:0] exp_win_l0;
+        reg [PW*64-1:0] exp_win_l1;
+        reg fx_z, fy_z;
+        begin
+            n_pixels = (1 << test_size_log2);
+            fx_z = (test_comp == 2'd0) ? (test_fx[1:0] === 2'd0) : (test_fx === 3'd0);
+            fy_z = (test_comp == 2'd0) ? (test_fy[1:0] === 2'd0) : (test_fy === 3'd0);
+            cyc_cnt = 0;
+
+            @(posedge clk);
+            start        <= 1'b1;
+            comp         <= test_comp;
+            tu_size_log2 <= test_size_log2;
+            base_x       <= test_base_x;
+            base_y       <= test_base_y;
+            frac_x       <= test_fx;
+            frac_y       <= test_fy;
+            @(posedge clk);
+            start        <= 1'b0;
+            cyc_cnt      = 1;
+
+            for (exp_y = 0; exp_y < n_pixels; exp_y = exp_y + 1) begin
+                for (exp_x = 0; exp_x < n_pixels; exp_x = exp_x + 1) begin
+                    while (!win_valid) begin
+                        @(posedge clk);
+                        cyc_cnt = cyc_cnt + 1;
+                    end
+
+                    if (win_x !== exp_x[5:0] || win_y !== exp_y[5:0]) begin
+                        $display("[ERROR] Coordinate mismatch: exp=(%0d,%0d) got=(%0d,%0d) comp=%0d size=%0d fx=%0d fy=%0d",
+                                 exp_x, exp_y, win_x, win_y, test_comp, test_size_log2, test_fx, test_fy);
+                        error_count = error_count + 1;
+                    end
+
+                    if ((exp_x == n_pixels - 1) && (exp_y == n_pixels - 1)) begin
+                        if (!win_last) begin
+                            $display("[ERROR] win_last missing on final sample (%0d,%0d)", exp_x, exp_y);
+                            error_count = error_count + 1;
+                        end
+                    end else if (win_last) begin
+                        $display("[ERROR] win_last asserted prematurely at (%0d,%0d)", exp_x, exp_y);
+                        error_count = error_count + 1;
+                    end
+
+                    exp_win_l0 = get_golden_win(1'b1, test_comp, test_base_x, test_base_y, exp_x[5:0], exp_y[5:0]);
+                    exp_win_l1 = get_golden_win(1'b0, test_comp, test_base_x, test_base_y, exp_x[5:0], exp_y[5:0]);
+
+                    if (test_comp == 2'd0) begin
+                        for (dy = 0; dy < 8; dy = dy + 1) begin
+                            for (dx = 0; dx < 8; dx = dx + 1) begin
+                                if ((fx_z && fy_z && (dx != 3 || dy != 3)) ||
+                                    (!fx_z && fy_z && (dy != 3)) ||
+                                    (fx_z && !fy_z && (dx != 3))) begin
+                                    // Unused taps in 0D/1D mode
+                                end else begin
+                                    if (win_l0_flat[PW*(dy*8+dx) +: PW] !== exp_win_l0[PW*(dy*8+dx) +: PW]) begin
+                                        $display("[ERROR] L0 Luma tap mismatch at (%0d,%0d)[%0d][%0d] fx=%0d fy=%0d got=%0d exp=%0d",
+                                                 exp_x, exp_y, dy, dx, test_fx, test_fy,
+                                                 win_l0_flat[PW*(dy*8+dx) +: PW], exp_win_l0[PW*(dy*8+dx) +: PW]);
+                                        error_count = error_count + 1;
+                                    end
+                                    if (win_l1_flat[PW*(dy*8+dx) +: PW] !== exp_win_l1[PW*(dy*8+dx) +: PW]) begin
+                                        $display("[ERROR] L1 Luma tap mismatch at (%0d,%0d)[%0d][%0d] fx=%0d fy=%0d got=%0d exp=%0d",
+                                                 exp_x, exp_y, dy, dx, test_fx, test_fy,
+                                                 win_l1_flat[PW*(dy*8+dx) +: PW], exp_win_l1[PW*(dy*8+dx) +: PW]);
+                                        error_count = error_count + 1;
+                                    end
+                                end
+                            end
+                        end
+                    end else begin
+                        for (dy = 0; dy < 4; dy = dy + 1) begin
+                            for (dx = 0; dx < 4; dx = dx + 1) begin
+                                if ((fx_z && fy_z && (dx != 1 || dy != 1)) ||
+                                    (!fx_z && fy_z && (dy != 1)) ||
+                                    (fx_z && !fy_z && (dx != 1))) begin
+                                    // Unused taps in 0D/1D mode
+                                end else begin
+                                    if (win_l0_flat[PW*(dy*4+dx) +: PW] !== exp_win_l0[PW*(dy*4+dx) +: PW]) begin
+                                        $display("[ERROR] L0 Chroma tap mismatch at (%0d,%0d)[%0d][%0d] fx=%0d fy=%0d got=%0d exp=%0d",
+                                                 exp_x, exp_y, dy, dx, test_fx, test_fy,
+                                                 win_l0_flat[PW*(dy*4+dx) +: PW], exp_win_l0[PW*(dy*4+dx) +: PW]);
+                                        error_count = error_count + 1;
+                                    end
+                                    if (win_l1_flat[PW*(dy*4+dx) +: PW] !== exp_win_l1[PW*(dy*4+dx) +: PW]) begin
+                                        $display("[ERROR] L1 Chroma tap mismatch at (%0d,%0d)[%0d][%0d] fx=%0d fy=%0d got=%0d exp=%0d",
+                                                 exp_x, exp_y, dy, dx, test_fx, test_fy,
+                                                 win_l1_flat[PW*(dy*4+dx) +: PW], exp_win_l1[PW*(dy*4+dx) +: PW]);
+                                        error_count = error_count + 1;
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    total_samples_verified = total_samples_verified + 1;
+                    @(posedge clk);
+                    cyc_cnt = cyc_cnt + 1;
+                end
+            end
+            $display("[INFO] comp=%0d size=%0dx%0d fx=%0d fy=%0d -> %0d cycles",
+                     test_comp, n_pixels, n_pixels, test_fx, test_fy, cyc_cnt);
+        end
+    endtask
+
+    task automatic run_tu_stall_test;
+        input [1:0]             test_comp;
+        input [2:0]             test_size_log2;
+        input signed [12:0]     test_base_x;
+        input signed [12:0]     test_base_y;
+        input [2:0]             test_fx;
+        input [2:0]             test_fy;
+        input                   stall_first_cyc;
+        integer exp_x, exp_y, dy, dx, cyc_cnt, wait_cnt, stall_cnt;
+        integer n_pixels;
+        reg [PW*64-1:0] exp_win_l0;
+        reg [PW*64-1:0] exp_win_l1;
+        reg fx_z, fy_z;
+        reg [15:0] stall_lfsr;
+        begin
+            n_pixels = (1 << test_size_log2);
+            fx_z = (test_comp == 2'd0) ? (test_fx[1:0] === 2'd0) : (test_fx === 3'd0);
+            fy_z = (test_comp == 2'd0) ? (test_fy[1:0] === 2'd0) : (test_fy === 3'd0);
+            stall_lfsr = 16'hB4E1 ^ {test_comp, test_size_log2, test_fx, test_fy, 5'd19};
+            cyc_cnt = 0;
+            stall_cnt = 0;
+
+            @(posedge clk);
+            start        <= 1'b1;
+            comp         <= test_comp;
+            tu_size_log2 <= test_size_log2;
+            base_x       <= test_base_x;
+            base_y       <= test_base_y;
+            frac_x       <= test_fx;
+            frac_y       <= test_fy;
+            rd_hold      <= stall_first_cyc;
+            if (stall_first_cyc) stall_cnt = stall_cnt + 1;
+            @(posedge clk);
+            start        <= 1'b0;
+            cyc_cnt      = 1;
+
+            for (exp_y = 0; exp_y < n_pixels; exp_y = exp_y + 1) begin
+                for (exp_x = 0; exp_x < n_pixels; exp_x = exp_x + 1) begin
+                    wait_cnt = 0;
+                    while (!win_valid) begin
+                        stall_lfsr = {stall_lfsr[14:0], stall_lfsr[15] ^ stall_lfsr[13] ^ stall_lfsr[12] ^ stall_lfsr[10]};
+                        // Include multi-cycle burst stalls and periodic single-cycle stalls, never permanent
+                        rd_hold <= (cyc_cnt < 4 && stall_first_cyc) ? 1'b1 :
+                                   ((stall_lfsr[2:0] == 3'd7) || (stall_lfsr[1:0] == 2'b01));
+                        if ((cyc_cnt < 4 && stall_first_cyc) || (stall_lfsr[2:0] == 3'd7) || (stall_lfsr[1:0] == 2'b01))
+                            stall_cnt = stall_cnt + 1;
+                        @(posedge clk);
+                        cyc_cnt = cyc_cnt + 1;
+                        wait_cnt = wait_cnt + 1;
+                        if (wait_cnt > 500) begin
+                            $display("[FATAL] Timeout waiting for win_valid under rd_hold at (%0d,%0d)", exp_x, exp_y);
+                            error_count = error_count + 1;
+                            $finish;
+                        end
+                    end
+
+                    if (win_x !== exp_x[5:0] || win_y !== exp_y[5:0]) begin
+                        $display("[ERROR] [STALL] Coord mismatch: exp=(%0d,%0d) got=(%0d,%0d) comp=%0d fx=%0d fy=%0d",
+                                 exp_x, exp_y, win_x, win_y, test_comp, test_fx, test_fy);
+                        error_count = error_count + 1;
+                    end
+
+                    if ((exp_x == n_pixels - 1) && (exp_y == n_pixels - 1)) begin
+                        if (!win_last) begin
+                            $display("[ERROR] [STALL] win_last missing on (%0d,%0d)", exp_x, exp_y);
+                            error_count = error_count + 1;
+                        end
+                    end else if (win_last) begin
+                        $display("[ERROR] [STALL] win_last premature on (%0d,%0d)", exp_x, exp_y);
+                        error_count = error_count + 1;
+                    end
+
+                    exp_win_l0 = get_golden_win(1'b1, test_comp, test_base_x, test_base_y, exp_x[5:0], exp_y[5:0]);
+                    exp_win_l1 = get_golden_win(1'b0, test_comp, test_base_x, test_base_y, exp_x[5:0], exp_y[5:0]);
+
+                    if (test_comp == 2'd0) begin
+                        for (dy = 0; dy < 8; dy = dy + 1) begin
+                            for (dx = 0; dx < 8; dx = dx + 1) begin
+                                if ((fx_z && fy_z && (dx != 3 || dy != 3)) ||
+                                    (!fx_z && fy_z && (dy != 3)) ||
+                                    (fx_z && !fy_z && (dx != 3))) begin
+                                end else begin
+                                    if (win_l0_flat[PW*(dy*8+dx) +: PW] !== exp_win_l0[PW*(dy*8+dx) +: PW]) begin
+                                        $display("[ERROR] [STALL] L0 Luma mismatch at (%0d,%0d)[%0d][%0d] got=%0d exp=%0d",
+                                                 exp_x, exp_y, dy, dx,
+                                                 win_l0_flat[PW*(dy*8+dx) +: PW], exp_win_l0[PW*(dy*8+dx) +: PW]);
+                                        error_count = error_count + 1;
+                                    end
+                                    if (win_l1_flat[PW*(dy*8+dx) +: PW] !== exp_win_l1[PW*(dy*8+dx) +: PW]) begin
+                                        $display("[ERROR] [STALL] L1 Luma mismatch at (%0d,%0d)[%0d][%0d] got=%0d exp=%0d",
+                                                 exp_x, exp_y, dy, dx,
+                                                 win_l1_flat[PW*(dy*8+dx) +: PW], exp_win_l1[PW*(dy*8+dx) +: PW]);
+                                        error_count = error_count + 1;
+                                    end
+                                end
+                            end
+                        end
+                    end else begin
+                        for (dy = 0; dy < 4; dy = dy + 1) begin
+                            for (dx = 0; dx < 4; dx = dx + 1) begin
+                                if ((fx_z && fy_z && (dx != 1 || dy != 1)) ||
+                                    (!fx_z && fy_z && (dy != 1)) ||
+                                    (fx_z && !fy_z && (dx != 1))) begin
+                                end else begin
+                                    if (win_l0_flat[PW*(dy*4+dx) +: PW] !== exp_win_l0[PW*(dy*4+dx) +: PW]) begin
+                                        $display("[ERROR] [STALL] L0 Chroma mismatch at (%0d,%0d)[%0d][%0d] got=%0d exp=%0d",
+                                                 exp_x, exp_y, dy, dx,
+                                                 win_l0_flat[PW*(dy*4+dx) +: PW], exp_win_l0[PW*(dy*4+dx) +: PW]);
+                                        error_count = error_count + 1;
+                                    end
+                                    if (win_l1_flat[PW*(dy*4+dx) +: PW] !== exp_win_l1[PW*(dy*4+dx) +: PW]) begin
+                                        $display("[ERROR] [STALL] L1 Chroma mismatch at (%0d,%0d)[%0d][%0d] got=%0d exp=%0d",
+                                                 exp_x, exp_y, dy, dx,
+                                                 win_l1_flat[PW*(dy*4+dx) +: PW], exp_win_l1[PW*(dy*4+dx) +: PW]);
+                                        error_count = error_count + 1;
+                                    end
+                                end
+                            end
+                        end
+                    end
+
+                    total_samples_verified = total_samples_verified + 1;
+                    // Toggle rd_hold on emission cycles too so every pipeline corner gets stressed
+                    stall_lfsr = {stall_lfsr[14:0], stall_lfsr[15] ^ stall_lfsr[13] ^ stall_lfsr[12] ^ stall_lfsr[10]};
+                    rd_hold <= stall_lfsr[0];
+                    if (stall_lfsr[0]) stall_cnt = stall_cnt + 1;
+                    @(posedge clk);
+                    cyc_cnt = cyc_cnt + 1;
+                end
+            end
+            rd_hold <= 1'b0;
+            $display("[INFO] [STALL] comp=%0d size=%0dx%0d fx=%0d fy=%0d -> %0d cycles (%0d stall cycles)",
+                     test_comp, n_pixels, n_pixels, test_fx, test_fy, cyc_cnt, stall_cnt);
+        end
+    endtask
+
     // Simulation sequence
     integer i;
     reg [15:0] lfsr;
@@ -232,6 +503,9 @@ module tb_mc_window_fetch;
         tu_size_log2 = 2;
         base_x = 0;
         base_y = 0;
+        frac_x = 3'bzzz;
+        frac_y = 3'bzzz;
+        rd_hold = 1'b0;
 
         // Fill DPBs with pseudo-random test pattern
         lfsr = 16'hACE1;
@@ -248,9 +522,7 @@ module tb_mc_window_fetch;
 
         $display("=== Starting Exhaustive Unit Test of mc_window_fetch ===");
 
-        // Test Matrix 1: Sweep TU sizes x components x MVs
-        // Sizes: 4x4 (2), 8x8 (3), 16x16 (4)
-        // MVs: (0,0), (-40,-40), (+60,+60), (+3,-5)
+        // Test Matrix 1: Full 2D fallback (unconnected/X frac_x, frac_y) across sizes x MVs
         run_tu_test(2'd0, 3'd2, 13'sd16, 13'sd16);       // Luma 4x4 interior
         run_tu_test(2'd0, 3'd2, -13'sd40, -13'sd40);     // Luma 4x4 negative boundary
         run_tu_test(2'd0, 3'd2, 13'sd120, 13'sd120);     // Luma 4x4 positive boundary
@@ -258,7 +530,7 @@ module tb_mc_window_fetch;
         run_tu_test(2'd0, 3'd3, 13'sd3, -13'sd5);        // Luma 8x8 mixed MV
         run_tu_test(2'd0, 3'd4, 13'sd48, 13'sd48);       // Luma 16x16 interior
 
-        // Chroma components Cb and Cr
+        // Chroma components Cb and Cr (full 2D)
         run_tu_test(2'd1, 3'd2, 13'sd8, 13'sd8);         // Cb 4x4 interior
         run_tu_test(2'd1, 3'd2, -13'sd15, -13'sd20);     // Cb 4x4 negative clamp
         run_tu_test(2'd1, 3'd2, 13'sd60, 13'sd60);       // Cb 4x4 positive clamp
@@ -269,8 +541,37 @@ module tb_mc_window_fetch;
         fork
             run_tu_test(2'd0, 3'd2, 13'sd10, 13'sd10);
         join
-        // Issue next TU immediately without waiting
         run_tu_test(2'd1, 3'd2, 13'sd12, 13'sd14);
+
+        // Test Matrix 3: Phase-Aware 0D, 1D-H, 1D-V, 2D (Luma 32x32 & Chroma 16x16)
+        $display("[INFO] Running Phase-Aware 0D/1D/2D tests...");
+        run_tu_phase_test(2'd0, 3'd3, 13'sd20, 13'sd18, 3'd0, 3'd0); // Luma 8x8 0D
+        run_tu_phase_test(2'd0, 3'd3, 13'sd20, 13'sd18, 3'd2, 3'd0); // Luma 8x8 1D-H
+        run_tu_phase_test(2'd0, 3'd3, 13'sd20, 13'sd18, 3'd0, 3'd3); // Luma 8x8 1D-V
+        run_tu_phase_test(2'd0, 3'd3, 13'sd20, 13'sd18, 3'd1, 3'd3); // Luma 8x8 2D
+        run_tu_phase_test(2'd0, 3'd5, 13'sd16, 13'sd16, 3'd0, 3'd0); // Luma 32x32 0D
+        run_tu_phase_test(2'd0, 3'd5, 13'sd16, 13'sd16, 3'd2, 3'd0); // Luma 32x32 1D-H
+        run_tu_phase_test(2'd0, 3'd5, 13'sd16, 13'sd16, 3'd0, 3'd1); // Luma 32x32 1D-V
+        run_tu_phase_test(2'd0, 3'd5, 13'sd16, 13'sd16, 3'd1, 3'd2); // Luma 32x32 2D
+        run_tu_phase_test(2'd1, 3'd4, 13'sd8,  13'sd8,  3'd0, 3'd0); // Chroma 16x16 0D
+        run_tu_phase_test(2'd1, 3'd4, 13'sd8,  13'sd8,  3'd4, 3'd0); // Chroma 16x16 1D-H
+        run_tu_phase_test(2'd1, 3'd4, 13'sd8,  13'sd8,  3'd0, 3'd5); // Chroma 16x16 1D-V
+        run_tu_phase_test(2'd1, 3'd4, 13'sd8,  13'sd8,  3'd3, 3'd6); // Chroma 16x16 2D
+        run_tu_phase_test(2'd2, 3'd2, -13'sd3, -13'sd2, 3'd4, 3'd0); // Cr 4x4 1D-H boundary
+        run_tu_phase_test(2'd2, 3'd2, 13'sd61, 13'sd61, 3'd0, 3'd3); // Cr 4x4 1D-V boundary
+
+        // Test Matrix 4: Port-A DPB Write Collision (rd_hold) Stall Stress Tests
+        $display("[INFO] Running Port-A rd_hold collision stall stress tests...");
+        run_tu_stall_test(2'd0, 3'd2, 13'sd10, 13'sd12, 3'd0, 3'd0, 1'b1); // Luma 4x4 0D + start stall
+        run_tu_stall_test(2'd0, 3'd3, 13'sd20, 13'sd18, 3'd2, 3'd0, 1'b1); // Luma 8x8 1D-H + start stall
+        run_tu_stall_test(2'd0, 3'd3, 13'sd20, 13'sd18, 3'd0, 3'd3, 1'b0); // Luma 8x8 1D-V + mid stalls
+        run_tu_stall_test(2'd0, 3'd3, 13'sd20, 13'sd18, 3'd1, 3'd3, 1'b1); // Luma 8x8 2D + burst stalls
+        run_tu_stall_test(2'd1, 3'd3, 13'sd16, 13'sd12, 3'd3, 3'd6, 1'b1); // Cb 8x8 2D + start stall
+
+        // Verify unconnected/X rd_hold safely treats as un-stalled in simulation
+        rd_hold = 1'bx;
+        run_tu_phase_test(2'd0, 3'd2, 13'sd4, 13'sd4, 3'd1, 3'd1);
+        rd_hold = 1'b0;
 
         #100;
         if (error_count == 0) begin

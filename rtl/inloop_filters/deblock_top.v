@@ -154,6 +154,7 @@ module deblock_top (
     reg          is_corner_stage; // 1: filtering delayed left neighbor CTU corner column
     reg [3:0]    edge_pos;        // 0..15 (Luma) or 0..7 (Chroma)
     reg [2:0]    sample_grp;      // which 4-sample group along the edge (0..3 luma, 0..1 chroma)
+    reg [2:0]    req_cnt;         // sample read request counter (Pillar 4 pipelined S_PIX_LOAD)
     reg [2:0]    resp_cnt;        // sample read response counter
     reg [2:0]    write_cnt;       // which sample we're writing back (0..5 luma, 0..1 chroma)
 
@@ -315,8 +316,8 @@ module deblock_top (
     //-------------------------------------------------------------------------
     reg          bs_in_valid, bs_out_ready;
     wire         bs_in_ready, bs_out_valid;
-    wire [1:0]   bs_result;
-    wire [5:0]   bs_edge_qp;
+    wire [1:0]   bs_result, bs_comb;
+    wire [5:0]   bs_edge_qp, qp_avg_comb;
 
     boundary_strength u_bs (
         .clk             (clk),
@@ -353,7 +354,9 @@ module deblock_top (
         .edge_qp         (bs_edge_qp),
         .out_valid       (bs_out_valid),
         .out_ready       (bs_out_ready),
-        .bs              (bs_result)
+        .bs              (bs_result),
+        .bs_comb         (bs_comb),
+        .qp_avg_comb     (qp_avg_comb)
     );
 
     //-------------------------------------------------------------------------
@@ -370,7 +373,14 @@ module deblock_top (
     wire [`PIXEL_WIDTH-1:0] luma_p0f, luma_p1f, luma_p2f, luma_q0f, luma_q1f, luma_q2f;
     wire luma_mod_p, luma_mod_q;
 
+`ifdef REMEDIATION
+    wire luma_skip_write = is_luma && !luma_mod_p && !luma_mod_q;
+    assign luma_out_ready = (state == S_PIX_WRITE) && is_luma &&
+                            (luma_skip_write || (pix_wr_ready && (write_cnt == 3'd5)));
+`else
+    wire luma_skip_write = 1'b0;
     assign luma_out_ready = (state == S_PIX_WRITE) && is_luma && pix_wr_ready && (write_cnt == 3'd5);
+`endif
 
     db_filter_luma u_luma (
         .clk(clk), .rst_n(rst_n),
@@ -415,8 +425,11 @@ module deblock_top (
             is_corner_stage <= 1'b0;
             edge_pos     <= 4'd0;
             sample_grp   <= 3'd0;
+            req_cnt      <= 3'd0;
             resp_cnt     <= 3'd0;
             write_cnt    <= 3'd0;
+            latched_bs   <= 2'd0;
+            latched_edge_qp <= 6'd0;
             ctu_done     <= 1'b0;
             bs_in_valid  <= 1'b0;
             bs_out_ready <= 1'b0;
@@ -448,14 +461,51 @@ module deblock_top (
                         is_corner_stage <= 1'b0;
                         edge_pos     <= 4'd0;
                         sample_grp   <= 3'd0;
+                        req_cnt      <= 3'd0;
+                        resp_cnt     <= 3'd0;
                         state        <= S_BS_REQ;
                     end
                 end
                 S_BS_REQ: begin
+`ifdef REMEDIATION
+                    bs_in_valid  <= 1'b0;
+                    bs_out_ready <= 1'b1;
+                    if (!is_boundary_edge || bs_comb == 2'd0 || (is_chroma && bs_comb != 2'd2)) begin
+                        // Pillar 4: 1-cycle Bs==0 (and Chroma Bs!=2) fast-skip; keep state==S_BS_REQ per edge
+                        sample_grp <= 3'd0;
+                        if (!is_vert && is_corner_stage) begin
+                            is_corner_stage <= 1'b0;
+                            edge_pos        <= 4'd0;
+                            state           <= S_BS_REQ;
+                        end else if (edge_pos < (is_vert ? max_pos : max_col_pos)) begin
+                            edge_pos <= edge_pos + 4'd1;
+                            state    <= S_BS_REQ;
+                        end else begin
+                            edge_pos <= 4'd0;
+                            if (edge_stage < max_edge_stage) begin
+                                edge_stage      <= edge_stage + 3'd1;
+                                is_corner_stage <= (!is_vert && has_left_neighbor);
+                                state           <= S_BS_REQ;
+                            end else begin
+                                state <= S_NEXT_PASS;
+                            end
+                        end
+                    end else begin
+                        latched_bs      <= bs_comb;
+                        latched_edge_qp <= qp_avg_comb;
+                        req_cnt         <= 3'd0;
+                        resp_cnt        <= 3'd0;
+                        sample_grp      <= 3'd0;
+                        pix_rd_valid    <= 1'b1;
+                        pix_rd_comp     <= cur_comp;
+                        state           <= S_PIX_LOAD;
+                    end
+`else
                     bs_in_valid  <= 1'b1;
                     bs_out_ready <= 1'b1;
                     if (bs_in_valid && bs_in_ready)
                         state <= S_BS_WAIT;
+`endif
                 end
                 S_BS_WAIT: begin
                     if (bs_out_valid) begin
@@ -466,6 +516,7 @@ module deblock_top (
                             sample_grp <= is_chroma ? 3'd3 : 3'd0;
                             state      <= S_NEXT_EDGE;
                         end else begin
+                            req_cnt      <= 3'd0;
                             resp_cnt     <= 3'd0;
                             sample_grp   <= is_luma ? 3'd0 : sample_grp;
                             pix_rd_valid <= 1'b1;
@@ -476,6 +527,40 @@ module deblock_top (
                 end
                 S_PIX_LOAD: begin
                     bs_out_ready <= 1'b0;
+`ifdef REMEDIATION
+                    // Pillar 4: Pipelined 1-sample/cycle SRAM reads (decoupled req_cnt & resp_cnt)
+                    if (pix_rd_valid && pix_rd_ready) begin
+                        if (req_cnt < (is_luma ? 3'd7 : 3'd3)) begin
+                            req_cnt      <= req_cnt + 3'd1;
+                            pix_rd_valid <= 1'b1;
+                            pix_rd_comp  <= cur_comp;
+                        end else begin
+                            req_cnt      <= 3'd0;
+                            pix_rd_valid <= 1'b0;
+                        end
+                    end
+
+                    if (pix_resp_valid && pix_resp_ready) begin
+                        if (resp_cnt < (is_luma ? 3'd4 : 3'd2)) px_p[resp_cnt[1:0]] <= pix_resp_data;
+                        else                                    px_q[resp_cnt[1:0] - (is_luma ? 2'd0 : 2'd2)] <= pix_resp_data;
+
+                        if (resp_cnt < (is_luma ? 3'd7 : 3'd3)) begin
+                            resp_cnt <= resp_cnt + 3'd1;
+                        end else begin
+                            req_cnt      <= 3'd0;
+                            resp_cnt     <= 3'd0;
+                            pix_rd_valid <= 1'b0;
+                            if (is_luma) begin
+                                luma_in_valid <= 1'b1;
+                                state         <= S_FILT_PUSH;
+                            end else begin
+                                chr_in_valid  <= 1'b1;
+                                chr_out_ready <= 1'b1;
+                                state         <= S_FILT_WAIT;
+                            end
+                        end
+                    end
+`else
                     if (pix_rd_valid && pix_rd_ready) begin
                         pix_rd_valid <= 1'b0;
                     end
@@ -500,6 +585,7 @@ module deblock_top (
                             end
                         end
                     end
+`endif
                 end
                 S_FILT_PUSH: begin
                     if (is_luma) begin
@@ -507,6 +593,7 @@ module deblock_top (
                             luma_in_valid <= 1'b0;
                             if (sample_grp < 3'd3) begin
                                 sample_grp   <= sample_grp + 3'd1;
+                                req_cnt      <= 3'd0;
                                 resp_cnt     <= 3'd0;
                                 pix_rd_valid <= 1'b1;
                                 pix_rd_comp  <= cur_comp;
@@ -530,12 +617,69 @@ module deblock_top (
                         chr_out_ready <= 1'b1;
                         if (chr_out_valid) begin
                             chr_out_ready <= 1'b0;
+`ifdef REMEDIATION
+                            if (!chr_modified) begin
+                                // Pillar 4: Skip unmodified Chroma write-backs & reuse BS across sample_grp
+                                if (sample_grp < 3'd3) begin
+                                    sample_grp   <= sample_grp + 3'd1;
+                                    req_cnt      <= 3'd0;
+                                    resp_cnt     <= 3'd0;
+                                    pix_rd_valid <= 1'b1;
+                                    pix_rd_comp  <= cur_comp;
+                                    state        <= S_PIX_LOAD;
+                                end else begin
+                                    state <= S_NEXT_EDGE;
+                                end
+                            end else begin
+                                write_cnt <= 3'd0;
+                                state     <= S_PIX_WRITE;
+                            end
+`else
                             write_cnt     <= 3'd0;
                             state         <= S_PIX_WRITE;
+`endif
                         end
                     end
                 end
                 S_PIX_WRITE: begin
+`ifdef REMEDIATION
+                    if (luma_skip_write) begin
+                        // Pillar 4: Skip unmodified Luma write-backs while draining filter output
+                        write_cnt <= 3'd0;
+                        if (sample_grp < 3'd3) begin
+                            sample_grp <= sample_grp + 3'd1;
+                        end else begin
+                            sample_grp <= 3'd3;
+                            state      <= S_NEXT_EDGE;
+                        end
+                    end else if (pix_wr_ready) begin
+                        if (write_cnt == (is_luma ? 3'd5 : 3'd1)) begin
+                            write_cnt <= 3'd0;
+                            if (is_luma) begin
+                                if (sample_grp < 3'd3) begin
+                                    sample_grp <= sample_grp + 3'd1;
+                                end else begin
+                                    sample_grp <= 3'd3;
+                                    state      <= S_NEXT_EDGE;
+                                end
+                            end else begin
+                                if (sample_grp < 3'd3) begin
+                                    // Pillar 4: Chroma sample_grp=1..3 reuse BS directly -> S_PIX_LOAD
+                                    sample_grp   <= sample_grp + 3'd1;
+                                    req_cnt      <= 3'd0;
+                                    resp_cnt     <= 3'd0;
+                                    pix_rd_valid <= 1'b1;
+                                    pix_rd_comp  <= cur_comp;
+                                    state        <= S_PIX_LOAD;
+                                end else begin
+                                    state <= S_NEXT_EDGE;
+                                end
+                            end
+                        end else begin
+                            write_cnt <= write_cnt + 3'd1;
+                        end
+                    end
+`else
                     if (pix_wr_ready) begin
                         if (write_cnt == (is_luma ? 3'd5 : 3'd1)) begin
                             write_cnt <= 3'd0;
@@ -553,6 +697,7 @@ module deblock_top (
                             write_cnt <= write_cnt + 3'd1;
                         end
                     end
+`endif
                 end
                 S_NEXT_EDGE: begin
                     if (is_chroma && (sample_grp < 3'd3)) begin
@@ -623,7 +768,11 @@ module deblock_top (
     wire [2:0] q_idx;
     wire [2:0] wr_q_idx;
 
+`ifdef REMEDIATION
+    assign px_idx    = req_cnt;
+`else
     assign px_idx    = resp_cnt;
+`endif
     assign loading_q = is_luma ? (px_idx >= 3'd4) : (px_idx >= 3'd2);
     assign q_idx     = is_luma ? (px_idx - 3'd4) : (px_idx - 3'd2);
     assign wr_q_idx  = is_luma ? (write_cnt - 3'd3) : (write_cnt - 3'd1);
@@ -645,7 +794,7 @@ module deblock_top (
     end
 
     always @(*) begin
-        pix_wr_valid = (state == S_PIX_WRITE);
+        pix_wr_valid = (state == S_PIX_WRITE) && !luma_skip_write;
         pix_wr_comp  = cur_comp;
 
         // Combinational write data

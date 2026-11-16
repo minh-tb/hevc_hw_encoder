@@ -38,6 +38,7 @@ module tb_ref_frame_buffer;
     logic [2:0]           ref_req_slot;
     logic [11:0]          ref_req_x;
     logic [11:0]          ref_req_y;
+    logic                 ref_req_is_4x4 = 1'b0;
 
     logic                 ref_resp_valid;
     logic [PX_EXT_Y-1:0]  ref_resp_y_flat;

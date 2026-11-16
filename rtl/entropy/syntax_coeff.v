@@ -40,6 +40,8 @@ module syntax_coeff #(
 `ifdef REMEDIATION
     input  wire [1:0]                    scan_mode,
 `endif
+    input  wire                          tu_cg_mask_en,
+    input  wire [63:0]                   tu_cg_nonzero_mask,
 
     // ── SRAM Read Port to coeff_buffer ──────────────────────────────────────
     output reg                           coeff_rd_en,
@@ -406,6 +408,18 @@ module syntax_coeff #(
     reg [63:0] cg_flags;
     reg [3:0]  load_cnt;
 
+    // Safeguard 4: Gate zero-subblock fast-skip with 4-state safe mask enable so
+    // standalone TBs (e.g. D-03) with unconnected or disabled mask read all CGs from SRAM.
+`ifdef SYNTHESIS
+    wire        eff_tu_cg_mask_en = tu_cg_mask_en;
+    wire [63:0] eff_tu_cg_mask    = eff_tu_cg_mask_en ? tu_cg_nonzero_mask : 64'hFFFF_FFFF_FFFF_FFFF;
+    wire        cur_cg_skip       = eff_tu_cg_mask_en && (cur_cg != last_cg_idx) && !eff_tu_cg_mask[cur_cg];
+`else
+    wire        eff_tu_cg_mask_en = (tu_cg_mask_en === 1'b1);
+    wire [63:0] eff_tu_cg_mask    = eff_tu_cg_mask_en ? tu_cg_nonzero_mask : 64'hFFFF_FFFF_FFFF_FFFF;
+    wire        cur_cg_skip       = eff_tu_cg_mask_en && (cur_cg != last_cg_idx) && (eff_tu_cg_mask[cur_cg] === 1'b0);
+`endif
+
     // 16-word buffer for the currently active 4x4 CG
     reg signed [COEFF_W-1:0] cg_coeffs [0:15];
     reg [15:0] cg_sig_map;
@@ -680,7 +694,11 @@ module syntax_coeff #(
                 bin_is_ep = 1'b1;
             end
 
-            S_LOAD_CG_REQ, S_LOAD_CG_WAIT: begin
+            S_LOAD_CG_REQ: begin
+                coeff_rd_en   = (load_cnt == 4'd0 && cur_cg_skip) ? 1'b0 : 1'b1;
+                coeff_rd_addr = {6'd0, cur_cg, 4'd0} + {8'd0, load_cnt};
+            end
+            S_LOAD_CG_WAIT: begin
                 coeff_rd_en   = 1'b1;
                 coeff_rd_addr = {6'd0, cur_cg, 4'd0} + {8'd0, load_cnt};
             end
@@ -1036,7 +1054,36 @@ module syntax_coeff #(
 
                 // --- Phase 1: Load 16 Coefficients for current CG ---
                 S_LOAD_CG_REQ: begin
+`ifdef REMEDIATION
+                    if ((load_cnt == 4'd0) && cur_cg_skip) begin
+                        // Pillar 3: Zero-subblock (CG) 1-cycle fast-skip (with all 4 safeguards)
+                        for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
+                            cg_coeffs[c_i]    <= {COEFF_W{1'b0}};
+                            sig_pos_list[c_i] <= 4'd0;
+                            sig_val_list[c_i] <= {COEFF_W{1'b0}};
+                        end
+                        cg_sig_map <= 16'd0;
+                        cg_num_sig <= 5'd0;
+                        ctx_set    <= (comp_r == 2'd0) ? ((cur_cg > 6'd0 ? 2'd2 : 2'd0) + {1'b0, prev_cg_had_gt1}) :
+                                                         {1'b0, prev_cg_had_gt1};
+                        scan_ptr   <= 5'd15;
+                        if (cur_cg == 6'd0) begin
+                            // Safeguard 1: DC sub-block (cur_cg==0) infers coded_sub_block_flag=1
+                            // -> enter S_SIG_SCAN to emit 16 zero sig_coeff_flag bins
+                            cg_flags[get_cg_raster(tu_size_log2_r,
+                                get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r),
+                                get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r))] <= 1'b1;
+                            state <= S_SIG_SCAN;
+                        end else begin
+                            // cur_cg > 0 -> emit coded_sub_block_flag = 0 via S_CG_FLAG
+                            state <= S_CG_FLAG;
+                        end
+                    end else begin
+                        state <= S_LOAD_CG_WAIT;
+                    end
+`else
                     state <= S_LOAD_CG_WAIT;
+`endif
                 end
 
                 S_LOAD_CG_WAIT: begin

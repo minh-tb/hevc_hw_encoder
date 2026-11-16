@@ -5,8 +5,8 @@
 The **Intra Prediction Subsystem** ([`rtl/intra/intra_pred_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_pred_top.v)) computes spatial intra prediction blocks for $I$, $P$, and $B$ slices per **HEVC Section 8.4**.
 
 At the system level, intra processing is split between two specialized engines:
-1. **[`intra_rmd`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v)** (Top-Level Pre-Screening): Evaluates all 35 HEVC intra modes using $4\times 4$ Hadamard SATD to pre-screen the top rate-distortion candidates for the top-level mode decision engine (`mode_decision.v`).
-2. **[`intra_pred_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_pred_top.v)** (Reconstruction Predictor): Generates the full spatial prediction pixel matrix ($4\times 4$ to $32\times 32$) using filtered reference samples:
+1. **[`intra_rmd`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v)** (Top-Level Pre-Screening): Evaluates **4 Luma intra modes** (`Planar=0, DC=1, Hor=10, Ver=26`) using `4x4`-tiled [`hadamard_satd_4x4`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/hadamard_satd_4x4.v) cores across `4x4..32x32` CUs/PUs (with `ping-pong` double-buffered residual banks and Stage-1 `row_t` start-edge latching), plus **5-candidate Chroma Intra RDO** (`Planar, Ver, Hor, DC, DM` per Table 8-2) for [`mode_decision`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/partition/mode_decision.v).
+2. **[`intra_pred_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_pred_top.v)** (Full 35-Mode Reconstruction Predictor): Generates the complete spatial prediction pixel matrix ($4\times 4$ to $32\times 32$) across all 35 modes (`0..34`) using filtered reference samples:
    - **[`ref_sample_filter`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/ref_sample_filter.v)**: Retrieves reference samples from neighbor boundary line buffers, checks availability, applies edge substitution, and executes 3-tap $[1, 2, 1]/4$ smoothing filters.
    - **[`intra_planar`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_planar.v)** (Mode 0): 2D bilinear surface interpolation.
    - **[`intra_dc`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_dc.v)** (Mode 1): Average DC calculation with edge smoothing for luma $4\times 4, 8\times 8, 16\times 16$.
@@ -29,9 +29,9 @@ flowchart TD
 
     %% Stage 1: RMD Pre-screening
     subgraph RMD_Stage ["1. Sàng lọc nhanh RMD (intra_rmd.v)"]
-        LoadRMD["Tải 35 Chế độ Intra (0..34)"]
-        Hadamard4x4["Tính chi phí SATD bằng Hadamard 4x4 cho từng hướng"]
-        SortCand["Sắp xếp và chọn Top 3 ứng viên có SATD nhỏ nhất"]
+        LoadRMD["Đánh giá 4 Chế độ Luma (Planar=0, DC=1, Hor=10, Ver=26)<br/>cùng 5 ứng viên Chroma RDO (Table 8-2)"]
+        Hadamard4x4["Tính SATD qua Hadamard 4x4 lát gạch (4x4..32x32)<br/>với Ping-Pong Double-Buffered Residual Banks"]
+        SortCand["Chọn chế độ Luma &amp; Chroma tốt nhất cho mode_decision.v"]
     end
 
     %% Stage 2: Reference Sample Filtering

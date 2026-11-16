@@ -28,25 +28,25 @@ All metrics extracted from post-synthesis Vivado 2026.1 reports targeting `xczu1
 
 | Metric | Initial Baseline | Phase 1 Post-Optimization | Phase 2 Un-bypassed | **Sign-Off Final** | Total Reduction vs. Baseline |
 |---|---:|---:|---:|---:|---|
-| **CLB LUTs** | 448,916 (85.88%) | 342,547 (65.53%) | 225,933 (43.22%) | **223,429 (42.74%)** | **-225,487 LUTs (-50.23%)** |
-| *-- LUT as Logic* | 446,581 (85.43%) | 340,166 (65.08%) | 223,550 (42.77%) | **215,670 (41.26%)** | **-230,911 LUTs (-51.71%)** |
+| **CLB LUTs** | 448,916 (85.88%) | 342,547 (65.53%) | 225,933 (43.22%) | **225,006 (43.05%)** | **-223,910 LUTs (-49.88%)** |
+| *-- LUT as Logic* | 446,581 (85.43%) | 340,166 (65.08%) | 223,550 (42.77%) | **217,247 (41.56%)** | **-229,334 LUTs (-51.35%)** |
 | *-- LUT as Memory (LUTRAM + SRL)* | 6,991 (4.33%) | 6,991 (4.33%) | 6,991 (4.33%) | **7,759 (4.81%)** | 7,728 LUTRAM + 31 SRL |
-| **CLB Registers (FFs)** | 344,030 (32.91%) | 253,425 (24.24%) | 249,980 (23.91%) | **126,387 (12.09%)** | **-217,643 FFs (-63.26%)** |
-| **Unique Control Sets** | 14,641 (11.20%) | 10,812 (8.27%) | 10,733 (8.21%) | **7,414 (5.67%)** | **-7,227 sets (-49.36%)** |
-| **DSP48E2 Slices** | 920 (46.75%) | 878 (44.61%) | 209 (10.62%) | **61 (3.10%)** | **-859 DSPs (-93.37%)** |
-| **Block RAM** | 12.5 Tiles (1.27%) | 30.0 Tiles (3.05%) | 30.0 Tiles (3.05%) | **33 RAMB36 + 17 RAMB18** | **+29.0 BRAM Tiles (41.5 Tiles / 4.22%)** |
-| **Setup Slack (WNS)** | -5.394 ns (VIOLATED) | +1.485 ns (MET) | +10.497 ns (MET) | **+10.121 ns (MET)** | **+15.515 ns timing slack** |
-| **Failing Endpoints** | 37 failing endpoints | 0 failing endpoints | 0 / 543,058 | **0 / 348,790** | **100% Timing Closure** |
-| **Estimated $F_{\max}$** | 39.38 MHz | 54.01 MHz | 105.23 MHz | **101.22 MHz** | **+157.0% Clock Speedup** |
-| **Dynamic Power** | 1.926 W | 1.304 W | 0.831 W | **0.963 W** | **-50.0% Dynamic Power** |
-| **Total On-Chip Power** | 3.048 W | 2.420 W | 1.943 W | **2.077 W** | **-31.9% Total Power** |
+| **CLB Registers (FFs)** | 344,030 (32.91%) | 253,425 (24.24%) | 249,980 (23.91%) | **140,035 (13.39%)** | **-203,995 FFs (-59.30%)** |
+| **Unique Control Sets** | 14,641 (11.20%) | 10,812 (8.27%) | 10,733 (8.21%) | **7,668 (5.87%)** | **-6,973 sets (-47.63%)** |
+| **DSP48E2 Slices** | 920 (46.75%) | 878 (44.61%) | 209 (10.62%) | **63 (3.20%)** | **-857 DSPs (-93.15%)** |
+| **Block RAM** | 12.5 Tiles (1.27%) | 30.0 Tiles (3.05%) | 30.0 Tiles (3.05%) | **33 RAMB36 + 17 RAMB18** | **+29.0 BRAM Tiles (41.5 Tiles / 4.22%, 0 extra from TDP)** |
+| **Setup Slack (WNS)** | -5.394 ns (VIOLATED) | +1.485 ns (MET) | +10.497 ns (MET) | **+10.360 ns (MET)** | **+15.754 ns timing slack** |
+| **Failing Endpoints** | 37 failing endpoints | 0 failing endpoints | 0 / 543,058 | **0 / 389,457** | **100% Timing Closure** |
+| **Estimated $F_{\max}$** | 39.38 MHz | 54.01 MHz | 105.23 MHz | **103.73 MHz** | **+163.4% Clock Speedup** |
+| **Dynamic Power** | 1.926 W | 1.304 W | 0.831 W | **1.084 W** | **-43.7% Dynamic Power** |
+| **Total On-Chip Power** | 3.048 W | 2.420 W | 1.943 W | **2.198 W** | **-27.9% Total Power** |
 | **Methodology `LUTAR-1`** | 1 Advisory | 1 Advisory | 1 Advisory | **0 Advisories** | Eliminated via sync `core_rst_n_reg` |
 
 ```
 Initial Baseline: 448,916 LUTs (85.88%) | 344,030 FFs (32.91%) | 920 DSPs (46.75%) | WNS = -5.394 ns (39.38 MHz)
 Phase 1:          342,547 LUTs (65.53%) | 253,425 FFs (24.24%) | 878 DSPs (44.61%) | WNS = +1.485 ns (54.01 MHz)
 Phase 2:          225,933 LUTs (43.22%) | 249,980 FFs (23.91%) | 209 DSPs (10.62%) | WNS = +10.497 ns (105.23 MHz)
-Sign-Off Final:   223,429 LUTs (42.74%) | 126,387 FFs (12.09%) | 61 DSPs (3.10%)   | WNS = +10.121 ns (101.22 MHz)
+Sign-Off Final:   225,006 LUTs (43.05%) | 140,035 FFs (13.39%) | 63 DSPs (3.20%)   | WNS = +10.360 ns (103.73 MHz)
 ```
 
 ---
@@ -328,18 +328,18 @@ To ensure academic and industrial transparency, this case study documents all ar
 
 ### Runtime-Configurable Subsystems (Un-bypassed in Final Netlist)
 1. **Sample Adaptive Offset (SAO — `T3-13` with CTU-Delayed Bitstream Serialization)**:
-   Controlled dynamically via `cfg_sao_enable`. [`sao_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v) (with 2-phase single-port BRAM neighbor read, `pre_sao_row_buf` line caching, and all 4 EO classes `0°, 90°, 135°, 45°`), [`sao_stats.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v) (dynamic multi-mode `EO`/`BO`/`OFF` RDO with `SINGLE_PASS_CAUSAL_SYNC = 0`), and [`syntax_sao.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_sao.v) + `ctu_bin_ram` (`8192 x 10-bit`, `2 RAMB36E2 + 1 RAMB18E2`) inside [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) are fully synthesized and active when enabled.
+   Controlled dynamically via `cfg_sao_enable`. [`sao_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v) (with 2-phase single-port BRAM neighbor read, `EO_45` right-border `n0_rd_valid`, `pre_sao_row_buf` line caching, and all 4 EO classes `0°, 90°, 135°, 45°`), [`sao_stats.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v) (full-CTU `Y -> Cb -> Cr` 32-band BO RDO with causality border-skip, symmetric `[-15, +15]` clamp matching `syntax_sao.v` `cMax = 31`, `ctu_qp` Q8 lambda LUT, and last-CTU 4-class EO RDO via internal `64x10b` line buffer), and [`syntax_sao.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_sao.v) + `ctu_bin_ram` (`8192 x 10-bit`, `2 RAMB36E2 + 1 RAMB18E2`, `drain_prefetched_valid` BRAM drain alignment) inside [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) are fully synthesized and active when enabled.
 2. **Rate Controller ([`rate_controller.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/rate_control/rate_controller.v) — `1,107 LUTs, 149 FFs, 3 DSPs, 0 Latches`)**:
    Controlled dynamically via `cfg_rc_enable`, `cfg_base_qp`, and `cfg_target_bitrate_kbps`. Uses reciprocal multiplication and a 6-stage binary shift-threshold tree for dividerless VBV fullness estimation.
-3. **GOP Controller ([`gop_controller.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/gop_controller.v) — `239 LUTs, 135 FFs`)**:
+3. **GOP Controller ([`gop_controller.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/gop_controller.v) — `240 LUTs, 135 FFs`)**:
    Controlled dynamically via `cfg_gop_structure` supporting IPP, Low-Delay B (IPBB), and Hierarchical B structures.
 4. **On-Chip DPB vs. External AXI4 DRAM ([`frame_store.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/recon/frame_store.v))**:
    Reconstructed frames are written out over the 256-bit AXI4 Master interface (`axi_aw*`, `axi_w*`), while inter motion estimation reads reference frames from low-latency on-chip DPB BRAMs (`41.5 BRAM tiles`: `33 RAMB36E2` + `17 RAMB18E2`).
 
 ### Post-Synthesis Vivado Methodology Status (Verified Clean)
-- **Zero Latches (`0 LDCE`) & Zero Failing Endpoints (`WNS = +10.121 ns`)**: All sequential elements are edge-triggered Flip-Flops (`126,387 FFs`, 0 / 348,790 failing endpoints).
+- **Zero Latches (`0 LDCE`) & Zero Failing Endpoints (`WNS = +10.360 ns`)**: All sequential elements are edge-triggered Flip-Flops (`140,035 FFs`, 0 / 389,457 failing endpoints; `WPWS = 9.458 ns`, 0 / 147,896 failing).
 - **Zero `LUTAR-1` Advisories (`0 Warnings`)**: In [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v), the former combinational reset `core_rst_n = rst_n & ~soft_reset` was replaced with a dedicated synchronous reset register `core_rst_n_reg` (asynchronous assertion on `!rst_n`, synchronous assertion/deassertion on `~soft_reset`), completely eliminating `LUTAR-1` across all asynchronous reset pins.
-- **`DPIR-2` & `SYNTH-6`**: Pipeline registers feeding DSP48E2 slices use async `rst_n` (kept in fabric FFs), and 21 BRAM instances operate in 1-cycle non-DOA-registered mode to preserve single-cycle FSM read handshakes; both maintain **+10.121 ns** setup slack margin ($F_{\max} = 101.22\text{ MHz}$).
+- **`DPIR-2` & `SYNTH-6`**: Pipeline registers feeding DSP48E2 slices use async `rst_n` (`104 DPIR-2` warnings), and 31 BRAM instances (`SYNTH-6`) operate in 1-cycle non-DOA-registered mode to preserve single-cycle FSM read handshakes; both maintain **+10.360 ns** setup slack margin ($F_{\max} = 103.73\text{ MHz}$).
 
 ---
 
@@ -366,46 +366,51 @@ Rigorous audit against ITU-T H.265 Clauses 7.3.6.1, 7.3.8.1, 7.3.8.3, 8.7.3 and 
    - Gated `sao_merge_left_flag` on `has_left` and `sao_merge_up_flag` on `has_up`.
    - Bypassed `S_TYPE` for Cr (`cIdx = 2`), directly inheriting Cb's `sao_type_idx_chroma`.
    - Reordered BO syntax: all 4 absolute offsets first in `S_OFFSET_ABS`, followed by sign emission only for non-zero offsets in `S_OFFSET_SIGN`, followed by 5-bit `band_pos` in `S_BAND_POS`.
-3. **CTU-Delayed Bitstream Serialization (`ctu_bin_ram`) & Dynamic Full-Frame Multi-Mode SAO (`T3-13`)**:
-   - In [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v), implemented `ctu_bin_ram` (`8192 x 10-bit`, `(* ram_style = "block" *)`) with a 1-cycle lookahead synchronous BRAM read address mux (`bin_rd_addr_mux`) to buffer `coding_quadtree()` bins (`syntax_cu`, `syntax_pred`, `syntax_coeff`) during `S_FILL`.
-   - In [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v), added `CABAC_WAIT_SAO_STATS` and `CABAC_DRAIN_CTU_BINS` states: after the last CU of the CTU finishes, CABAC waits for `sao_stats_done`, fires `syntax_sao.v` **first** to emit `sao(rx, ry)` with the dynamic `sao_stats` decision (`EO`, `BO`, or `OFF`), drains `ctu_bin_ram` into `bin_encoder` $\to$ `range_coder`, and finishes with `CABAC_TRM_CTU`.
-4. **2-Phase Single-Port BRAM EO Read & Post-Deblocked Neighbor Updates**:
-   - In [`sao_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v), implemented `SINGLE_PORT_BRAM_MODE = 1` (`S_REQ_PIX` $\to$ `S_REQ_N1` $\to$ `S_WAIT_PIX`) and pre-SAO line caches (`pre_sao_row_buf`, `cur_row_left`, `prev_row_left_d`).
-   - In [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), updated `col_buf_*`, `line_buf_*`, and `corner_buf_*` in-place whenever `db_pix_wr_neighbor` modifies a cross-CTU border pixel during `S_DB`.
+3. **CTU-Delayed Bitstream Serialization (`ctu_bin_ram`) & Full-CTU Multi-Mode SAO RDO (`T3-13`)**:
+   - In [`sao_stats.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v), implemented sequential full-CTU `Y -> Cb -> Cr` 32-band BO RDO across all CTUs (skipping border columns/rows subject to causal deblocking lag on non-last CTUs, clamping offsets symmetrically to `[-15, +15]` matching `syntax_sao.v` `cMax = 31`, and scoring RD costs via a 52-entry `ctu_qp` Q8 lambda LUT) plus last-CTU (`is_last_col && is_last_row`) 4-class EO (`0°, 90°, 135°, 45°`) RDO using an internal `64x10b` line buffer.
+   - In [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v), implemented `ctu_bin_ram` (`8192 x 10-bit`, `(* ram_style = "block" *)`) with `drain_prefetched_valid` BRAM read alignment (`bin_rd_addr_mux < bin_wr_ptr`) to buffer `coding_quadtree()` bins (`syntax_cu`, `syntax_pred`, `syntax_coeff`) during `S_FILL`.
+   - In [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v), `CABAC_WAIT_SAO_STATS` and `CABAC_DRAIN_CTU_BINS` wait for `sao_stats_done`, fire `syntax_sao.v` **first** to emit `sao(rx, ry)` with the `sao_stats` RDO decision, drain `ctu_bin_ram` into `bin_encoder` $\to$ `range_coder`, and finish with `CABAC_TRM_CTU`.
+4. **2-Phase Single-Port BRAM EO Read, `EO_45` Guard & Neighbor BO Forwarding**:
+   - In [`sao_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v), implemented `SINGLE_PORT_BRAM_MODE = 1` (`S_REQ_PIX` $\to$ `S_REQ_N1` $\to$ `S_WAIT_PIX`), pre-SAO line caches (`pre_sao_row_buf`, `cur_row_left`, `prev_row_left_d`), and the `EO_45` right-border `n0_rd_valid` lookup (`scan_y == 6'd0 || scan_x == max_dim`).
+   - In [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), `col_buf_*`, `line_buf_*`, and `corner_buf_*` remain strictly **post-DB, pre-SAO** during `S_DB`, while `left_sao_*`, `top_left_sao_*`, and `top_sao_*[0:63]` latch completed CTU BO parameters and apply neighbor BO (`db_nbr_sao_pixel`) onto DPB-bound `db_pix_wr_neighbor` `out_pixel` transfers **only** (with signed `sao_n0/n1_oob` guards).
 
 ### Impact & Results
-- **Flaw Regression Suite**: All 14 flaw testbenches (`scripts/run_all_flaw_tb.py`) pass 100% in both buggy and remediated modes.
-- **HM 18.0 Clean Decoding**: Full 3-frame sequence (`I`, `P`, `B`) with simultaneous Rate Control (CBR 250 kbps) and SAO decoded cleanly with **exit code 0** (zero syntax errors, zero warnings).
-- **100% Bit-Exact Reconstruction**: Hardware reconstruction (`hw_recon.yuv`) verified against HM 18.0 decoded stream (`dec_foreman.yuv`) across all 73,728 samples (147,456 bytes) with **`max_diff == 0` (100.00% exact match)**.
+- **Flaw Regression Suite**: All 14 flaw testbenches (`scripts/run_all_flaw_tb.py`) pass 100% in both buggy and remediated modes (`28/28` runs).
+- **HM 18.0 Clean Decoding**: Full 3-frame sequence (`I`, `P`, `B`) with simultaneous Rate Control (CBR 250 kbps) and SAO decoded cleanly with **exit code 0** (zero syntax errors, zero warnings) across **28,962 / 28,962 CABAC bins** (`POC 0: 8,496, POC 1: 10,022, POC 2: 10,444`).
+- **100% Bit-Exact Reconstruction**: Hardware reconstruction (`hw_recon.yuv`, `147,456 B`) verified against HM 18.0 decoded stream (`dec_gate.yuv`) across all 73,728 post-filter samples (and pre-filter `hw_recon_pre.yuv` vs `rec_before_filter.yuv`) with **`max_diff == 0` (100.00% exact match)**.
 
 ---
 
-## 11. Case Study 10: Synchronous BRAM Architecture, Zero-Overhead Handshakes & 100% Bit-Exact In-Loop Pipeline
+## 11. Case Study 10: Synchronous BRAM Architecture, 4-Pillar Throughput & TDP DPB Zero-Replication
 
 ### Architectural Overview & Sign-Off Objectives
-To achieve physical sign-off on AMD Zynq UltraScale+ FPGA (`xczu19eg-ffvb1517-2-e`) and guarantee bit-exact parity between RTL simulation and synthesized hardware, the encoder architecture was unified across [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src):
+To achieve physical sign-off on AMD Zynq UltraScale+ FPGA (`xczu19eg-ffvb1517-2-e`), guarantee bit-exact parity between RTL simulation and synthesized hardware, and cut hardware latency below `71,348` cycles/CTU (`T_DB <= 12,500`), the encoder architecture was upgraded and unified across [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src):
 1. **Synchronous Single-Cycle BRAM Read Architecture**:
    - Converted CTU storage arrays (`luma_ram`, `cb_ram`, `cr_ram`) in [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v) from asynchronous combinational reads to synchronous single-cycle registered read ports.
    - Dedicated registered responses (`sao_n0_resp_data`, `sao_n1_resp_data`) eliminate distributed LUTRAM/FF fallback and map cleanly onto dedicated UltraScale+ `RAMB36E2` and `RAMB18E2` primitives.
 2. **Backpressure-Resilient `S_DUMP` Streaming Handshake**:
    - In [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), decoupled `dump_valid_q` assertion from downstream `out_ready` assertion (complying strictly with ARM AMBA AXI-Stream IHI 0051A §2.2.1).
    - Added a registered hold stage (`dump_stall = dump_valid_q && !out_ready`) to freeze internal address counters (`dump_idx`) and hold `out_x`, `out_y`, `out_comp`, and `out_pixel` stable under downstream backpressure, eliminating pipeline phase skews.
-3. **100% Unified Datapath Across Simulation & Synthesis**:
-   - Eliminated all divergent `` `ifdef SYNTHESIS `` branches on intra reconstruction references (`recon_val_wire`) and RMD SATD references (`rmd_recon_val_wire`) in [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v). Both behavioral simulation and FPGA bitstreams now execute the exact same synchronous registered read multiplexer (`rmd_is_top_d ? row_buf_y_d : col_buf_y_d`).
-   - Restored DPB slot-1 Chroma Cr reference writeback (`dpb_cr_ram_l1` when `filter_out_comp == 2'd2`), ensuring temporal reference consistency for B-slices across hardware and software decoders.
+3. **4-Pillar Throughput Optimization & TDP DPB Zero-BRAM-Replication**:
+   - **Pillar 1 (`mc_window_fetch.v` + `hevc_encoder_top.v`):** Added `0D/1D` fast fetch, drain-to-emit write-through bypass, vertical `row0_win` reuse, and True Dual-Port (TDP) 2-sample/cycle DPB reads (`rd_addr_0`/`rd_addr_1`) with **0 extra BRAM tiles** by time-multiplexing Port-A between pipelined in-loop writeback (`dpb_wr_luma/cb/cr_d1`) and `mc_window_fetch` even-column reads (`rd_hold` Stage-1 stall via `mc_dpb_wr_collision`), leaving Read-Only Port-B dedicated to odd columns.
+   - **Pillar 2 (`mode_decision.v` + `hevc_encoder_top.v`):** Depth-0 (`64×64`) bit-exact bypass + parameterized `FAST_EARLY_CU_SPLIT` (`0` default for bit-exact sign-off & `D-05` compatibility).
+   - **Pillar 3 (`syntax_coeff.v` + `cabac_enc_top.v` + `hevc_encoder_top.v`):** Per-CU `tu_cg_nonzero_mask_y/cb/cr` zero-CG skipping (32-cycle SRAM read skip with Clause 7.3.8.11 `cur_cg == 0` inferred `coded_sub_block_flag = 1` handling and `tu_cg_mask_en` gating).
+   - **Pillar 4 (`deblock_top.v` + `boundary_strength.v` + `decoder_inloop_filters.v`):** Combinational `bs_comb`/`qp_avg_comb` 1-cycle `Bs == 0` skip, grid-stepped `+2`/`+4` traversal, pipelined 1-sample/cycle `S_PIX_LOAD` (`db_pix_rd_ready`), and unmodified write-back skipping (`!luma_skip_write`, `chroma_skip_write`), reducing `T_DB` from `15,936` to `7,230` cycles/CTU (`-54.6%`).
+   - **X-Safety & Simulation-Synthesis Parity:** `0` behavioral `` `ifdef SYNTHESIS `` branches remain (`3` 4-state `===` X-safety guards in `syntax_coeff.v`, `mc_window_fetch.v`, and `ref_frame_buffer.v`; `11` simulation-only `` `ifndef SYNTHESIS `` init/clear loops across 8 RTL files; and `72` `synthesis translate_off` lines). Fixed Chroma `above-right` reference fetch bit-5 masking (`abs_top_x_raw`, `rmd_abs_top_x_c_raw`).
 4. **Complete IP-XACT Repository Synchronization**:
-   - Enforced default `` `define REMEDIATION `` in [`rtl/common/parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh) and synchronized all **63 / 63** Verilog source and header files into [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src/) with 100% SHA-256 byte identity.
+   - Enforced default `` `define REMEDIATION `` in [`rtl/common/parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh) and synchronized all **63 / 63** RTL source and header files into [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src/) with 100% SHA-256 byte identity (64 packaged files total including `hevc_encoder_top.xdc`).
 
 ### Hardware Implementation & Sign-Off Verification Results
-- **CLB LUTs**: **223,429 LUTs (42.74%)** (-225,487 LUTs / **-50.23% net reduction** vs. baseline).
-- **CLB Flip-Flops**: **126,387 FFs (12.09%)** (-217,643 FFs / **-63.26% net reduction** vs. baseline).
-- **Block RAM**: **33 RAMB36 + 17 RAMB18 blocks (4.22%)** (41.5 BRAM tiles), providing fully synchronous on-chip frame buffering and CTU CABAC bin queuing (`ctu_bin_ram`).
-- **DSP48E2 Slices**: **61 / 1,968 (3.10%)** (-859 DSPs / **-93.37% net reduction** vs. baseline).
-- **Timing Closure**: **WNS = +10.121 ns (MET)** at 50 MHz constraint (**$F_{\max} = 101.22\text{ MHz}$**, 0 failing endpoints out of 348,790).
-- **Power Consumption**: **2.077 W total on-chip power** (**0.963 W dynamic**, 1.114 W static).
-- **Methodology Cleanliness**: **0 `LUTAR-1` warnings**, 0 latches (`0 LDCE`), 0 critical synthesis warnings.
-- **Full 3-Frame Post-Filter Conformance**:
-  - `python scripts/regression_gate.py --enable-loop-filters --num-frames 3` achieved **100.00% sample-exact match (`max_diff = 0`, average diff = 0.0000)** across all 73,728 samples in Frames 0, 1, and 2 ($Y, Cb, Cr$) against Fraunhofer HM 18.0 reference decoder (`TAppDecoder.exe`, exit code 0).
-  - `python scripts/verify_3frames_bins.py` achieved **100.00% CABAC bin parity** across all 6 fields (**29,383 / 29,383 bins** across POC 0: 8,844, POC 1: 9,908, POC 2: 10,631).
-  - All 14 dual-state algorithmic flaw testbenches (`scripts/run_all_flaw_tb.py`) pass 100% in remediated mode and prove failure in buggy mode.
-  - All 9 AXI4-Lite/AXI4 SoC test suites (`tb/run_tb_axi.do`) pass cleanly.
+- **CLB LUTs**: **225,006 LUTs (43.05%)** (-223,910 LUTs / **-49.88% net reduction** vs. baseline; 217,247 Logic LUTs, 7,728 LUTRAMs, 31 SRLs).
+- **CLB Flip-Flops**: **140,035 FFs (13.39%)** (-203,995 FFs / **-59.30% net reduction** vs. baseline).
+- **Block RAM**: **33 RAMB36 + 17 RAMB18 blocks (4.22%)** (41.5 BRAM tiles — **0 extra BRAMs from TDP DPB conversion**), providing fully synchronous on-chip frame buffering and CTU CABAC bin queuing (`ctu_bin_ram`).
+- **DSP48E2 Slices**: **63 / 1,968 (3.20%)** (-857 DSPs / **-93.15% net reduction** vs. baseline).
+- **Timing Closure**: **WNS = +10.360 ns (MET)** at 50 MHz constraint (`Data Path Delay = 9.422 ns`, **$F_{\max} = 103.73\text{ MHz}$**, 0 failing endpoints out of 389,457; `WPWS = 9.458 ns`, `0 / 147,896`).
+- **Power Consumption**: **2.198 W total on-chip power** (**1.084 W dynamic**, 1.115 W static @ `26.8 °C`).
+- **Methodology Cleanliness**: **0 `LUTAR-1` warnings**, 0 latches (`0 LDCE`), 0 critical synthesis warnings (`104 DPIR-2`, `31 SYNTH-6`).
+- **Full 3-Frame Bit-Exact & Throughput Conformance (`2026-11-16` HEAD)**:
+  - `python scripts/regression_gate.py --enable-loop-filters --num-frames 3` achieved **100.00% sample-exact match (`max_diff = 0`, average diff = 0.0000)** across all 73,728 samples in Frames 0, 1, and 2 (both post-filter `hw_recon.yuv` vs `dec_gate.yuv` and pre-filter `hw_recon_pre.yuv` vs `rec_before_filter.yuv` SHA-256 `6CFC954D3A337CBF4D5C810DF83B5C71A372A6FFF4FD1CA724B55AA2EC115A38`; bit-identical `str_b_frame.bin` `3,178 B` SHA-256 `542231A85C24C6D600096E46F971DE0274442D49B9A74630355576EAFDB4C0FA` and `hw_recon.yuv` `147,456 B` SHA-256 `FDAB258067650458E281E0DF5F2C0DE33FA19D57B8B56FAE2E014CAF409E683F` across Gate 1 and Gate 2 `+define+SYNTHESIS`).
+  - `python scripts/profile_pipeline_throughput.py`: **62,747 cycles/CTU** average (`-50.8%` vs `127,647` baseline, `< 71,348`), **`T_DB = 7,230`** (`-54.6%` vs `15,936`, `<= 12,500`), `T_MD = 9,982`, `T_TQ = 14,172`, `T_CABAC = 40,321`, `Stall_Inloop = 0`.
+  - Foreman 3-frame quality vs original YUV: F0 `39.02 dB Y / 39.34 dB YUV`, F1 `39.34 dB Y / 40.15 dB YUV`, F2 `39.44 dB Y / 40.21 dB YUV` (3-frame average `39.268 dB Y / 41.637 dB U / 41.952 dB V / 39.900 dB YUV`). *(Archived `2026-11-14` pre-optimization 4-QP sweep `qp_sweep_results.json` achieved `73,728 / 73,728 max_diff = 0`, `BD-Rate +148.58%`, `BD-PSNR -5.11 dB` vs HM 18.0.)*
+  - `python scripts/verify_3frames_bins.py` achieved **100.00% CABAC bin parity** across all 6 fields (**28,962 / 28,962 bins** across POC 0: 8,496, POC 1: 10,022, POC 2: 10,444).
+  - All 14 dual-state algorithmic flaw testbenches (`scripts/run_all_flaw_tb.py`, 28/28 runs), 12 re-verified post-edit unit suites (incl. `tb_mc_window_fetch` 6,272 samples + `rd_hold` stall stress), and all 9 AXI4-Lite/AXI4 SoC test suites (`tb/run_tb_axi.do`) pass cleanly (`119 B`, `TLAST=1`).

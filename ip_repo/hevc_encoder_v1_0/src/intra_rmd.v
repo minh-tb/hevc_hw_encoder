@@ -84,32 +84,51 @@ module intra_rmd (
     end
 `endif
 
-    // Iteration counters
-    reg [5:0] cx, cy;
+    // Iteration & pipeline registers (2-stage q1->q2 matches 1-cycle synchronous BRAM latency)
     wire [7:0] N = 8'd1 << pu_size_log2;  // 8-bit to avoid overflow (N<<1 = 64 for log2=5)
+    wire [7:0] N_C = N >> 1;
 
-    // Internal latches for pu_x/pu_y (captured on start)
-    reg [5:0] lat_pu_x, lat_pu_y;
+    reg        req_active;
+    reg [5:0]  lat_pu_x, lat_pu_y;
 
-    // Pipeline registers for coordinates to match orig_rd_data latency
-    reg [5:0] cx_q, cy_q;
-    reg       eval_q;
+`ifdef REMEDIATION
+    reg [1:0]  sub_x, sub_y;
+    reg [2:0]  tile_x, tile_y;
+    wire [3:0] tile_max_w = N[5:2] - 4'd1;
+    wire [2:0] tile_max = tile_max_w[2:0];
+    wire [6:0] total_tiles = (pu_size_log2 == 3'd2) ? 7'd1 :
+                             (pu_size_log2 == 3'd3) ? 7'd4 :
+                             (pu_size_log2 == 3'd4) ? 7'd16 : 7'd64;
+    wire [5:0] cx = {1'b0, tile_x, sub_x};
+    wire [5:0] cy = {1'b0, tile_y, sub_y};
+`else
+    reg [5:0]  cx, cy;
+`endif
+
+    reg [5:0]  cx_q1, cy_q1, cx_q2, cy_q2;
+    reg        eval_q1, eval_q2;
+    reg        eval_c_q1, eval_c_q2;
 
     // Accumulators
+`ifdef REMEDIATION
+    reg [31:0] satd_acc_p, satd_acc_d, satd_acc_h, satd_acc_v;
+    reg [6:0]  tiles_acc;
+`else
     reg [31:0] sad_planar, sad_dc, sad_hor, sad_ver;
+`endif
     reg [31:0] sad_c_planar, sad_c_dc, sad_c_hor, sad_c_ver, sad_c_34;
-    reg        eval_c_q;
-
-    // Chroma reference / size helpers
-    wire [7:0] N_C = N >> 1;
 
     // DC Prediction (Average of N top + N left reference samples)
     // top:  ref[1..N]
     // left: ref[2N+1..3N]
     reg [15:0] dc_sum;
     reg [15:0] dc_sum_u, dc_sum_v;
-    always @(posedge clk) begin
-        if (state == S_LOAD_REF && ref_valid) begin
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            dc_sum   <= 16'd0;
+            dc_sum_u <= 16'd0;
+            dc_sum_v <= 16'd0;
+        end else if (state == S_LOAD_REF && ref_valid) begin
             // Top row: ref[1..N]
             if (ref_idx >= 8'd1 && ref_idx <= N[7:0]) begin
                 dc_sum <= dc_sum + ref_sample;
@@ -146,20 +165,20 @@ module intra_rmd (
     wire [`PIXEL_WIDTH-1:0] pred_dc_v = dc_val_v[`PIXEL_WIDTH-1:0];
 
     // Horizontal Prediction
-    wire [7:0] idx_left = (N << 1) + 8'd1 + {2'd0, cy_q};
+    wire [7:0] idx_left = (N << 1) + 8'd1 + {2'd0, cy_q2};
     wire [`PIXEL_WIDTH-1:0] pred_hor = ref_buf[idx_left];
 
     // Chroma Horizontal Prediction (mode 10)
-    wire [7:0] idx_left_c = N + 8'd1 + {3'd0, cy_q[4:0]};
+    wire [7:0] idx_left_c = N + 8'd1 + {3'd0, cy_q2[4:0]};
     wire [`PIXEL_WIDTH-1:0] pred_hor_u = ref_buf_u[idx_left_c[6:0]];
     wire [`PIXEL_WIDTH-1:0] pred_hor_v = ref_buf_v[idx_left_c[6:0]];
 
     // Vertical Prediction
-    wire [7:0] idx_top = 8'd1 + {2'd0, cx_q};
+    wire [7:0] idx_top = 8'd1 + {2'd0, cx_q2};
     wire [`PIXEL_WIDTH-1:0] pred_ver = ref_buf[idx_top];
 
     // Chroma Vertical Prediction (mode 26)
-    wire [7:0] idx_top_c = 8'd1 + {3'd0, cx_q[4:0]};
+    wire [7:0] idx_top_c = 8'd1 + {3'd0, cx_q2[4:0]};
     wire [`PIXEL_WIDTH-1:0] pred_ver_u = ref_buf_u[idx_top_c[6:0]];
     wire [`PIXEL_WIDTH-1:0] pred_ver_v = ref_buf_v[idx_top_c[6:0]];
 
@@ -179,42 +198,44 @@ module intra_rmd (
     wire [`PIXEL_WIDTH-1:0] refT_N_v = ref_buf_v[idx_refT_Nc[6:0]];
     wire [`PIXEL_WIDTH-1:0] refL_N_v = ref_buf_v[idx_refL_Nc[6:0]];
 
-    wire [17:0] wL_u = (N_C - 8'd1 - {3'd0, cx_q[4:0]}) * pred_hor_u;
-    wire [17:0] wR_u = ({3'd0, cx_q[4:0]} + 8'd1) * refT_N_u;
-    wire [17:0] wT_u = (N_C - 8'd1 - {3'd0, cy_q[4:0]}) * pred_ver_u;
-    wire [17:0] wB_u = ({3'd0, cy_q[4:0]} + 8'd1) * refL_N_u;
+    wire [17:0] wL_u = (N_C - 8'd1 - {3'd0, cx_q2[4:0]}) * pred_hor_u;
+    wire [17:0] wR_u = ({3'd0, cx_q2[4:0]} + 8'd1) * refT_N_u;
+    wire [17:0] wT_u = (N_C - 8'd1 - {3'd0, cy_q2[4:0]}) * pred_ver_u;
+    wire [17:0] wB_u = ({3'd0, cy_q2[4:0]} + 8'd1) * refL_N_u;
     wire [17:0] planar_sum_u = wL_u + wR_u + wT_u + wB_u + {10'd0, N_C};
     wire [17:0] raw_pred_planar_u = planar_sum_u >> pu_size_log2;
     wire [`PIXEL_WIDTH-1:0] pred_planar_u = (raw_pred_planar_u > 18'd1023) ? 10'd1023 : raw_pred_planar_u[`PIXEL_WIDTH-1:0];
 
-    wire [17:0] wL_v = (N_C - 8'd1 - {3'd0, cx_q[4:0]}) * pred_hor_v;
-    wire [17:0] wR_v = ({3'd0, cx_q[4:0]} + 8'd1) * refT_N_v;
-    wire [17:0] wT_v = (N_C - 8'd1 - {3'd0, cy_q[4:0]}) * pred_ver_v;
-    wire [17:0] wB_v = ({3'd0, cy_q[4:0]} + 8'd1) * refL_N_v;
+    wire [17:0] wL_v = (N_C - 8'd1 - {3'd0, cx_q2[4:0]}) * pred_hor_v;
+    wire [17:0] wR_v = ({3'd0, cx_q2[4:0]} + 8'd1) * refT_N_v;
+    wire [17:0] wT_v = (N_C - 8'd1 - {3'd0, cy_q2[4:0]}) * pred_ver_v;
+    wire [17:0] wB_v = ({3'd0, cy_q2[4:0]} + 8'd1) * refL_N_v;
     wire [17:0] planar_sum_v = wL_v + wR_v + wT_v + wB_v + {10'd0, N_C};
     wire [17:0] raw_pred_planar_v = planar_sum_v >> pu_size_log2;
     wire [`PIXEL_WIDTH-1:0] pred_planar_v = (raw_pred_planar_v > 18'd1023) ? 10'd1023 : raw_pred_planar_v[`PIXEL_WIDTH-1:0];
 
     // Chroma Diagonal 34 Prediction (mode 34: ref_top[x + y + 2])
-    wire [6:0] idx_34 = {2'd0, cx_q[4:0]} + {2'd0, cy_q[4:0]} + 7'd2;
+    wire [6:0] idx_34 = {2'd0, cx_q2[4:0]} + {2'd0, cy_q2[4:0]} + 7'd2;
     wire [`PIXEL_WIDTH-1:0] pred_34_u = ref_buf_u[idx_34];
     wire [`PIXEL_WIDTH-1:0] pred_34_v = ref_buf_v[idx_34];
     
 `ifdef REMEDIATION
-    wire [17:0] wL = (N[7:0] - 8'd1 - {2'd0, cx_q}) * refL_y;
-    wire [17:0] wR = ({2'd0, cx_q} + 8'd1) * refT_N;
-    wire [17:0] wT = (N[7:0] - 8'd1 - {2'd0, cy_q}) * refT_x;
-    wire [17:0] wB = ({2'd0, cy_q} + 8'd1) * refL_N;
+    wire [17:0] wL = (N[7:0] - 8'd1 - {2'd0, cx_q2}) * refL_y;
+    wire [17:0] wR = ({2'd0, cx_q2} + 8'd1) * refT_N;
+    wire [17:0] wT = (N[7:0] - 8'd1 - {2'd0, cy_q2}) * refT_x;
+    wire [17:0] wB = ({2'd0, cy_q2} + 8'd1) * refL_N;
     
     wire [17:0] planar_sum = wL + wR + wT + wB + {10'd0, N};
     wire [17:0] raw_pred_planar = planar_sum >> (pu_size_log2 + 1);
     wire [`PIXEL_WIDTH-1:0] pred_planar = (raw_pred_planar > 18'd1023) ? 10'd1023 : raw_pred_planar[`PIXEL_WIDTH-1:0];
 
-    // Buffer 4x4 differences for Hadamard transform
-    reg signed [10:0] diff_planar_buf [0:15];
-    reg signed [10:0] diff_dc_buf     [0:15];
-    reg signed [10:0] diff_hor_buf    [0:15];
-    reg signed [10:0] diff_ver_buf    [0:15];
+    // Double-buffered 4x4 residual tile banks (User Safeguard #2):
+    // wr_bank receives S_EVAL writes while rd_bank holds completed tile steady for u_had_*
+    reg signed [10:0] diff_planar_buf [0:31];
+    reg signed [10:0] diff_dc_buf     [0:31];
+    reg signed [10:0] diff_hor_buf    [0:31];
+    reg signed [10:0] diff_ver_buf    [0:31];
+    reg               wr_bank, rd_bank;
 
     wire signed [10:0] diff_p = $signed({1'b0, orig_rd_data}) - $signed({1'b0, pred_planar});
     wire signed [10:0] diff_d = $signed({1'b0, orig_rd_data}) - $signed({1'b0, pred_dc});
@@ -227,54 +248,70 @@ module intra_rmd (
 
     hadamard_satd_4x4 u_had_p (
         .clk(clk), .rst_n(rst_n), .start(had_start),
-        .diff_0(diff_planar_buf[0]), .diff_1(diff_planar_buf[1]), .diff_2(diff_planar_buf[2]), .diff_3(diff_planar_buf[3]),
-        .diff_4(diff_planar_buf[4]), .diff_5(diff_planar_buf[5]), .diff_6(diff_planar_buf[6]), .diff_7(diff_planar_buf[7]),
-        .diff_8(diff_planar_buf[8]), .diff_9(diff_planar_buf[9]), .diff_10(diff_planar_buf[10]), .diff_11(diff_planar_buf[11]),
-        .diff_12(diff_planar_buf[12]), .diff_13(diff_planar_buf[13]), .diff_14(diff_planar_buf[14]), .diff_15(diff_planar_buf[15]),
+        .diff_0(diff_planar_buf[{rd_bank, 4'd0}]),   .diff_1(diff_planar_buf[{rd_bank, 4'd1}]),
+        .diff_2(diff_planar_buf[{rd_bank, 4'd2}]),   .diff_3(diff_planar_buf[{rd_bank, 4'd3}]),
+        .diff_4(diff_planar_buf[{rd_bank, 4'd4}]),   .diff_5(diff_planar_buf[{rd_bank, 4'd5}]),
+        .diff_6(diff_planar_buf[{rd_bank, 4'd6}]),   .diff_7(diff_planar_buf[{rd_bank, 4'd7}]),
+        .diff_8(diff_planar_buf[{rd_bank, 4'd8}]),   .diff_9(diff_planar_buf[{rd_bank, 4'd9}]),
+        .diff_10(diff_planar_buf[{rd_bank, 4'd10}]), .diff_11(diff_planar_buf[{rd_bank, 4'd11}]),
+        .diff_12(diff_planar_buf[{rd_bank, 4'd12}]), .diff_13(diff_planar_buf[{rd_bank, 4'd13}]),
+        .diff_14(diff_planar_buf[{rd_bank, 4'd14}]), .diff_15(diff_planar_buf[{rd_bank, 4'd15}]),
         .done(had_done_p), .satd_out(satd_p)
     );
 
     hadamard_satd_4x4 u_had_d (
         .clk(clk), .rst_n(rst_n), .start(had_start),
-        .diff_0(diff_dc_buf[0]), .diff_1(diff_dc_buf[1]), .diff_2(diff_dc_buf[2]), .diff_3(diff_dc_buf[3]),
-        .diff_4(diff_dc_buf[4]), .diff_5(diff_dc_buf[5]), .diff_6(diff_dc_buf[6]), .diff_7(diff_dc_buf[7]),
-        .diff_8(diff_dc_buf[8]), .diff_9(diff_dc_buf[9]), .diff_10(diff_dc_buf[10]), .diff_11(diff_dc_buf[11]),
-        .diff_12(diff_dc_buf[12]), .diff_13(diff_dc_buf[13]), .diff_14(diff_dc_buf[14]), .diff_15(diff_dc_buf[15]),
+        .diff_0(diff_dc_buf[{rd_bank, 4'd0}]),   .diff_1(diff_dc_buf[{rd_bank, 4'd1}]),
+        .diff_2(diff_dc_buf[{rd_bank, 4'd2}]),   .diff_3(diff_dc_buf[{rd_bank, 4'd3}]),
+        .diff_4(diff_dc_buf[{rd_bank, 4'd4}]),   .diff_5(diff_dc_buf[{rd_bank, 4'd5}]),
+        .diff_6(diff_dc_buf[{rd_bank, 4'd6}]),   .diff_7(diff_dc_buf[{rd_bank, 4'd7}]),
+        .diff_8(diff_dc_buf[{rd_bank, 4'd8}]),   .diff_9(diff_dc_buf[{rd_bank, 4'd9}]),
+        .diff_10(diff_dc_buf[{rd_bank, 4'd10}]), .diff_11(diff_dc_buf[{rd_bank, 4'd11}]),
+        .diff_12(diff_dc_buf[{rd_bank, 4'd12}]), .diff_13(diff_dc_buf[{rd_bank, 4'd13}]),
+        .diff_14(diff_dc_buf[{rd_bank, 4'd14}]), .diff_15(diff_dc_buf[{rd_bank, 4'd15}]),
         .done(had_done_d), .satd_out(satd_d)
     );
 
     hadamard_satd_4x4 u_had_h (
         .clk(clk), .rst_n(rst_n), .start(had_start),
-        .diff_0(diff_hor_buf[0]), .diff_1(diff_hor_buf[1]), .diff_2(diff_hor_buf[2]), .diff_3(diff_hor_buf[3]),
-        .diff_4(diff_hor_buf[4]), .diff_5(diff_hor_buf[5]), .diff_6(diff_hor_buf[6]), .diff_7(diff_hor_buf[7]),
-        .diff_8(diff_hor_buf[8]), .diff_9(diff_hor_buf[9]), .diff_10(diff_hor_buf[10]), .diff_11(diff_hor_buf[11]),
-        .diff_12(diff_hor_buf[12]), .diff_13(diff_hor_buf[13]), .diff_14(diff_hor_buf[14]), .diff_15(diff_hor_buf[15]),
+        .diff_0(diff_hor_buf[{rd_bank, 4'd0}]),   .diff_1(diff_hor_buf[{rd_bank, 4'd1}]),
+        .diff_2(diff_hor_buf[{rd_bank, 4'd2}]),   .diff_3(diff_hor_buf[{rd_bank, 4'd3}]),
+        .diff_4(diff_hor_buf[{rd_bank, 4'd4}]),   .diff_5(diff_hor_buf[{rd_bank, 4'd5}]),
+        .diff_6(diff_hor_buf[{rd_bank, 4'd6}]),   .diff_7(diff_hor_buf[{rd_bank, 4'd7}]),
+        .diff_8(diff_hor_buf[{rd_bank, 4'd8}]),   .diff_9(diff_hor_buf[{rd_bank, 4'd9}]),
+        .diff_10(diff_hor_buf[{rd_bank, 4'd10}]), .diff_11(diff_hor_buf[{rd_bank, 4'd11}]),
+        .diff_12(diff_hor_buf[{rd_bank, 4'd12}]), .diff_13(diff_hor_buf[{rd_bank, 4'd13}]),
+        .diff_14(diff_hor_buf[{rd_bank, 4'd14}]), .diff_15(diff_hor_buf[{rd_bank, 4'd15}]),
         .done(had_done_h), .satd_out(satd_h)
     );
 
     hadamard_satd_4x4 u_had_v (
         .clk(clk), .rst_n(rst_n), .start(had_start),
-        .diff_0(diff_ver_buf[0]), .diff_1(diff_ver_buf[1]), .diff_2(diff_ver_buf[2]), .diff_3(diff_ver_buf[3]),
-        .diff_4(diff_ver_buf[4]), .diff_5(diff_ver_buf[5]), .diff_6(diff_ver_buf[6]), .diff_7(diff_ver_buf[7]),
-        .diff_8(diff_ver_buf[8]), .diff_9(diff_ver_buf[9]), .diff_10(diff_ver_buf[10]), .diff_11(diff_ver_buf[11]),
-        .diff_12(diff_ver_buf[12]), .diff_13(diff_ver_buf[13]), .diff_14(diff_ver_buf[14]), .diff_15(diff_ver_buf[15]),
+        .diff_0(diff_ver_buf[{rd_bank, 4'd0}]),   .diff_1(diff_ver_buf[{rd_bank, 4'd1}]),
+        .diff_2(diff_ver_buf[{rd_bank, 4'd2}]),   .diff_3(diff_ver_buf[{rd_bank, 4'd3}]),
+        .diff_4(diff_ver_buf[{rd_bank, 4'd4}]),   .diff_5(diff_ver_buf[{rd_bank, 4'd5}]),
+        .diff_6(diff_ver_buf[{rd_bank, 4'd6}]),   .diff_7(diff_ver_buf[{rd_bank, 4'd7}]),
+        .diff_8(diff_ver_buf[{rd_bank, 4'd8}]),   .diff_9(diff_ver_buf[{rd_bank, 4'd9}]),
+        .diff_10(diff_ver_buf[{rd_bank, 4'd10}]), .diff_11(diff_ver_buf[{rd_bank, 4'd11}]),
+        .diff_12(diff_ver_buf[{rd_bank, 4'd12}]), .diff_13(diff_ver_buf[{rd_bank, 4'd13}]),
+        .diff_14(diff_ver_buf[{rd_bank, 4'd14}]), .diff_15(diff_ver_buf[{rd_bank, 4'd15}]),
         .done(had_done_v), .satd_out(satd_v)
     );
 `else
-    wire [15:0] wL = (N[7:0] - 8'd1 - {2'd0, cx_q}) * refL_y;
-    wire [15:0] wR = ({2'd0, cx_q} + 8'd1) * refT_N;
-    wire [15:0] wT = (N[7:0] - 8'd1 - {2'd0, cy_q}) * refT_x;
-    wire [15:0] wB = ({2'd0, cy_q} + 8'd1) * refL_N;
+    wire [15:0] wL = (N[7:0] - 8'd1 - {2'd0, cx_q2}) * refL_y;
+    wire [15:0] wR = ({2'd0, cx_q2} + 8'd1) * refT_N;
+    wire [15:0] wT = (N[7:0] - 8'd1 - {2'd0, cy_q2}) * refT_x;
+    wire [15:0] wB = ({2'd0, cy_q2} + 8'd1) * refL_N;
     
     wire [15:0] planar_sum = wL + wR + wT + wB + N;
     wire [`PIXEL_WIDTH-1:0] pred_planar = planar_sum >> (pu_size_log2 + 1);
-`endif
 
-    // Absolute Differences
+    // Absolute Differences (used only in unpatched spatial-SAD mode)
     wire [31:0] ad_planar = (orig_rd_data > pred_planar) ? (orig_rd_data - pred_planar) : (pred_planar - orig_rd_data);
     wire [31:0] ad_dc     = (orig_rd_data > pred_dc)     ? (orig_rd_data - pred_dc)     : (pred_dc - orig_rd_data);
     wire [31:0] ad_hor    = (orig_rd_data > pred_hor)    ? (orig_rd_data - pred_hor)    : (pred_hor - orig_rd_data);
     wire [31:0] ad_ver    = (orig_rd_data > pred_ver)    ? (orig_rd_data - pred_ver)    : (pred_ver - orig_rd_data);
+`endif
 
     // Chroma Absolute Differences
     wire [31:0] ad_u_planar = (orig_u_rd_data > pred_planar_u) ? (orig_u_rd_data - pred_planar_u) : (pred_planar_u - orig_u_rd_data);
@@ -292,13 +329,12 @@ module intra_rmd (
     assign rmd_active = (state == S_EVAL);
 
     // Winning Luma Mode derivation for Table 8-2
+`ifdef REMEDIATION
+    wire [5:0] win_luma_mode = best_mode;
+`else
     wire [5:0] luma_mode_sad = (sad_planar <= sad_dc && sad_planar <= sad_hor && sad_planar <= sad_ver) ? `INTRA_PLANAR :
                                (sad_dc <= sad_hor && sad_dc <= sad_ver) ? `INTRA_DC :
                                (sad_hor <= sad_ver) ? 6'd10 : 6'd26;
-
-`ifdef REMEDIATION
-    wire [5:0] win_luma_mode = (pu_size_log2 == 3'd2) ? best_mode : luma_mode_sad;
-`else
     wire [5:0] win_luma_mode = luma_mode_sad;
 `endif
 
@@ -345,48 +381,69 @@ module intra_rmd (
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= S_IDLE;
-            rmd_done <= 0;
-            cx <= 0; cy <= 0;
-            cx_q <= 0; cy_q <= 0;
-            eval_q <= 0;
-            sad_planar <= 0; sad_dc <= 0; sad_hor <= 0; sad_ver <= 0;
+            rmd_done <= 1'b0;
+            req_active <= 1'b0;
+            cx_q1 <= 6'd0; cy_q1 <= 6'd0;
+            cx_q2 <= 6'd0; cy_q2 <= 6'd0;
+            eval_q1 <= 1'b0; eval_q2 <= 1'b0;
+            eval_c_q1 <= 1'b0; eval_c_q2 <= 1'b0;
             sad_c_planar <= 32'd0; sad_c_dc <= 32'd0; sad_c_hor <= 32'd0; sad_c_ver <= 32'd0; sad_c_34 <= 32'd0;
-            eval_c_q <= 1'b0;
             orig_c_rd_addr <= 10'd0;
+            best_mode <= 6'd0;
+            best_cost <= 32'd0;
             best_chroma_pred_mode <= 3'd4;
             best_chroma_dir <= 6'd0;
-            lat_pu_x <= 0; lat_pu_y <= 0;
-            orig_rd_addr <= 0;
+            lat_pu_x <= 6'd0; lat_pu_y <= 6'd0;
+            orig_rd_addr <= 12'd0;
 `ifdef REMEDIATION
+            sub_x <= 2'd0; sub_y <= 2'd0;
+            tile_x <= 3'd0; tile_y <= 3'd0;
+            satd_acc_p <= 32'd0; satd_acc_d <= 32'd0; satd_acc_h <= 32'd0; satd_acc_v <= 32'd0;
+            tiles_acc <= 7'd0;
+            wr_bank <= 1'b0; rd_bank <= 1'b0;
             had_start <= 1'b0;
+`else
+            cx <= 6'd0; cy <= 6'd0;
+            sad_planar <= 32'd0; sad_dc <= 32'd0; sad_hor <= 32'd0; sad_ver <= 32'd0;
 `endif
         end else begin
             state <= next_state;
             
             case (state)
                 S_IDLE: begin
-                    rmd_done <= 0;
+                    rmd_done <= 1'b0;
 `ifdef REMEDIATION
                     had_start <= 1'b0;
 `endif
                     if (start) begin
                         if (pu_size_log2 > 3'd5) begin
                             // Fast return for 64x64
-                            rmd_done <= 1;
+                            rmd_done <= 1'b1;
                             best_cost <= 32'hFFFFFFFF;
                             best_mode <= 6'd0;
                             best_chroma_pred_mode <= 3'd4;
                             best_chroma_dir <= 6'd0;
                         end else begin
-                            cx <= 0; cy <= 0;
-                            sad_planar <= 0; sad_dc <= 0; sad_hor <= 0; sad_ver <= 0;
+                            req_active <= 1'b1;
+                            cx_q1 <= 6'd0; cy_q1 <= 6'd0;
+                            cx_q2 <= 6'd0; cy_q2 <= 6'd0;
+                            eval_q1 <= 1'b0; eval_q2 <= 1'b0;
+                            eval_c_q1 <= 1'b0; eval_c_q2 <= 1'b0;
                             sad_c_planar <= 32'd0; sad_c_dc <= 32'd0; sad_c_hor <= 32'd0; sad_c_ver <= 32'd0; sad_c_34 <= 32'd0;
-                            eval_q <= 0;
-                            eval_c_q <= 0;
                             lat_pu_x <= pu_x;
                             lat_pu_y <= pu_y;
                             best_chroma_pred_mode <= 3'd4;
                             best_chroma_dir <= 6'd0;
+`ifdef REMEDIATION
+                            sub_x <= 2'd0; sub_y <= 2'd0;
+                            tile_x <= 3'd0; tile_y <= 3'd0;
+                            satd_acc_p <= 32'd0; satd_acc_d <= 32'd0; satd_acc_h <= 32'd0; satd_acc_v <= 32'd0;
+                            tiles_acc <= 7'd0;
+                            wr_bank <= 1'b0; rd_bank <= 1'b0;
+`else
+                            cx <= 6'd0; cy <= 6'd0;
+                            sad_planar <= 32'd0; sad_dc <= 32'd0; sad_hor <= 32'd0; sad_ver <= 32'd0;
+`endif
                         end
                     end
                 end
@@ -402,51 +459,99 @@ module intra_rmd (
                 end
                 
                 S_EVAL: begin
-                    // Read Request
-                    if (cy < N[5:0]) begin
-                        orig_rd_addr <= { (lat_pu_y + cy[5:0]), (lat_pu_x + cx[5:0]) };
-                        if (cx == N[5:0] - 6'd1) begin
-                            cx <= 0;
-                            cy <= cy + 1;
-                        end else begin
-                            cx <= cx + 1;
-                        end
-                    end
-                    if (cy < N_C && cx < N_C) begin
+`ifdef REMEDIATION
+                    had_start <= 1'b0;
+`endif
+                    // Stage 0: Issue BRAM read request
+                    if (req_active) begin
+                        orig_rd_addr <= { (lat_pu_y + cy), (lat_pu_x + cx) };
                         orig_c_rd_addr <= { (lat_pu_y[5:1] + cy[4:0]), (lat_pu_x[5:1] + cx[4:0]) };
+                        cx_q1 <= cx;
+                        cy_q1 <= cy;
+                        eval_q1 <= 1'b1;
+                        eval_c_q1 <= ({2'b00, cy} < N_C && {2'b00, cx} < N_C);
+
+`ifdef REMEDIATION
+                        if (sub_x == 2'd3) begin
+                            sub_x <= 2'd0;
+                            if (sub_y == 2'd3) begin
+                                sub_y <= 2'd0;
+                                if (tile_x == tile_max) begin
+                                    tile_x <= 3'd0;
+                                    if (tile_y == tile_max) begin
+                                        tile_y <= 3'd0;
+                                        req_active <= 1'b0;
+                                    end else begin
+                                        tile_y <= tile_y + 3'd1;
+                                    end
+                                end else begin
+                                    tile_x <= tile_x + 3'd1;
+                                end
+                            end else begin
+                                sub_y <= sub_y + 2'd1;
+                            end
+                        end else begin
+                            sub_x <= sub_x + 2'd1;
+                        end
+`else
+                        if (cx == N[5:0] - 6'd1) begin
+                            cx <= 6'd0;
+                            if (cy == N[5:0] - 6'd1) begin
+                                cy <= 6'd0;
+                                req_active <= 1'b0;
+                            end else begin
+                                cy <= cy + 6'd1;
+                            end
+                        end else begin
+                            cx <= cx + 6'd1;
+                        end
+`endif
+                    end else begin
+                        eval_q1 <= 1'b0;
+                        eval_c_q1 <= 1'b0;
                     end
-                    
-                    // Pipeline
-                    cx_q <= cx;
-                    cy_q <= cy;
-                    eval_q <= (cy < N[5:0]);
-                    eval_c_q <= (cy < N_C && cx < N_C);
-                    
-                    // Accumulate
-                    if (eval_q) begin
+
+                    // Stage 1 (q1 -> q2): Match 1-cycle synchronous BRAM read output register
+                    cx_q2 <= cx_q1;
+                    cy_q2 <= cy_q1;
+                    eval_q2 <= eval_q1;
+                    eval_c_q2 <= eval_c_q1;
+
+                    // Stage 2: Consume aligned orig_rd_data / orig_u/v_rd_data
+                    if (eval_q2) begin
+`ifdef REMEDIATION
+                        diff_planar_buf[{wr_bank, cy_q2[1:0], cx_q2[1:0]}] <= diff_p;
+                        diff_dc_buf    [{wr_bank, cy_q2[1:0], cx_q2[1:0]}] <= diff_d;
+                        diff_hor_buf   [{wr_bank, cy_q2[1:0], cx_q2[1:0]}] <= diff_h;
+                        diff_ver_buf   [{wr_bank, cy_q2[1:0], cx_q2[1:0]}] <= diff_v;
+                        if (cx_q2[1:0] == 2'd3 && cy_q2[1:0] == 2'd3) begin
+                            had_start <= 1'b1;
+                            rd_bank   <= wr_bank;
+                            wr_bank   <= ~wr_bank;
+                        end
+`else
                         sad_planar <= sad_planar + ad_planar;
                         sad_dc     <= sad_dc     + ad_dc;
                         sad_hor    <= sad_hor    + ad_hor;
                         sad_ver    <= sad_ver    + ad_ver;
-`ifdef REMEDIATION
-                        if (pu_size_log2 == 3'd2) begin
-                            diff_planar_buf[{cy_q[1:0], cx_q[1:0]}] <= diff_p;
-                            diff_dc_buf    [{cy_q[1:0], cx_q[1:0]}] <= diff_d;
-                            diff_hor_buf   [{cy_q[1:0], cx_q[1:0]}] <= diff_h;
-                            diff_ver_buf   [{cy_q[1:0], cx_q[1:0]}] <= diff_v;
-                        end
 `endif
                     end
-                    if (eval_c_q) begin
+                    if (eval_c_q2) begin
                         sad_c_planar <= sad_c_planar + ad_u_planar + ad_v_planar;
                         sad_c_dc     <= sad_c_dc     + ad_u_dc     + ad_v_dc;
                         sad_c_hor    <= sad_c_hor    + ad_u_hor    + ad_v_hor;
                         sad_c_ver    <= sad_c_ver    + ad_u_ver    + ad_v_ver;
                         sad_c_34     <= sad_c_34     + ad_u_34     + ad_v_34;
                     end
+
 `ifdef REMEDIATION
-                    if (!eval_q && cy == N && pu_size_log2 == 3'd2) begin
-                        had_start <= 1'b1;
+                    // Accumulate completed 4x4 tile SATD outputs while streaming subsequent tiles
+                    if (had_done_p) begin
+                        satd_acc_p <= satd_acc_p + {16'd0, satd_p};
+                        satd_acc_d <= satd_acc_d + {16'd0, satd_d};
+                        satd_acc_h <= satd_acc_h + {16'd0, satd_h};
+                        satd_acc_v <= satd_acc_v + {16'd0, satd_v};
+                        tiles_acc  <= tiles_acc + 7'd1;
                     end
 `endif
                 end
@@ -455,42 +560,32 @@ module intra_rmd (
                 S_HADAMARD: begin
                     had_start <= 1'b0;
                     if (had_done_p) begin
-                        if (satd_p <= satd_d && satd_p <= satd_h && satd_p <= satd_v) begin
+                        satd_acc_p <= satd_acc_p + {16'd0, satd_p};
+                        satd_acc_d <= satd_acc_d + {16'd0, satd_d};
+                        satd_acc_h <= satd_acc_h + {16'd0, satd_h};
+                        satd_acc_v <= satd_acc_v + {16'd0, satd_v};
+                        tiles_acc  <= tiles_acc + 7'd1;
+                    end else if (tiles_acc == total_tiles) begin
+                        if (satd_acc_p <= satd_acc_d && satd_acc_p <= satd_acc_h && satd_acc_p <= satd_acc_v) begin
                             best_mode <= `INTRA_PLANAR;
-                            best_cost <= {16'd0, satd_p};
-                        end else if (satd_d <= satd_h && satd_d <= satd_v) begin
+                            best_cost <= satd_acc_p;
+                        end else if (satd_acc_d <= satd_acc_h && satd_acc_d <= satd_acc_v) begin
                             best_mode <= `INTRA_DC;
-                            best_cost <= {16'd0, satd_d};
-                        end else if (satd_h <= satd_v) begin
+                            best_cost <= satd_acc_d;
+                        end else if (satd_acc_h <= satd_acc_v) begin
                             best_mode <= 6'd10;
-                            best_cost <= {16'd0, satd_h};
+                            best_cost <= satd_acc_h;
                         end else begin
                             best_mode <= 6'd26;
-                            best_cost <= {16'd0, satd_v};
+                            best_cost <= satd_acc_v;
                         end
                     end
                 end
 `endif
 
                 S_DONE: begin
-                    rmd_done <= 1;
-`ifdef REMEDIATION
-                    if (pu_size_log2 != 3'd2) begin
-                        if (sad_planar <= sad_dc && sad_planar <= sad_hor && sad_planar <= sad_ver) begin
-                            best_mode <= `INTRA_PLANAR;
-                            best_cost <= sad_planar;
-                        end else if (sad_dc <= sad_hor && sad_dc <= sad_ver) begin
-                            best_mode <= `INTRA_DC;
-                            best_cost <= sad_dc;
-                        end else if (sad_hor <= sad_ver) begin
-                            best_mode <= 6'd10;
-                            best_cost <= sad_hor;
-                        end else begin
-                            best_mode <= 6'd26;
-                            best_cost <= sad_ver;
-                        end
-                    end
-`else
+                    rmd_done <= 1'b1;
+`ifndef REMEDIATION
                     // synthesis translate_off
                     $display("Time=%0t: [INTRA_RMD] SAD: planar=%0d dc=%0d hor=%0d ver=%0d", $time, sad_planar, sad_dc, sad_hor, sad_ver);
                     $display("DEBUG [INTRA_RMD]: orig_rd_addr=%0d, orig_rd_data=%h, pred_planar=%h, refL_y=%h, refT_x=%h, refT_N=%h, refL_N=%h", 
@@ -536,20 +631,15 @@ module intra_rmd (
     always @(*) begin
         next_state = state;
         case (state)
-            S_IDLE: if (start && pu_size_log2 <= 3'd5) next_state = S_LOAD_REF;
+            S_IDLE:     if (start && pu_size_log2 <= 3'd5) next_state = S_LOAD_REF;
             S_LOAD_REF: if (ref_valid && ref_last) next_state = S_EVAL;
 `ifdef REMEDIATION
-            S_EVAL: begin
-                if (!eval_q && cy == N) begin
-                    if (pu_size_log2 == 3'd2) next_state = S_HADAMARD;
-                    else next_state = S_DONE;
-                end
-            end
-            S_HADAMARD: if (had_done_p) next_state = S_DONE;
+            S_EVAL:     if (!req_active && !eval_q1 && !eval_q2) next_state = S_HADAMARD;
+            S_HADAMARD: if (!had_done_p && (tiles_acc == total_tiles)) next_state = S_DONE;
 `else
-            S_EVAL: if (!eval_q && cy == N) next_state = S_DONE;
+            S_EVAL:     if (!req_active && !eval_q1 && !eval_q2) next_state = S_DONE;
 `endif
-            S_DONE: next_state = S_IDLE;
+            S_DONE:     next_state = S_IDLE;
         endcase
     end
 

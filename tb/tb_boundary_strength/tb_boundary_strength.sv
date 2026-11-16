@@ -53,6 +53,8 @@ module tb_boundary_strength;
     // Outputs
     logic [5:0] edge_qp;
     logic [1:0] bs;
+    logic [1:0] bs_comb;
+    logic [5:0] qp_avg_comb;
 
     //=========================================================================
     // DUT Instantiation
@@ -89,8 +91,8 @@ module tb_boundary_strength;
         // Rule 1: Intra = 2
         if (p_is_intra || q_is_intra) return 2'd2;
         
-        // Rule 2: Residual = 1
-        if (p_cbf_luma || q_cbf_luma) return 2'd1;
+        // Rule 2: Residual = 1 (ITU-T H.265 Clause 8.7.2.4: Luma or Chroma non-zero CBF)
+        if (p_cbf_luma || q_cbf_luma || p_cbf_chroma || q_cbf_chroma) return 2'd1;
         
         // Rule 3: Different number of references
         if (p_bi_pred != q_bi_pred) return 2'd1;
@@ -159,6 +161,7 @@ module tb_boundary_strength;
         p_is_intra = 0; q_is_intra = 0;
         p_qp = 32;      q_qp = 32;
         p_cbf_luma = 0; q_cbf_luma = 0;
+        p_cbf_chroma = 0; q_cbf_chroma = 0;
         p_bi_pred = 0;  q_bi_pred = 0;
         p_ref_idx_l0 = 0; p_ref_idx_l1 = 1;
         q_ref_idx_l0 = 0; q_ref_idx_l1 = 1;
@@ -208,6 +211,14 @@ module tb_boundary_strength;
         q_cbf_luma = 1;
         send_edge();
 
+        drive_defaults();
+        p_cbf_chroma = 1;
+        send_edge();
+
+        drive_defaults();
+        q_cbf_chroma = 1;
+        send_edge();
+
         // TEST 5: Ref list mismatch (BS=1)
         drive_defaults();
         p_ref_idx_l0 = 2; // differs from q
@@ -234,6 +245,8 @@ module tb_boundary_strength;
             q_is_intra = $urandom() % 2;
             p_cbf_luma = $urandom() % 2;
             q_cbf_luma = $urandom() % 2;
+            p_cbf_chroma = $urandom() % 2;
+            q_cbf_chroma = $urandom() % 2;
             p_bi_pred  = $urandom() % 2;
             q_bi_pred  = $urandom() % 2;
             

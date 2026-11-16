@@ -99,6 +99,8 @@ module cabac_enc_top #(
 `ifdef REMEDIATION
     input  wire [1:0]  coeff_scan_mode,
 `endif
+    input  wire        tu_cg_mask_en,
+    input  wire [63:0] tu_cg_nonzero_mask,
     output wire        coeff_rd_en,
     output wire [11:0] coeff_rd_addr,
     input  wire signed [COEFF_W-1:0] coeff_rd_data,
@@ -365,8 +367,10 @@ module cabac_enc_top #(
         .tu_cbf        (coeff_tu_cbf),
         .last_sig_pos  (coeff_last_sig_pos),
 `ifdef REMEDIATION
-        .scan_mode     (coeff_scan_mode),
+        .scan_mode         (coeff_scan_mode),
 `endif
+        .tu_cg_mask_en     (tu_cg_mask_en),
+        .tu_cg_nonzero_mask(tu_cg_nonzero_mask),
         .coeff_rd_en   (coeff_rd_en),
         .coeff_rd_addr (coeff_rd_addr),
         .coeff_rd_data (coeff_rd_data),

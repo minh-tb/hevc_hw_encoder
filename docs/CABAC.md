@@ -10,7 +10,7 @@ The subsystem consists of three tightly coupled pipeline stages:
    - Truncated Rice (TR)
    - Exp-Golomb ($EG0, EG1, EG2$)
    - Truncated Unary (TU)
-2. **Context Modeling**: Dynamically selects one of **154 probability models** based on spatial neighbors (left and above CUs/TUs). Each context model stores:
+2. **Context Modeling**: Dynamically selects one of **186 probability models** (`ctx 0..185`, initialized in 186 cycles per slice via `ctx_model_store.v`) based on spatial neighbors (left and above CUs/TUs). Each context model stores:
    - **`pStateIdx` [5:0]**: 6-bit Least Probable Symbol (LPS) probability state ($0..62$).
    - **`valMPS`**: 1-bit Most Probable Symbol ($0$ or $1$).
 3. **Binary Arithmetic Range Coding (M-Coder)**:
@@ -44,7 +44,7 @@ flowchart TD
     %% Regular Context Coded Path
     subgraph RegularCoding ["Nhánh Mã Hóa Có Ngữ Cảnh (Context-Coded Bins)"]
         CalcCtx["Tính toán Context Index (ctxIdx)<br/>dựa trên trạng thái lân cận (Left &amp; Above)"]
-        ReadCtx["Đọc xác suất pStateIdx &amp; valMPS<br/>từ CtxStore SRAM (154 x 7-bit)"]
+        ReadCtx["Đọc xác suất pStateIdx &amp; valMPS<br/>từ CtxStore SRAM (186 x 7-bit, ctx 0..185)"]
         RangeCoderCtx["Cập nhật Arithmetic Range Coder (M-Coder):<br/>1. rLPS = table&#91;pStateIdx&#93;&#91;(Range &gt;&gt; 6) &amp; 3&#93;<br/>2. If bin == valMPS:<br/>&nbsp;&nbsp;&nbsp;&nbsp;Range = Range - rLPS<br/>&nbsp;&nbsp;&nbsp;Else:<br/>&nbsp;&nbsp;&nbsp;&nbsp;Low = Low + (Range - rLPS); Range = rLPS"]
         UpdateCtx["Cập nhật trạng thái Context mới:<br/>pStateIdx_next = next_state_MPS/LPS(pStateIdx)<br/>Ghi lại CtxStore SRAM"]
     end
@@ -118,7 +118,7 @@ graph TD
 
     SCU & SPRED & SCOEFF & SSAO --> BIN["bin_encoder.v<br/>(Bin Multiplexer & Context Dispatcher)"]:::submod
 
-    BIN <--> CTX[("ctx_model_store.v<br/>(154 x 7-bit State SRAM<br/>LUT Initialization)")]:::sram
+    BIN <--> CTX[("ctx_model_store.v<br/>(186 x 7-bit State SRAM<br/>186-Cycle LUT Init)")]:::sram
     BIN --> RC["range_coder.v<br/>(M-Coder Arithmetic Engine<br/>Renormalization & Byte Packing)"]:::submod
 
     RC --> OUT[("Output FIFO / NAL Writer<br/>(Annex B Stream)")]:::sram
@@ -128,8 +128,8 @@ graph TD
 
 | Module | Location | Function & HEVC Specification Clause |
 |:---|:---|:---|
-| [`cabac_enc_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) | `rtl/entropy/cabac_enc_top.v` | Top-level orchestrator. Arbitrates requests between CU, Pred, Coeff, and SAO syntax generators; manages slice initialization and terminating flush. |
-| [`ctx_model_store`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/ctx_model_store.v) | `rtl/entropy/ctx_model_store.v` | Implements Table 9-4 through 9-40. Initializes 154 contexts using linear equation: $\text{slope} \cdot \text{clamp}(\text{QP}, 0, 51) + \text{offset}$. Stores 6-bit `pStateIdx` and 1-bit `valMPS`. |
+| [`cabac_enc_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) | `rtl/entropy/cabac_enc_top.v` | Top-level orchestrator. Arbitrates requests between CU, Pred, Coeff, and SAO syntax generators; manages 186-cycle slice initialization, `ctu_bin_ram` (`8192 x 10-bit`, `2 RAMB36 + 1 RAMB18`) CTU-delayed serialization with `drain_prefetched_valid` BRAM drain alignment, and terminating flush. |
+| [`ctx_model_store`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/ctx_model_store.v) | `rtl/entropy/ctx_model_store.v` | Implements Table 9-4 through 9-40 (`N_CTX = 186`, `ctx 0..185`, `186`-cycle slice initialization). Initializes contexts using linear equation: $\text{slope} \cdot \text{clamp}(\text{QP}, 0, 51) + \text{offset}$ (`slice_type`: `0=B, 1=P, 2=I` under `REMEDIATION`). Stores 6-bit `pStateIdx` and 1-bit `valMPS`. |
 | [`bin_encoder`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/bin_encoder.v) | `rtl/entropy/bin_encoder.v` | Receives syntax bin requests; performs context lookup from `ctx_model_store`; drives `range_coder` with context or bypass directives. |
 | [`range_coder`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v) | `rtl/entropy/range_coder.v` | Synthesizable M-coder arithmetic engine (Clause 9.3.4.3). Uses 4-column LPS range table $4 \times 64$; features single-cycle renormalization loop with carry-over propagation. |
 | [`syntax_cu`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_cu.v) | `rtl/entropy/syntax_cu.v` | Encodes `split_cu_flag`, `cu_skip_flag`, `cu_merge_flag`, `merge_idx`, `pred_mode_flag`, `part_mode`, and intra prediction directions. |
@@ -160,5 +160,5 @@ $$\text{Low} \leftarrow (\text{Low} \ll 1) + (\text{bin} ? \text{Range} : 0)$$
 $$\text{Range} \leftarrow \text{Range}$$
 
 ### Conformance Verification & Synthesis Footprint
-- **Bit-Exact Bin Conformance**: The CABAC engine achieves **100.00% bit-exact conformance across all 29,383 bins** (`POC 0`: `8,844/8,844`, `POC 1`: `9,908/9,908`, `POC 2`: `10,631/10,631` with CTU-delayed dynamic `EO`/`BO`/`OFF` SAO and Rate Control enabled) against HM 18.0 reference decoder traces (`TAppDecoder.exe`) across all frame types ($I$, $P$, $B$).
-- **UltraScale+ Synthesis Footprint (`xczu19eg-ffvb1517-2-e`)**: `cabac_enc_top` synthesizes to **5,372 CLB LUTs**, **2,358 Flip-Flops**, and **2 RAMB36 + 1 RAMB18 (`ctu_bin_ram`)** (`0 DSPs`) with zero timing violations (`u_sc`: `2,688 LUTs, 717 FFs`; `u_ctx`: `1,248 LUTs, 1,335 FFs`; `u_rc`: `784 LUTs, 109 FFs`; `u_sp`: `296 LUTs, 112 FFs`; `u_be`: `253 LUTs, 18 FFs`; `u_ssao`: `73 LUTs, 29 FFs`).
+- **Bit-Exact Bin Conformance**: The CABAC engine achieves **100.00% bit-exact conformance across all 28,962 bins** (`POC 0`: `8,496/8,496`, `POC 1`: `10,022/10,022`, `POC 2`: `10,444/10,444` across all 6 traced fields `bin, type, range, pstate, valmps, ctx`, with Pillar 3 per-CU `tu_cg_nonzero_mask` zero-CG skipping, CTU-delayed dynamic `BO`/`EO`/`OFF` SAO, and Rate Control enabled) against HM 18.0 reference decoder traces (`TAppDecoder.exe`) across all frame types ($I$, $P$, $B$).
+- **UltraScale+ Synthesis Footprint (`xczu19eg-ffvb1517-2-e`)**: `cabac_enc_top` synthesizes to **5,478 CLB LUTs**, **2,369 Flip-Flops**, and **2 RAMB36 + 1 RAMB18 (`ctu_bin_ram`)** (`0 DSPs`) with zero timing violations (`u_sc`: `2,766 LUTs, 736 FFs`; `u_ctx`: `1,199 LUTs, 1,335 FFs`; `u_rc`: `777 LUTs, 109 FFs`; `u_sp`: `306 LUTs, 111 FFs`; `u_be`: `262 LUTs, 10 FFs`; `u_ssao`: `128 LUTs, 29 FFs`; plus `ctu_bin_ram` BRAM drain control).

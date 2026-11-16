@@ -179,7 +179,7 @@ graph TD
     MD --> INTRA_PRED["u_intra_pred"]:::coremod
     MD --> SUBPEL_L0["u_subpel_core_l0"]:::coremod
     MD --> SUBPEL_L1["u_subpel_core_l1"]:::coremod
-    MD --> SUBPEL_STR["u_synth_subpel_filter"]:::coremod
+    MD --> MC_WIN["u_mc_window_fetch"]:::coremod
     MD --> RES["u_residual_sub"]:::coremod
 
     RES --> DCT["u_dct_top"]:::coremod
@@ -213,22 +213,22 @@ graph TD
 | 7 | `u_mvp_predictor` | `mvp_predictor` | `pu_valid`, `cu_x/y`, `neighbor_mv_line_buf`, `col_ref_mv` | `amvp_mv_x_flat`, `amvp_mv_y_flat` | Derives spatial and temporal AMVP candidates ($A_0, A_1, B_0, B_1, B_2, \text{Col}$). |
 | 8 | `u_mode_decision` | `mode_decision` | `intra_rd_cost`, `intra_best_mode`, `best_sad`, `best_mv_x/y`, `merge_cand` | `split_flag`, `best_is_intra`, `best_intra_mode`, `best_inter_mv_x/y`, `best_skip_flag` | Minimizes Lagrangian cost $J = D + \lambda R$; drives FEN early split termination. |
 | 9 | `u_residual_sub` | `residual_sub` | `orig_pixel`, `pred_pixel`, `orig_valid`, `pred_valid` | `residual_data` | Subtracts predicted pixel from original sample to form 16-bit residual ($16\text{-bit}$). |
-| 10 | `u_intra_rmd` | `intra_rmd` | `orig_samples`, `ref_samples` | `intra_best_mode`, `intra_rd_cost` | Pre-screens all 35 intra modes using $4\times 4$ Hadamard SATD. |
+| 10 | `u_intra_rmd` | `intra_rmd` | `orig_samples`, `ref_samples` (incl. Chroma above-right bit-5 fix) | `intra_best_mode`, `intra_rd_cost`, `best_chroma_pred_mode/dir` | Evaluates 4 Luma modes (`Planar=0, DC=1, Hor=10, Ver=26`) via `4x4`-tiled Hadamard SATD across `4x4..32x32` with ping-pong residual banks + 5-cand Chroma RDO (`9,857 LUTs, 5,392 FFs, 12 DSPs`). |
 | 11 | `u_inter_pred` | `inter_pred_top` | `search_start`, `cu_orig_flat`, `mvp_x/y`, `ref_slot_in/l1` | `best_mv_x/y`, `best_sad`, `mc_pred_y/cb/cr` | Executes integer TZ search, quarter-pel FME, and bi-prediction MC. |
-| 12 | `u_mc_window_fetch` | `mc_window_fetch` | `start`, `comp`, `tu_size_log2`, `base_x/y`, `rd_data_l0/l1` | `rd_addr`, `win_valid`, `win_l0/l1_flat`, `win_x/y`, `win_last`, `busy` | Sliding-column DPB window fetch engine for fractional motion compensation. |
+| 12 | `u_mc_window_fetch` | `mc_window_fetch` | `start`, `comp`, `tu_size_log2`, `base_x/y`, `frac_x/y`, `rd_hold`, `rd_data_l0/l1` | `rd_addr_0/1`, `win_valid`, `win_l0/l1_flat`, `win_x/y`, `win_last`, `busy` | TDP 2-sample/cyc sliding-column DPB window fetch engine (`13,739 LUTs, 3,896 FFs`) w/ 0D/1D fast fetch, row-start reuse, write-through bypass, and `rd_hold` Port-A write collision stall. |
 | 13 | `u_subpel_core_l0` | `subpel_interpolation_core` | `ref_stream_l0`, `subpel_phase_x/y` | `interp_pixels_l0` | 8-tap luma / 4-tap chroma sub-pel interpolation engine for List 0. |
 | 14 | `u_subpel_core_l1` | `subpel_interpolation_core` | `ref_stream_l1`, `subpel_phase_x/y` | `interp_pixels_l1` | 8-tap luma / 4-tap chroma sub-pel interpolation engine for List 1 (B-frames). |
-| 15 | `u_intra_pred` | `intra_pred_top` | `intra_mode`, `pu_size_log2`, `ref_sample` | `intra_pred_pixel`, `out_valid` | Computes Planar (0), DC (1), or Angular (2..34) prediction matrices with 3-tap ref filter. |
+| 15 | `u_intra_pred` | `intra_pred_top` | `intra_mode`, `pu_size_log2`, `ref_sample` | `intra_pred_pixel`, `out_valid` | Computes all 35 prediction modes — Planar (0), DC (1), and Angular (2..34) — with 3-tap ref filter (`10,369 LUTs [48 LUTRAMs], 4,436 FFs, 23 DSPs`). |
 | 16 | `u_dct_top` | `dct_top` | `residual_data`, `tu_size_log2`, `is_dst7`, `fwd_inv_n=1` | `dct_out_data` ($32\times 32\times 16$) | 2-pass row-serial transform using `transform_1d_core` and `transpose_ram_32x32`. |
 | 17 | `u_addr_gen` | `address_generator` | `ctu_x`, `ctu_y`, `latched_wr_slot` | `axi_awaddr`, `axi_awlen` | Computes byte addresses in DRAM for reconstructed frame writeback. |
 | 18 | `u_fwd_quant` | `fwd_quant` | `dct_out_data`, `frame_qp`, `tu_size_log2` | `quant_out_level`, `quant_out_cbf` | Deadzone scalar quantization and Coded Block Flag generation. |
 | 19 | `u_inv_quant` | `inv_quant` | `quant_out_level`, `frame_qp` | `inv_quant_out_coeff` | Dequantizes transform coefficients for the local reconstruction feedback loop. |
 | 20 | `u_s2p_addr_gen` | `address_generator` | `ref_req_x`, `ref_req_y`, `ref_slot` | `fs_araddr`, `fs_arlen` | Serial-to-parallel memory address generator for reference frame read requests. |
 | 21 | `u_recon_unit` | `recon_unit` | `pred_pixel`, `idct_out_data` | `recon_out_pixel` ($10\text{-bit}$) | Reconstructs pixels: $\text{Clip Main10}(\text{Pred} + \text{IDCT}_{\text{res}}) \in [0..1023]$ (`1 RAMB36E2, 1 RAMB18E2`). |
-| 22 | `u_inloop_filters` | `decoder_inloop_filters` | `recon_out_pixel`, `cu_map_*`, `nbr_*`, `out_ready` | `filt_out_pixel`, `out_valid`, `inloop_ctu_done` | Dual in-loop filter subsystem (`deblock_top` + `sao_top`) with synchronous BRAM CTU buffers and decoupled `dump_valid_q` streaming handshake. |
-| 23 | `u_frame_store` | `frame_store` | `recon_out_pixel`, `filt_out_pixel` | `ref_resp_data`, `axi_wdata` | Multi-bank on-chip reconstructed pixel buffer (`28 RAMB36E2, 8 RAMB18E2` in top DPB) and DMA interface. |
+| 22 | `u_inloop_filters` | `decoder_inloop_filters` | `recon_out_pixel`, `ctu_qp`, `cu_map_*`, `nbr_*`, `out_ready` | `filt_out_pixel`, `out_valid`, `inloop_ctu_done` | Deblock (`bs_comb` 1-cycle skip, grid-stepped traversal, pipelined load, skip unmodified writes) + `sao_top` (`EO_45` `n0_rd_valid`) + `sao_stats` (`33,665 LUTs, 37,374 FFs, 2 RAMB36, 6 RAMB18, 2 DSPs`). |
+| 23 | `u_frame_store` | `frame_store` | `recon_out_pixel`, `filt_out_pixel` | `ref_resp_data`, `axi_wdata` | Multi-bank on-chip reconstructed pixel buffer (`28 RAMB36E2, 8 RAMB18E2` in top DPB w/ pipelined Port-A writes) and DMA interface. |
 | 24 | `u_axi_read_arbiter` | `axi_read_arbiter` | `fs_arvalid`, `tz_arvalid`, `mc_arvalid` | `axi_arvalid`, `axi_araddr` | Round-robin arbitration for external DRAM read requests across search and filter engines. |
 | 25 | `u_coeff_buffer` | `coeff_buffer` | `quant_out_level`, `coeff_rd_addr` | `coeff_rd_data` | Dual-port SRAM buffer decoupling fast Reconstruction from CABAC serialization. |
-| 26 | `u_cabac_enc_top` | `cabac_enc_top` | `wire_cu_req`, `pred_req`, `coeff_req`, `sao_req` | `rbsp_byte`, `rbsp_valid` | M-coder entropy coder with 154 contexts, binarizers, and single-cycle renormalization (`5,300 LUTs, 2,320 FFs`). |
+| 26 | `u_cabac_enc_top` | `cabac_enc_top` | `wire_cu_req`, `pred_req`, `coeff_req`, `sao_req`, `tu_cg_nonzero_mask`, `tu_cg_mask_en` | `rbsp_byte`, `rbsp_valid`, `ctu_bin_drain_done` | M-coder entropy coder with **186 contexts** (`ctx 0..185`, `186`-cycle init), `ctu_bin_ram` (`8K x 10`, `2 RAMB36 + 1 RAMB18`) w/ `drain_prefetched_valid`, `tu_cg_nonzero_mask` zero-CG skip (`5,478 LUTs, 2,369 FFs`). |
 | 27 | `u_nal_writer` | `nal_writer` | `rbsp_byte`, `rbsp_valid`, `nal_type` | `out_byte`, `out_valid` | Packs RBSP into Annex B NAL units with `0x00000001` headers and emulation prevention. |
 

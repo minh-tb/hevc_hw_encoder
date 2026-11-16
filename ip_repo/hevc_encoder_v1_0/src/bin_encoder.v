@@ -55,7 +55,7 @@
 `include "parameter_pkg.vh"
 
 module bin_encoder #(
-    parameter CTX_ID_W = 8     // context index width (covers 0..153)
+    parameter CTX_ID_W = 8     // context index width (covers 0..185)
 )(
     input  wire                clk,
     input  wire                rst_n,
@@ -67,7 +67,7 @@ module bin_encoder #(
     // ── Bin input from syntax_cu / syntax_pred / syntax_coeff ───────────────
     input  wire                bin_valid,    // new bin available
     input  wire                bin_value,    // 0 or 1
-    input  wire [CTX_ID_W-1:0] ctx_id,       // context index (0..153, ignored if is_ep)
+    input  wire [CTX_ID_W-1:0] ctx_id,       // context index (0..185, ignored if is_ep)
     input  wire                is_ep,        // 1 = bypass (equiprobable), 0 = context-coded
     output wire                bin_rdy_out,  // 1 = can accept a new bin this cycle
 

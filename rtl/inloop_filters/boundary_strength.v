@@ -101,7 +101,9 @@ module boundary_strength (
     //-------------------------------------------------------------------------
     output reg          out_valid,
     input  wire         out_ready,
-    output reg  [1:0]   bs            // 0=none, 1=weak candidate, 2=strong candidate
+    output reg  [1:0]   bs,           // 0=none, 1=weak candidate, 2=strong candidate
+    output wire [1:0]   bs_comb,      // Pillar 4: combinational BS for 1-cycle Bs==0 skip
+    output wire [5:0]   qp_avg_comb   // Pillar 4: combinational edge QP
 );
 
     //-------------------------------------------------------------------------
@@ -216,7 +218,7 @@ module boundary_strength (
     // -----------------------------------------------------------------------
     // BS combinational result
     // -----------------------------------------------------------------------
-    wire [1:0] bs_comb =
+    assign bs_comb =
         bs2                             ? 2'd2 :   // intra
         (has_residual || ref_diff || mv_diff) ? 2'd1 :   // inter diff
         2'd0;                                       // no filtering
@@ -227,6 +229,7 @@ module boundary_strength (
     // -----------------------------------------------------------------------
     wire [6:0] qp_sum  = {1'b0, p_qp} + {1'b0, q_qp} + 7'd1;
     wire [5:0] qp_avg  = qp_sum[6:1];   // >> 1
+    assign qp_avg_comb = qp_avg;
 
     //-------------------------------------------------------------------------
     // Output register

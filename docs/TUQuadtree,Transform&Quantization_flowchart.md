@@ -149,6 +149,6 @@ graph LR
 ```
 
 ### Synthesis Verification & Resource Metrics
-- **Multipliers**: 348 shared constant multipliers in `transform_1d_core.v` (`50,027 LUTs, 513 FFs, 1 DSP48E2`; **99.4% reduction** over 57,411 unrolled 2D multipliers). Total `dct_top.v` footprint: `86,280 LUTs, 35,075 FFs, 1 DSP48E2` (including `transpose_ram_32x32`: `5,077 LUTs, 16,896 FFs`).
-- **Tested Block Types**: $4\times 4$ DST-VII, $4\times 4$ DCT-II, $8\times 8$ DCT-II, $16\times 16$ DCT-II, $32\times 32$ DCT-II.
+- **Multipliers**: 348 shared constant multipliers in `transform_1d_core.v` (`54,159 LUTs, 513 FFs, 1 DSP48E2`; **99.4% reduction** over 57,411 unrolled 2D multipliers). Total `dct_top.v` footprint (`xczu19eg-ffvb1517-2-e`): `91,341 LUTs, 35,130 FFs, 1 DSP48E2` (including `transpose_ram_32x32`: `5,075 LUTs, 16,896 FFs`, plus top mux/control `32,107 LUTs, 17,721 FFs`).
+- **Tested Block Types & Invocation Scope**: $4\times 4$ DST-VII, $4\times 4$ DCT-II, $8\times 8$ DCT-II, $16\times 16$ DCT-II, $32\times 32$ DCT-II. In [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v), `is_dst7` is asserted for $4\times 4$ intra luma blocks (`tu_size_log2 == 3'd2 && latched_cu_is_intra && reg_tu_comp == 2'd0`), and $4\times 4$ DST-VII is unit-verified in `tb/tb_flaw_dst7/tb_flaw_dst7.sv`, `tb/tb_transform/tb_transform_rigorous.v`, and `tb/tb_dct_top/tb_dct_top.sv`. Because the full-encoder baseline operates with `RQT depth = 0` (`TU = CU`) and an $8\times 8$ minimum CU size, the 3-frame Foreman encoder run invokes $8\times 8$ through $32\times 32$ DCT-II.
 - **Verification**: Verified bit-exact against HM 18.0 `TComTrQuant::xTrMxN()` and `TComTrQuant::xITrMxN()`.

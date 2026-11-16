@@ -14,9 +14,9 @@ The hardware encoder implements the **HEVC/H.265 Main10 Profile** targeting synt
    - **FME**: Quarter-pel Fractional Motion Estimation.
    - **MC Unit**: 8-tap luma and 4-tap chroma sub-pel interpolation for unidirectional ($L0$, $L1$) and bidirectional ($BI$) prediction.
 5. **Intra Prediction**:
-   - **RMD**: Rough Mode Decision screens all 35 intra modes using $4\times 4$ Hadamard SATD.
-   - **Reference Filter**: 3-tap smoothing filter $[1, 2, 1]/4$ applied to boundary samples.
-   - **Predictors**: Planar (Mode 0), DC (Mode 1), and Angular (Modes 2–34).
+   - **RMD**: Rough Mode Decision screens **4 Luma modes** (`Planar=0, DC=1, Hor=10, Ver=26`) using `4x4`-tiled Hadamard SATD across `4x4..32x32` CUs/PUs (`ping-pong` double-buffered residual banks) plus a **5-candidate Chroma RDO** (`Planar, Ver, Hor, DC, DM` per Table 8-2).
+   - **Reference Filter**: 3-tap smoothing filter $[1, 2, 1]/4$ applied to boundary samples (with Chroma `above-right` reference fetch bit-5 masking in `hevc_encoder_top.v`).
+   - **Predictors**: Reconstruction engine (`intra_pred_top.v` / `intra_angular.v`) supports all 35 HEVC modes — Planar (Mode 0), DC (Mode 1), and Angular (Modes 2–34).
 6. **Transform & Quantization (TU Quadtree)**:
    - Supports $4\times 4$ DST-VII (Intra luma) and $4\times 4, 8\times 8, 16\times 16, 32\times 32$ DCT-II.
    - Row-serial 2D transform engine with dual-port transpose RAM.
@@ -26,9 +26,9 @@ The hardware encoder implements the **HEVC/H.265 Main10 Profile** targeting synt
    - Local reconstructed sample feedback for intra-frame spatial prediction.
 8. **In-Loop Filters**:
    - **Deblocking Filter**: Boundary Strength ($bS = 0, 1, 2$) evaluation followed by strong/weak luma filtering and chroma filtering across horizontal and vertical edges.
-   - **SAO (Sample Adaptive Offset)**: Edge Offset (EO) across 4 directional classes and Band Offset (BO) across 32 sample bands.
+   - **SAO (Sample Adaptive Offset)**: Full-CTU `Y -> Cb -> Cr` 32-band Band Offset (BO) RDO (`sao_stats.v`: causality border-skip on non-last CTUs, symmetric `[-15, +15]` clamp matching `syntax_sao.v` `cMax=31`, `ctu_qp` Q8 lambda LUT, latched neighbor BO forwarding on `db_pix_wr_neighbor` `out_pixel`) and last-CTU (`is_last_col && is_last_row`) 4-class Edge Offset (EO: `0°, 90°, 135°, 45°`) RDO via internal `64x10b` line buffer.
 9. **Entropy Coding (CABAC)**:
-   - M-coder binary arithmetic coder with 154 context models.
+   - M-coder binary arithmetic coder with **186 context models** (`ctx 0..185`, 186-cycle slice initialization) and `ctu_bin_ram` CTU-delayed serialization (`drain_prefetched_valid` BRAM drain alignment).
    - Dedicated syntax serialization for slice headers, CU syntax, prediction info, SAO, and residual transform coefficients.
    - Emits an Annex B compliant byte stream.
 
@@ -60,7 +60,7 @@ flowchart TD
         SliceCheck{"Kiểm tra loại Slice<br/>(Slice Type?)"}
 
         %% Intra Branch
-        Intra["Intra Prediction Evaluation<br/>1. RMD SATD Pre-screen (35 modes)<br/>2. 3-Tap Ref Sample Filtering<br/>3. Planar, DC, Angular 2..34"]
+        Intra["Intra Prediction Evaluation<br/>1. 4-Mode Luma RMD SATD (0,1,10,26) + 5-Cand Chroma RDO<br/>2. 3-Tap Ref Sample Filtering<br/>3. Full Reconstruction: Planar, DC, Angular (Modes 0..34)"]
 
         %% Inter Branch
         FDM["FDM / Early Merge & Skip Check<br/>(Đánh giá 5 ứng viên Merge từ MVP)"]
@@ -150,7 +150,7 @@ The algorithm flowchart directly maps to dedicated synthesizable RTL hardware mo
 | **Slice Control** | [`slice_controller`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/slice_controller.v) | `rtl/top/slice_controller.v` | Slice header generation, CTU coordinate sequencing, CABAC context reload strobe. |
 | **CTU Scheduler** | [`ctu_raster_scan`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/partition/ctu_raster_scan.v) | `rtl/partition/ctu_raster_scan.v` | Raster order CTU $(x, y)$ coordinate generation, frame boundary clipping. |
 | **CU Quadtree Split** | [`ctu_partitioner`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/partition/ctu_partitioner.v)<br>[`pu_cu_splitter`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/partition/pu_cu_splitter.v) | `rtl/partition/ctu_partitioner.v`<br>`rtl/partition/pu_cu_splitter.v` | Recursive top-down quadtree splitting ($64\to 8$), PU partition dispatching ($2N\times 2N$). |
-| **Intra Evaluation** | [`intra_rmd`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v)<br>[`intra_pred_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_pred_top.v) | `rtl/intra/intra_rmd.v`<br>`rtl/intra/intra_pred_top.v` | 35-mode RMD screening, boundary reference filtering, Planar, DC, and 33-direction Angular prediction. |
+| **Intra Evaluation** | [`intra_rmd`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v)<br>[`intra_pred_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_pred_top.v) | `rtl/intra/intra_rmd.v`<br>`rtl/intra/intra_pred_top.v` | 4-mode Luma RMD (`Planar=0, DC=1, Hor=10, Ver=26`) via `4x4`-tiled Hadamard SATD + 5-candidate Chroma RDO; boundary reference filtering and full Planar, DC, and 33 Angular mode reconstruction (`intra_pred_top`). |
 | **Inter Evaluation** | [`tz_search`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/tz_search.v)<br>[`fme_search`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/fme_search.v)<br>[`mvp_predictor`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/mvp_predictor.v) | `rtl/inter/tz_search.v`<br>`rtl/inter/fme_search.v`<br>`rtl/inter/mvp_predictor.v` | Test Zone Search integer ME, AMVP candidate list derivation, quarter-pel sub-pixel refinement. |
 | **Motion Comp (MC)** | [`mc_unit`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/mc_unit.v)<br>[`subpel_interpolation_core`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/subpel_interpolation_core.v) | `rtl/inter/mc_unit.v`<br>`rtl/inter/subpel_interpolation_core.v` | Bi-prediction motion compensation, 8-tap luma and 4-tap chroma filtering. |
 | **Mode Decision** | [`mode_decision`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/partition/mode_decision.v) | `rtl/partition/mode_decision.v` | Lagrangian RD-cost comparison ($J = D + \lambda R$), FEN early termination split flag generation. |
@@ -159,6 +159,6 @@ The algorithm flowchart directly maps to dedicated synthesizable RTL hardware mo
 | **Quantization** | [`fwd_quant`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/quant/fwd_quant.v)<br>[`inv_quant`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/quant/inv_quant.v) | `rtl/quant/fwd_quant.v`<br>`rtl/quant/inv_quant.v` | Forward deadzone scalar quantization and inverse scaling dequantization. |
 | **Reconstruction** | [`recon_unit`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/recon/recon_unit.v)<br>[`frame_store`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/recon/frame_store.v) | `rtl/recon/recon_unit.v`<br>`rtl/recon/frame_store.v` | Reconstructs $\text{Rec} = \text{Clip}(\text{Pred} + \text{InvRes})$, manages on-chip line buffers and DRAM writes. |
 | **Deblocking Filter** | [`deblock_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/deblock_top.v) | `rtl/inloop_filters/deblock_top.v` | Boundary strength calculation, vertical and horizontal edge filtering across CTU boundaries. |
-| **SAO Filter** | [`sao_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v) | `rtl/inloop_filters/sao_top.v` | Sample Adaptive Offset Edge Offset and Band Offset filtering and statistics accumulation. |
-| **Entropy Coding** | [`cabac_enc_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) | `rtl/entropy/cabac_enc_top.v` | Context model management, syntax element binarization, M-coder arithmetic engine, byte packing. |
+| **SAO Filter** | [`sao_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v)<br>[`sao_stats`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v) | `rtl/inloop_filters/sao_top.v`<br>`rtl/inloop_filters/sao_stats.v` | Full-CTU `Y->Cb->Cr` 32-band BO RDO, last-CTU 4-class EO RDO via `64x10b` line buffer, and 2-phase BRAM SAO pixel filtering. |
+| **Entropy Coding** | [`cabac_enc_top`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) | `rtl/entropy/cabac_enc_top.v` | 186-context model store (`ctx 0..185`, 186-cycle init), `ctu_bin_ram` CTU-delayed serialization, syntax binarization, M-coder arithmetic engine, byte packing. |
 | **Rate Control** | [`rate_controller`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/rate_control/rate_controller.v) | `rtl/rate_control/rate_controller.v` | VBV virtual buffer fullness estimation, frame-level QP adaptation, $\lambda$ cost scaling. |

@@ -95,6 +95,7 @@ module ref_frame_buffer #(
     input  wire [2:0]                ref_req_slot,   // DPB frame slot
     input  wire signed [11:0]               ref_req_x,      // top-left x of extended region
     input  wire signed [11:0]               ref_req_y,      // top-left y of extended region
+    input  wire                      ref_req_is_4x4, // 1=4x4 Luma fetch (TZ search), 0=full BLK_EXT
     // (signed interpretation: negative = left/above frame border)
 
     // Response port — to mc_unit
@@ -160,8 +161,15 @@ module ref_frame_buffer #(
     // =========================================================================
     reg [PIXEL_WIDTH-1:0] ext_buf [0:BLK_EXT_Y-1][0:BLK_EXT_Y-1];
 
+    reg req_is_4x4_r;
+`ifdef SYNTHESIS
+    wire ref_req_is_4x4_safe = ref_req_is_4x4;
+`else
+    wire ref_req_is_4x4_safe = (ref_req_is_4x4 === 1'b1);
+`endif
+
     // Current BLK_EXT (depends on component)
-    wire [3:0] blk_ext_cur = (comp_r == 2'd0) ? BLK_EXT_Y : BLK_EXT_C;
+    wire [3:0] blk_ext_cur = (comp_r == 2'd0) ? (req_is_4x4_r ? 4'd4 : BLK_EXT_Y) : BLK_EXT_C;
 
     // =========================================================================
     // Address computation helpers
@@ -263,6 +271,7 @@ module ref_frame_buffer #(
             slot_r         <= 3'd0;
             req_x_r        <= 13'sd0;
             req_y_r        <= 13'sd0;
+            req_is_4x4_r   <= 1'b0;
             frame_w        <= FRAME_W_Y[11:0];
             frame_h        <= FRAME_H_Y[11:0];
             stride         <= FRAME_W_Y[11:0];
@@ -286,9 +295,10 @@ module ref_frame_buffer #(
                     // Latch all request inputs NOW while they are valid
                     comp_r    <= ref_req_comp;
                     slot_r    <= ref_req_slot;
-                    req_x_r   <= {ref_req_x[11], ref_req_x};
-                    req_y_r   <= {ref_req_y[11], ref_req_y};
-                    state         <= S_INIT;
+                    req_x_r      <= {ref_req_x[11], ref_req_x};
+                    req_y_r      <= {ref_req_y[11], ref_req_y};
+                    req_is_4x4_r <= ref_req_is_4x4_safe;
+                    state        <= S_INIT;
                 end
             end
 
@@ -389,7 +399,12 @@ module ref_frame_buffer #(
                         ext_buf[row_idx][ci] <= row_pixel[ci];
                     end
                 end
-                state <= S_NEXT_ROW;
+                if (row_idx == blk_ext_cur - 4'd1) begin
+                    state <= S_DONE;
+                end else begin
+                    row_idx <= row_idx + 4'd1;
+                    state   <= S_ROW_AR1;
+                end
             end
 
             // ---------------------------------------------------------------

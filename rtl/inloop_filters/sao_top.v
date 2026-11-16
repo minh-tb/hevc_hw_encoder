@@ -74,7 +74,7 @@ module sao_top #(
     output reg  [5:0]   pix_wr_x,
     output reg  [5:0]   pix_wr_y,
     output reg  [1:0]   pix_wr_comp,
-    output reg  [`PIXEL_WIDTH-1:0] pix_wr_data,
+    output wire [`PIXEL_WIDTH-1:0] pix_wr_data,
 
     output reg          ctu_done
 );
@@ -155,7 +155,7 @@ module sao_top #(
 
     wire [`PIXEL_WIDTH-1:0] eo_in_pix_mux = (SINGLE_PORT_BRAM_MODE == 1) ? c_pix : pix_resp_data;
     wire [`PIXEL_WIDTH-1:0] eo_n0_mux     = eo_pic_boundary ? eo_in_pix_mux : ((SINGLE_PORT_BRAM_MODE == 1) ? n0_pix : n0_resp_data);
-    wire [`PIXEL_WIDTH-1:0] eo_n1_mux     = eo_pic_boundary ? eo_in_pix_mux : ((SINGLE_PORT_BRAM_MODE == 1) ? n1_pix : n1_resp_data);
+    wire [`PIXEL_WIDTH-1:0] eo_n1_mux     = eo_pic_boundary ? eo_in_pix_mux : n1_resp_data;
 
     sao_edge_offset u_sao_eo (
         .clk        (clk),
@@ -185,7 +185,7 @@ module sao_top #(
         .offset     (cur_bo_offset),
         .in_valid   (bo_in_valid),
         .in_ready   (bo_in_ready),
-        .pixel_in   ((SINGLE_PORT_BRAM_MODE == 1) ? c_pix : pix_resp_data),
+        .pixel_in   (pix_resp_data),
         .in_last    (1'b0),
         .out_valid  (bo_out_valid),
         .out_ready  (1'b1),
@@ -195,17 +195,25 @@ module sao_top #(
 
 
 
+    reg [`PIXEL_WIDTH-1:0] pix_wr_data_r;
+    wire [1:0] wr_sao_type = (p_comp_q1 == 2'd0) ? sao_type[1:0] :
+                             (p_comp_q1 == 2'd1) ? sao_type[3:2] : sao_type[5:4];
+    wire [`PIXEL_WIDTH-1:0] pix_wr_data_fast = (wr_sao_type == 2'd1) ? eo_pixel_out :
+                                               (wr_sao_type == 2'd2) ? bo_pixel_out : c_pix;
+    assign pix_wr_data = (SINGLE_PORT_BRAM_MODE == 1) ? pix_wr_data_fast : pix_wr_data_r;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state        <= S_IDLE;
-            ctu_done     <= 1'b0;
-            comp_idx     <= 2'd0;
-            scan_x       <= 6'd0;
-            scan_y       <= 6'd0;
-            pix_rd_valid <= 1'b0;
-            n0_rd_valid  <= 1'b0;
-            n1_rd_valid  <= 1'b0;
-            pix_wr_valid <= 1'b0;
+            state         <= S_IDLE;
+            ctu_done      <= 1'b0;
+            comp_idx      <= 2'd0;
+            scan_x        <= 6'd0;
+            scan_y        <= 6'd0;
+            pix_rd_valid  <= 1'b0;
+            n0_rd_valid   <= 1'b0;
+            n1_rd_valid   <= 1'b0;
+            pix_wr_valid  <= 1'b0;
+            pix_wr_data_r <= {`PIXEL_WIDTH{1'b0}};
             eo_in_valid  <= 1'b0;
             bo_in_valid  <= 1'b0;
             p_x_q1       <= 6'd0;
@@ -390,10 +398,12 @@ module sao_top #(
                                 n1_rd_y <= $signed({2'b00, p_y_q1}) + 8'sd1;
                             end
                         endcase
-                    end else begin
+                        state <= S_WAIT_PIX;
+                    end else begin // BO: skip S_WAIT_PIX + S_APPLY; feed pix_resp_data directly in S_FILTER
                         n1_rd_valid <= 1'b0;
+                        bo_in_valid <= 1'b1;
+                        state       <= S_FILTER;
                     end
-                    state <= S_WAIT_PIX;
                 end
 
                 S_WAIT_PIX: begin
@@ -401,23 +411,28 @@ module sao_top #(
                     n0_rd_valid  <= 1'b0;
                     n1_rd_valid  <= 1'b0;
 
-                    c_pix <= pix_resp_data;
-                    if (cur_sao_type == 2'd1) begin
-                        pre_sao_row_buf[p_x_q1] <= pix_resp_data;
-                        cur_row_left           <= pix_resp_data;
-                        if (p_x_q1 == 6'd0)
-                            prev_row_left_d    <= pre_sao_row_buf[0];
-                        else
-                            prev_row_left_d    <= pre_sao_row_buf[p_x_q1];
+                    if (SINGLE_PORT_BRAM_MODE == 1) begin
+                        c_pix <= pix_resp_data;
+                        if (cur_sao_type == 2'd1) begin
+                            pre_sao_row_buf[p_x_q1] <= pix_resp_data;
+                            cur_row_left           <= pix_resp_data;
+                            if (p_x_q1 == 6'd0)
+                                prev_row_left_d    <= pre_sao_row_buf[0];
+                            else
+                                prev_row_left_d    <= pre_sao_row_buf[p_x_q1];
 
-                        case (cur_eo_class)
-                            2'd0: n0_pix <= (p_x_q1 > 6'd0) ? cur_row_left : n0_resp_data;
-                            2'd1: n0_pix <= (p_y_q1 > 6'd0) ? pre_sao_row_buf[p_x_q1] : n0_resp_data;
-                            2'd2: n0_pix <= (p_x_q1 > 6'd0 && p_y_q1 > 6'd0) ? prev_row_left_d : n0_resp_data;
-                            2'd3: n0_pix <= (p_y_q1 > 6'd0 && p_x_q1 < max_dim) ? pre_sao_row_buf[p_x_q1 + 6'd1] : n0_resp_data;
-                        endcase
+                            case (cur_eo_class)
+                                2'd0: n0_pix <= (p_x_q1 > 6'd0) ? cur_row_left : n0_resp_data;
+                                2'd1: n0_pix <= (p_y_q1 > 6'd0) ? pre_sao_row_buf[p_x_q1] : n0_resp_data;
+                                2'd2: n0_pix <= (p_x_q1 > 6'd0 && p_y_q1 > 6'd0) ? prev_row_left_d : n0_resp_data;
+                                2'd3: n0_pix <= (p_y_q1 > 6'd0 && p_x_q1 < max_dim) ? pre_sao_row_buf[p_x_q1 + 6'd1] : n0_resp_data;
+                            endcase
+                            eo_in_valid <= 1'b1;
+                        end
+                        state <= S_FILTER;
+                    end else begin
+                        state <= S_APPLY;
                     end
-                    state <= S_APPLY;
                 end
 
                 S_APPLY: begin
@@ -432,7 +447,33 @@ module sao_top #(
                 S_FILTER: begin
                     eo_in_valid <= 1'b0;
                     bo_in_valid <= 1'b0;
-                    state       <= S_WRITE;
+                    if (SINGLE_PORT_BRAM_MODE == 1) begin
+                        pix_wr_valid <= 1'b1;
+                        pix_wr_x     <= p_x_q1;
+                        pix_wr_y     <= p_y_q1;
+                        pix_wr_comp  <= p_comp_q1;
+                        if (scan_x == max_dim) begin
+                            scan_x <= 6'd0;
+                            if (scan_y == max_dim) begin
+                                scan_y <= 6'd0;
+                                if (comp_idx == 2'd2) begin
+                                    state    <= S_DONE;
+                                    ctu_done <= 1'b1;
+                                end else begin
+                                    comp_idx <= comp_idx + 2'd1;
+                                    state    <= S_REQ_PIX;
+                                end
+                            end else begin
+                                scan_y <= scan_y + 6'd1;
+                                state  <= S_REQ_PIX;
+                            end
+                        end else begin
+                            scan_x <= scan_x + 6'd1;
+                            state  <= S_REQ_PIX;
+                        end
+                    end else begin
+                        state <= S_WRITE;
+                    end
                 end
 
                 S_WRITE: begin
@@ -443,9 +484,9 @@ module sao_top #(
                     pix_wr_y     <= p_y_q1;
                     pix_wr_comp  <= p_comp_q1;
 
-                    if (cur_sao_type == 2'd1) pix_wr_data <= eo_pixel_out;
-                    else if (cur_sao_type == 2'd2) pix_wr_data <= bo_pixel_out;
-                    else pix_wr_data <= (SINGLE_PORT_BRAM_MODE == 1) ? c_pix : pix_resp_data;
+                    if (cur_sao_type == 2'd1) pix_wr_data_r <= eo_pixel_out;
+                    else if (cur_sao_type == 2'd2) pix_wr_data_r <= bo_pixel_out;
+                    else pix_wr_data_r <= (SINGLE_PORT_BRAM_MODE == 1) ? c_pix : pix_resp_data;
 
                     // Advance coordinates
                     if (scan_x == max_dim) begin

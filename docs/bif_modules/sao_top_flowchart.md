@@ -10,7 +10,7 @@ SAO reconstructs high-frequency details and reduces ringing and banding artifact
 3. **Dedicated Submodules**:
    - **[`sao_edge_offset`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_edge_offset.v)**: Directional neighbor fetch, category calculation, and signed offset addition.
    - **[`sao_band_offset`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_band_offset.v)**: Amplitude band classification and band-selective offset addition.
-   - **[`sao_stats`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v)**: Accumulates distortion differences and sample counts to enable rate-distortion optimal SAO parameter estimation.
+   - **[`sao_stats`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v)**: Executes sequential full-CTU `Y -> Cb -> Cr` 32-band BO RDO (with causality border-skip on non-last CTUs, symmetric `[-15, +15]` offset clamp matching `syntax_sao.v` `cMax=31`, and `ctu_qp` 52-entry Q8 lambda LUT + Table 8-10 chroma QP) and last-CTU (`is_last_col && is_last_row`) 4-class EO RDO (`0°, 90°, 135°, 45°`) via an internal `64x10b` line buffer.
 
 ---
 
@@ -113,6 +113,7 @@ flowchart TD
 | `ctu_valid` | In | 1 | New CTU ready for SAO processing. |
 | `ctu_ready` | Out | 1 | SAO unit ready to accept new CTU. |
 | `ctu_x`, `ctu_y` | In | 10 | Frame coordinates of current CTU. |
+| `frame_width_px`, `frame_height_px` | In | 12 | Active frame dimensions in pixels (used for right/bottom boundary gating). |
 | `sao_type` | In | 6 | Packed $3 \times 2\text{-bit}$ type per component: $[1:0]=Y, [3:2]=Cb, [5:4]=Cr$. |
 | `eo_class` | In | 6 | Packed $3 \times 2\text{-bit}$ direction class per component. |
 | `eo_offset` | In | 75 | Packed $3 \times 5 \times 5\text{-bit}$ signed EO offsets. |
@@ -126,11 +127,17 @@ flowchart TD
 
 ## 5. End-to-End Bit-Exact Dynamic Multi-Mode SAO & CTU-Delayed CABAC Serialization (`T3-13`)
 
-### 5.1. 2-Phase Single-Port BRAM Neighbor Read & Post-Deblocked Border Cache
+### 5.1. 2-Phase Single-Port BRAM Neighbor Read, `EO_45` Right-Border Guard & Neighbor BO Forwarding
 In CTU-by-CTU hardware architectures, Edge Offset (EO) requires reading neighboring boundary pixels ($n_0, n_1$) that may cross CTU boundaries or undergo in-place write modification within single-port SRAM buffers.
 
-To achieve **100% bit-exact reconstruction (`max_diff == 0`)** across all 3 frames (`I`, `P`, `B`) while dynamically switching between `OFF`, `EO` ($0^\circ, 90^\circ, 135^\circ, 45^\circ$), and `BO`:
-1. **2-Phase Single-Port BRAM EO Read (`SINGLE_PORT_BRAM_MODE = 1`)**: `sao_top.v` sequences `S_REQ_PIX` (reading center pixel $c$ and any cross-CTU $n_0$) $\to$ `S_REQ_N1` (reading $n_1$ from single-port BRAM while caching unmodified intra-CTU $n_0$ in `pre_sao_row_buf`, `cur_row_left`, and `prev_row_left_d`) $\to$ `S_WAIT_PIX`.
-2. **Post-Deblocked Neighbor Border Update**: In `decoder_inloop_filters.v`, whenever cross-CTU deblocking (`db_pix_wr_neighbor`) modifies a border pixel during `S_DB`, `col_buf_*`, `line_buf_*`, and `corner_buf_*` are updated in-place with the post-deblocked sample $p'_0$ so `S_SAO` sees the exact same boundary samples as `HM 18.0 TAppDecoder.exe`.
-3. **CTU-Delayed Bitstream Serialization (`ctu_bin_ram`, `SINGLE_PASS_CAUSAL_SYNC = 0`)**: HEVC Clause 7.3.8.2 mandates that `sao(rx, ry)` syntax must be emitted at the start of each CTU before `coding_quadtree()`. During `S_FILL`, `cabac_enc_top.v` buffers the CTU's `coding_quadtree()` bins (`syntax_cu`, `syntax_pred`, `syntax_coeff`) into `ctu_bin_ram` (`8192 x 10-bit` BRAM). Once `sao_stats_done` asserts after `S_STATS`, `syntax_sao.v` emits `sao(rx, ry)` **first** with the dynamic `EO`/`BO`/`OFF` RDO decision, and `ctu_bin_ram` then drains into `bin_encoder` $\to$ `range_coder` with a 1-cycle lookahead synchronous read handshake.
+To achieve **100% bit-exact reconstruction (`max_diff == 0`)** across all 3 frames (`I`, `P`, `B`) while dynamically executing `OFF`, `EO` ($0^\circ, 90^\circ, 135^\circ, 45^\circ$), and `BO`:
+1. **2-Phase Single-Port BRAM EO Read (`SINGLE_PORT_BRAM_MODE = 1`) & `EO_45` Guard**: `sao_top.v` sequences `S_REQ_PIX` (reading center pixel $c$ and any cross-CTU $n_0$) $\to$ `S_REQ_N1` (reading $n_1$ from single-port BRAM while caching unmodified intra-CTU $n_0$ in `pre_sao_row_buf`, `cur_row_left`, and `prev_row_left_d`) $\to$ `S_WAIT_PIX`. For `EO_45` (`2'd3`), `sao_top.v` checks `if (scan_y == 6'd0 || scan_x == max_dim)` to drive `n0_rd_valid` with `(scan_x + 1, scan_y - 1)` so right-border top-right lookups resolve via `sao_n0_top_right` (`line_buf` when `has_right_ctu`) or signed `sao_n0_oob` / `sao_n1_oob` guards in `decoder_inloop_filters.v`.
+2. **Pre-SAO Neighbor Buffers & Latched Neighbor BO Forwarding**: `decoder_inloop_filters.v` keeps `col_buf_*`, `line_buf_*`, and `corner_buf_*` strictly **post-deblocked, pre-SAO** (updated with post-DB samples during `S_DB`), and latches each finished CTU's BO parameters into `left_sao_*`, `top_left_sao_*`, and `top_sao_*[0:63]` at the end of `S_DUMP` (`dump_count_q == 6143`). Whenever cross-CTU deblocking asserts `db_pix_wr_neighbor` during `S_DB`, `decoder_inloop_filters.v` applies the latched neighbor CTU BO (`db_nbr_sao_pixel`) onto the DPB-bound `out_pixel` output **only**, leaving internal `col_buf_*`/`line_buf_*`/`corner_buf_*` uncorrupted for downstream CTUs.
+
+### 5.2. Sequential Full-CTU `sao_stats.v` RDO (`Y -> Cb -> Cr` BO + Last-CTU EO)
+1. **Full-CTU `Y -> Cb -> Cr` 32-Band BO RDO**: `sao_stats.v` sweeps components sequentially (`Y -> Cb -> Cr`) across 2-stage BRAM read alignment (`rd_req_d1 -> rd_req_d2` + `S_FLUSH`). On non-last CTUs, border pixels susceptible to right/bottom causal deblocking lag are skipped (`> 60` for Luma, `> 28` / `> 30` for Chroma); candidate offsets across cyclic 4-band windows (`bp0..bp3`) are clamped symmetrically to `[-15, +15]` (`iter_m <= 4'd15`, fitting inside `signed [4:0]` and `syntax_sao.v` `cMax = 31`). Rate-distortion scoring uses `ctu_qp` (with X/Z fallback to `29`), Table 8-10 `get_qpc` chroma QP mapping, and a 52-entry 10-bit Q8 lambda LUT (`get_lambda_q8`), evaluating independent Luma vs. joint `Cb + Cr` decisions (`syntax_sao.v` shared chroma `sao_type` / `eo_class`).
+2. **Last-CTU 4-Class EO RDO (`is_last_col && is_last_row`)**: On the bottom-right CTU where no further causal CTUs depend on unmodified borders, `sao_stats.v` enables all 4 EO classes (`0°, 90°, 135°, 45°`) using internal `64`-entry `10-bit` line buffers (`row_m1_rec`, `row_m2_rec`, `row_m1_diff`) and a $3\times 3$ sliding window over interior pixels (`x >= 2, y >= 2`).
+
+### 5.3. CTU-Delayed Bitstream Serialization (`ctu_bin_ram`, `SINGLE_PASS_CAUSAL_SYNC = 0`)
+HEVC Clause 7.3.8.2 mandates that `sao(rx, ry)` syntax must be emitted at the start of each CTU before `coding_quadtree()`. During `S_FILL`, `cabac_enc_top.v` buffers `coding_quadtree()` bins (`syntax_cu`, `syntax_pred`, `syntax_coeff`) into `ctu_bin_ram` (`8192 x 10-bit`, `2 RAMB36 + 1 RAMB18`). Once `sao_stats_done` asserts after `S_STATS`, `syntax_sao.v` emits `sao(rx, ry)` **first**, and `ctu_bin_ram` drains into `bin_encoder` $\to$ `range_coder` with `drain_prefetched_valid` BRAM drain alignment.
 

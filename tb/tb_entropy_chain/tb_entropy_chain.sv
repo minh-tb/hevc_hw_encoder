@@ -57,6 +57,8 @@ module tb_entropy_chain;
     logic       coeff_tu_cbf = 1'b1;
     logic [9:0] coeff_last_sig_pos = 10'd2;
     logic [1:0] coeff_scan_mode = 2'd0;
+    logic       tu_cg_mask_en = 1'b0;
+    logic [63:0] tu_cg_nonzero_mask = 64'hFFFF_FFFF_FFFF_FFFF;
     logic       coeff_rd_en;
     logic [11:0] coeff_rd_addr;
     logic signed [COEFF_W-1:0] coeff_rd_data;
