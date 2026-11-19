@@ -488,7 +488,7 @@ module frame_store #(
                     axi_arlen   <= 8'd0;     
                     axi_arsize  <= 3'b101;   
                     axi_arburst <= 2'b01;
-                    if (axi_arready) begin
+                    if (axi_arvalid && axi_arready) begin
                         axi_arvalid <= 1'b0;
                         rd_state    <= RD_DATA;
                     end

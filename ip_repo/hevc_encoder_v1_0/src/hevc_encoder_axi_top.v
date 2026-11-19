@@ -194,6 +194,8 @@ module hevc_encoder_axi_top #(
     reg        reg_done;
     reg        irq_status;
     reg        prev_encode_done;
+    reg        prev_frame_done;
+    reg [15:0] frame_done_cnt;
 
     reg [15:0] reg_total_frames;
     reg [5:0]  reg_base_qp;
@@ -305,31 +307,47 @@ module hevc_encoder_axi_top #(
     //-------------------------------------------------------------------------
     // Status & Interrupt Event Tracking
     //-------------------------------------------------------------------------
+    wire core_frame_done_pulse = core_frame_done && !prev_frame_done;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             reg_busy         <= 1'b0;
             reg_done         <= 1'b0;
             irq_status       <= 1'b0;
             prev_encode_done <= 1'b0;
+            prev_frame_done  <= 1'b0;
+            frame_done_cnt   <= 16'd0;
         end else begin
             prev_encode_done <= core_encode_done;
+            prev_frame_done  <= core_frame_done;
 
             if (reg_soft_rst) begin
-                reg_busy   <= 1'b0;
-                reg_done   <= 1'b0;
-                irq_status <= 1'b0;
+                reg_busy       <= 1'b0;
+                reg_done       <= 1'b0;
+                irq_status     <= 1'b0;
+                prev_frame_done <= 1'b0;
+                frame_done_cnt <= 16'd0;
             end else begin
                 // State transitions for Busy & Done
                 if (encode_start_pulse) begin
-                    reg_busy <= 1'b1;
-                    reg_done <= 1'b0;
-                end else if (core_encode_done) begin
-                    reg_busy <= 1'b0;
-                    reg_done <= 1'b1;
+                    reg_busy       <= 1'b1;
+                    reg_done       <= 1'b0;
+                    frame_done_cnt <= 16'd0;
+                end else begin
+                    if (core_frame_done_pulse) begin
+                        frame_done_cnt <= frame_done_cnt + 16'd1;
+                    end
+                    if (core_encode_done) begin
+                        reg_busy <= 1'b0;
+                        reg_done <= 1'b1;
+                    end
                 end
 
-                // Interrupt event detection & W1C handling (assert on frame completion or full encode completion)
-                if ((core_encode_done && !prev_encode_done) || core_frame_done) begin
+                // Interrupt event detection & W1C handling:
+                // Align final-frame IRQ with core_encode_done (DONE=1, BUSY=0), while preserving
+                // edge-detected intermediate per-frame IRQs when reg_total_frames > 1.
+                if ((core_encode_done && !prev_encode_done) ||
+                    (core_frame_done_pulse && ((frame_done_cnt + 16'd1) < reg_total_frames))) begin
                     irq_status <= 1'b1;
                 end else if (slv_wren && (s_axi_lite_awaddr[5:2] == 4'h2) && s_axi_lite_wstrb[0] && s_axi_lite_wdata[0]) begin
                     // 0x08: Write 1 to clear IRQ

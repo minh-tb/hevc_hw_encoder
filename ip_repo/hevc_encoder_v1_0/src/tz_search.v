@@ -134,7 +134,7 @@ module tz_search #(
         S_CMP        = 4'd7,   // compare sad_out vs best_sad, update best
         S_NEXT_PT    = 4'd8,   // advance point index (0..7) or next step
         S_NEXT_STEP  = 4'd9,   // decrease step level, re-center on best
-        S_REFINE_REQ = 4'd10,  // start diamond refinement (same as REQ_REF)
+        // 4'd10 reserved (diamond refinement entered via S_NEXT_PT with phase_refine=1)
         S_DONE       = 4'd11;  // assert result_valid, return to IDLE
 
     reg [3:0] state;

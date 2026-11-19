@@ -117,7 +117,7 @@ module syntax_cu #(
         S_PART0       = 5'd9,   // part_mode bin 0         (ctx=10)
         S_PART1       = 5'd10,  // part_mode bin 1         (ctx=11, if needed)
         S_PART2       = 5'd11,  // part_mode bin 2         (ctx=12, if needed)
-        S_CBF         = 5'd12,  // rqt_root_cbf            (EP bypass)
+        // 5'd12 reserved (rqt_root_cbf handled in syntax_coeff.v)
         S_DONE        = 5'd13;
 
     reg [4:0] state;
@@ -230,11 +230,6 @@ module syntax_cu #(
                 bin_value  = (cu_part_mode == 2'd2);
                 bin_ctx_id = CTX_PART_2;
             end
-            S_CBF: begin
-                bin_valid  = 1'b1;
-                bin_value  = cu_cbf;
-                bin_ctx_id = CTX_CBF;
-            end
             default: ;
         endcase
     end
@@ -312,10 +307,6 @@ module syntax_cu #(
             end
 
             S_PART2: begin
-                if (bin_rdy) state <= S_DONE;
-            end
-
-            S_CBF: begin
                 if (bin_rdy) state <= S_DONE;
             end
 

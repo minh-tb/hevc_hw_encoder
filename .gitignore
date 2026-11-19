@@ -91,3 +91,8 @@ synth/vivado_output_dct/
 # Documentation & visual dashboards (local / non-repo)
 /walkthrough*.md
 visual_verification_dashboard.html
+
+# Vivado xsim & QuestaSim UVM build/coverage artifacts
+**/build_xsim/
+*.ucdb
+qwave.db

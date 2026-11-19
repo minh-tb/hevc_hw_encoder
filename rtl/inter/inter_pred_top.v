@@ -250,8 +250,7 @@ module inter_pred_top #(
     localparam [1:0]
         MC_S_IDLE = 2'd0,
         MC_S_L0   = 2'd1,
-        MC_S_L1   = 2'd2,
-        MC_S_DONE = 2'd3;
+        MC_S_L1   = 2'd2; // 2'd3 (MC_S_DONE) retired
 
     reg [1:0] mc_state;
     reg       sub_mc_start;
@@ -381,6 +380,8 @@ module inter_pred_top #(
                         mc_state  <= MC_S_IDLE;
                     end
                 end
+
+                default: mc_state <= MC_S_IDLE;
             endcase
         end
     end

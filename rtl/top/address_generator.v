@@ -8,208 +8,105 @@ module address_generator (
     output reg  [4:0]   addr_y
 );
 
+    // Pure case/bit-slice lookup functions (no unpacked local arrays in functions,
+    // ensuring complete sensitivity lists across xsim, QuestaSim, ModelSim, and Vivado).
     function automatic [1:0] diag_4_row;
         input [3:0] pos;
-        reg [1:0] lut [0:15];
         begin
-lut[ 0]=2'd0; lut[ 1]=2'd1; lut[ 2]=2'd0; lut[ 3]=2'd2;
-lut[ 4]=2'd1; lut[ 5]=2'd0; lut[ 6]=2'd3; lut[ 7]=2'd2;
-lut[ 8]=2'd1; lut[ 9]=2'd0; lut[10]=2'd3; lut[11]=2'd2;
-lut[12]=2'd1; lut[13]=2'd3; lut[14]=2'd2; lut[15]=2'd3;
-            diag_4_row = lut[pos];
+            case (pos)
+                4'd0:  diag_4_row = 2'd0; 4'd1:  diag_4_row = 2'd1; 4'd2:  diag_4_row = 2'd0; 4'd3:  diag_4_row = 2'd2;
+                4'd4:  diag_4_row = 2'd1; 4'd5:  diag_4_row = 2'd0; 4'd6:  diag_4_row = 2'd3; 4'd7:  diag_4_row = 2'd2;
+                4'd8:  diag_4_row = 2'd1; 4'd9:  diag_4_row = 2'd0; 4'd10: diag_4_row = 2'd3; 4'd11: diag_4_row = 2'd2;
+                4'd12: diag_4_row = 2'd1; 4'd13: diag_4_row = 2'd3; 4'd14: diag_4_row = 2'd2; default: diag_4_row = 2'd3;
+            endcase
         end
     endfunction
+
     function automatic [1:0] diag_4_col;
         input [3:0] pos;
-        reg [1:0] lut [0:15];
         begin
-lut[ 0]=2'd0; lut[ 1]=2'd0; lut[ 2]=2'd1; lut[ 3]=2'd0;
-lut[ 4]=2'd1; lut[ 5]=2'd2; lut[ 6]=2'd0; lut[ 7]=2'd1;
-lut[ 8]=2'd2; lut[ 9]=2'd3; lut[10]=2'd1; lut[11]=2'd2;
-lut[12]=2'd3; lut[13]=2'd2; lut[14]=2'd3; lut[15]=2'd3;
-            diag_4_col = lut[pos];
+            case (pos)
+                4'd0:  diag_4_col = 2'd0; 4'd1:  diag_4_col = 2'd0; 4'd2:  diag_4_col = 2'd1; 4'd3:  diag_4_col = 2'd0;
+                4'd4:  diag_4_col = 2'd1; 4'd5:  diag_4_col = 2'd2; 4'd6:  diag_4_col = 2'd0; 4'd7:  diag_4_col = 2'd1;
+                4'd8:  diag_4_col = 2'd2; 4'd9:  diag_4_col = 2'd3; 4'd10: diag_4_col = 2'd1; 4'd11: diag_4_col = 2'd2;
+                4'd12: diag_4_col = 2'd3; 4'd13: diag_4_col = 2'd2; 4'd14: diag_4_col = 2'd3; default: diag_4_col = 2'd3;
+            endcase
         end
     endfunction
+
     function automatic [3:0] diag_8_row;
         input [5:0] pos;
-        reg [3:0] lut [0:63];
         begin
-lut[ 0]=4'd0; lut[ 1]=4'd1; lut[ 2]=4'd0; lut[ 3]=4'd2;
-lut[ 4]=4'd1; lut[ 5]=4'd0; lut[ 6]=4'd3; lut[ 7]=4'd2;
-lut[ 8]=4'd1; lut[ 9]=4'd0; lut[10]=4'd4; lut[11]=4'd3;
-lut[12]=4'd2; lut[13]=4'd1; lut[14]=4'd0; lut[15]=4'd5;
-lut[16]=4'd4; lut[17]=4'd3; lut[18]=4'd2; lut[19]=4'd1;
-lut[20]=4'd0; lut[21]=4'd6; lut[22]=4'd5; lut[23]=4'd4;
-lut[24]=4'd3; lut[25]=4'd2; lut[26]=4'd1; lut[27]=4'd0;
-lut[28]=4'd7; lut[29]=4'd6; lut[30]=4'd5; lut[31]=4'd4;
-lut[32]=4'd3; lut[33]=4'd2; lut[34]=4'd1; lut[35]=4'd0;
-lut[36]=4'd7; lut[37]=4'd6; lut[38]=4'd5; lut[39]=4'd4;
-lut[40]=4'd3; lut[41]=4'd2; lut[42]=4'd1; lut[43]=4'd7;
-lut[44]=4'd6; lut[45]=4'd5; lut[46]=4'd4; lut[47]=4'd3;
-lut[48]=4'd2; lut[49]=4'd7; lut[50]=4'd6; lut[51]=4'd5;
-lut[52]=4'd4; lut[53]=4'd3; lut[54]=4'd7; lut[55]=4'd6;
-lut[56]=4'd5; lut[57]=4'd4; lut[58]=4'd7; lut[59]=4'd6;
-lut[60]=4'd5; lut[61]=4'd7; lut[62]=4'd6; lut[63]=4'd7;
-            diag_8_row = lut[pos];
+            case (pos)
+                6'd0:  diag_8_row = 4'd0; 6'd1:  diag_8_row = 4'd1; 6'd2:  diag_8_row = 4'd0; 6'd3:  diag_8_row = 4'd2;
+                6'd4:  diag_8_row = 4'd1; 6'd5:  diag_8_row = 4'd0; 6'd6:  diag_8_row = 4'd3; 6'd7:  diag_8_row = 4'd2;
+                6'd8:  diag_8_row = 4'd1; 6'd9:  diag_8_row = 4'd0; 6'd10: diag_8_row = 4'd4; 6'd11: diag_8_row = 4'd3;
+                6'd12: diag_8_row = 4'd2; 6'd13: diag_8_row = 4'd1; 6'd14: diag_8_row = 4'd0; 6'd15: diag_8_row = 4'd5;
+                6'd16: diag_8_row = 4'd4; 6'd17: diag_8_row = 4'd3; 6'd18: diag_8_row = 4'd2; 6'd19: diag_8_row = 4'd1;
+                6'd20: diag_8_row = 4'd0; 6'd21: diag_8_row = 4'd6; 6'd22: diag_8_row = 4'd5; 6'd23: diag_8_row = 4'd4;
+                6'd24: diag_8_row = 4'd3; 6'd25: diag_8_row = 4'd2; 6'd26: diag_8_row = 4'd1; 6'd27: diag_8_row = 4'd0;
+                6'd28: diag_8_row = 4'd7; 6'd29: diag_8_row = 4'd6; 6'd30: diag_8_row = 4'd5; 6'd31: diag_8_row = 4'd4;
+                6'd32: diag_8_row = 4'd3; 6'd33: diag_8_row = 4'd2; 6'd34: diag_8_row = 4'd1; 6'd35: diag_8_row = 4'd0;
+                6'd36: diag_8_row = 4'd7; 6'd37: diag_8_row = 4'd6; 6'd38: diag_8_row = 4'd5; 6'd39: diag_8_row = 4'd4;
+                6'd40: diag_8_row = 4'd3; 6'd41: diag_8_row = 4'd2; 6'd42: diag_8_row = 4'd1; 6'd43: diag_8_row = 4'd7;
+                6'd44: diag_8_row = 4'd6; 6'd45: diag_8_row = 4'd5; 6'd46: diag_8_row = 4'd4; 6'd47: diag_8_row = 4'd3;
+                6'd48: diag_8_row = 4'd2; 6'd49: diag_8_row = 4'd7; 6'd50: diag_8_row = 4'd6; 6'd51: diag_8_row = 4'd5;
+                6'd52: diag_8_row = 4'd4; 6'd53: diag_8_row = 4'd3; 6'd54: diag_8_row = 4'd7; 6'd55: diag_8_row = 4'd6;
+                6'd56: diag_8_row = 4'd5; 6'd57: diag_8_row = 4'd4; 6'd58: diag_8_row = 4'd7; 6'd59: diag_8_row = 4'd6;
+                6'd60: diag_8_row = 4'd5; 6'd61: diag_8_row = 4'd7; 6'd62: diag_8_row = 4'd6; default: diag_8_row = 4'd7;
+            endcase
         end
     endfunction
+
     function automatic [3:0] diag_8_col;
         input [5:0] pos;
-        reg [3:0] lut [0:63];
         begin
-lut[ 0]=4'd0; lut[ 1]=4'd0; lut[ 2]=4'd1; lut[ 3]=4'd0;
-lut[ 4]=4'd1; lut[ 5]=4'd2; lut[ 6]=4'd0; lut[ 7]=4'd1;
-lut[ 8]=4'd2; lut[ 9]=4'd3; lut[10]=4'd0; lut[11]=4'd1;
-lut[12]=4'd2; lut[13]=4'd3; lut[14]=4'd4; lut[15]=4'd0;
-lut[16]=4'd1; lut[17]=4'd2; lut[18]=4'd3; lut[19]=4'd4;
-lut[20]=4'd5; lut[21]=4'd0; lut[22]=4'd1; lut[23]=4'd2;
-lut[24]=4'd3; lut[25]=4'd4; lut[26]=4'd5; lut[27]=4'd6;
-lut[28]=4'd0; lut[29]=4'd1; lut[30]=4'd2; lut[31]=4'd3;
-lut[32]=4'd4; lut[33]=4'd5; lut[34]=4'd6; lut[35]=4'd7;
-lut[36]=4'd1; lut[37]=4'd2; lut[38]=4'd3; lut[39]=4'd4;
-lut[40]=4'd5; lut[41]=4'd6; lut[42]=4'd7; lut[43]=4'd2;
-lut[44]=4'd3; lut[45]=4'd4; lut[46]=4'd5; lut[47]=4'd6;
-lut[48]=4'd7; lut[49]=4'd3; lut[50]=4'd4; lut[51]=4'd5;
-lut[52]=4'd6; lut[53]=4'd7; lut[54]=4'd4; lut[55]=4'd5;
-lut[56]=4'd6; lut[57]=4'd7; lut[58]=4'd5; lut[59]=4'd6;
-lut[60]=4'd7; lut[61]=4'd6; lut[62]=4'd7; lut[63]=4'd7;
-            diag_8_col = lut[pos];
+            case (pos)
+                6'd0:  diag_8_col = 4'd0; 6'd1:  diag_8_col = 4'd0; 6'd2:  diag_8_col = 4'd1; 6'd3:  diag_8_col = 4'd0;
+                6'd4:  diag_8_col = 4'd1; 6'd5:  diag_8_col = 4'd2; 6'd6:  diag_8_col = 4'd0; 6'd7:  diag_8_col = 4'd1;
+                6'd8:  diag_8_col = 4'd2; 6'd9:  diag_8_col = 4'd3; 6'd10: diag_8_col = 4'd0; 6'd11: diag_8_col = 4'd1;
+                6'd12: diag_8_col = 4'd2; 6'd13: diag_8_col = 4'd3; 6'd14: diag_8_col = 4'd4; 6'd15: diag_8_col = 4'd0;
+                6'd16: diag_8_col = 4'd1; 6'd17: diag_8_col = 4'd2; 6'd18: diag_8_col = 4'd3; 6'd19: diag_8_col = 4'd4;
+                6'd20: diag_8_col = 4'd5; 6'd21: diag_8_col = 4'd0; 6'd22: diag_8_col = 4'd1; 6'd23: diag_8_col = 4'd2;
+                6'd24: diag_8_col = 4'd3; 6'd25: diag_8_col = 4'd4; 6'd26: diag_8_col = 4'd5; 6'd27: diag_8_col = 4'd6;
+                6'd28: diag_8_col = 4'd0; 6'd29: diag_8_col = 4'd1; 6'd30: diag_8_col = 4'd2; 6'd31: diag_8_col = 4'd3;
+                6'd32: diag_8_col = 4'd4; 6'd33: diag_8_col = 4'd5; 6'd34: diag_8_col = 4'd6; 6'd35: diag_8_col = 4'd7;
+                6'd36: diag_8_col = 4'd1; 6'd37: diag_8_col = 4'd2; 6'd38: diag_8_col = 4'd3; 6'd39: diag_8_col = 4'd4;
+                6'd40: diag_8_col = 4'd5; 6'd41: diag_8_col = 4'd6; 6'd42: diag_8_col = 4'd7; 6'd43: diag_8_col = 4'd2;
+                6'd44: diag_8_col = 4'd3; 6'd45: diag_8_col = 4'd4; 6'd46: diag_8_col = 4'd5; 6'd47: diag_8_col = 4'd6;
+                6'd48: diag_8_col = 4'd7; 6'd49: diag_8_col = 4'd3; 6'd50: diag_8_col = 4'd4; 6'd51: diag_8_col = 4'd5;
+                6'd52: diag_8_col = 4'd6; 6'd53: diag_8_col = 4'd7; 6'd54: diag_8_col = 4'd4; 6'd55: diag_8_col = 4'd5;
+                6'd56: diag_8_col = 4'd6; 6'd57: diag_8_col = 4'd7; 6'd58: diag_8_col = 4'd5; 6'd59: diag_8_col = 4'd6;
+                6'd60: diag_8_col = 4'd7; 6'd61: diag_8_col = 4'd6; 6'd62: diag_8_col = 4'd7; default: diag_8_col = 4'd7;
+            endcase
         end
     endfunction
+
     function automatic [1:0] horiz_4_row;
         input [3:0] pos;
-        reg [1:0] lut [0:15];
         begin
-lut[ 0]=2'd0; lut[ 1]=2'd0; lut[ 2]=2'd0; lut[ 3]=2'd0;
-lut[ 4]=2'd1; lut[ 5]=2'd1; lut[ 6]=2'd1; lut[ 7]=2'd1;
-lut[ 8]=2'd2; lut[ 9]=2'd2; lut[10]=2'd2; lut[11]=2'd2;
-lut[12]=2'd3; lut[13]=2'd3; lut[14]=2'd3; lut[15]=2'd3;
-            horiz_4_row = lut[pos];
+            horiz_4_row = pos[3:2];
         end
     endfunction
+
     function automatic [1:0] horiz_4_col;
         input [3:0] pos;
-        reg [1:0] lut [0:15];
         begin
-lut[ 0]=2'd0; lut[ 1]=2'd1; lut[ 2]=2'd2; lut[ 3]=2'd3;
-lut[ 4]=2'd0; lut[ 5]=2'd1; lut[ 6]=2'd2; lut[ 7]=2'd3;
-lut[ 8]=2'd0; lut[ 9]=2'd1; lut[10]=2'd2; lut[11]=2'd3;
-lut[12]=2'd0; lut[13]=2'd1; lut[14]=2'd2; lut[15]=2'd3;
-            horiz_4_col = lut[pos];
+            horiz_4_col = pos[1:0];
         end
     endfunction
-    function automatic [3:0] horiz_8_row;
-        input [5:0] pos;
-        reg [3:0] lut [0:63];
-        begin
-lut[ 0]=4'd0; lut[ 1]=4'd0; lut[ 2]=4'd0; lut[ 3]=4'd0;
-lut[ 4]=4'd0; lut[ 5]=4'd0; lut[ 6]=4'd0; lut[ 7]=4'd0;
-lut[ 8]=4'd1; lut[ 9]=4'd1; lut[10]=4'd1; lut[11]=4'd1;
-lut[12]=4'd1; lut[13]=4'd1; lut[14]=4'd1; lut[15]=4'd1;
-lut[16]=4'd2; lut[17]=4'd2; lut[18]=4'd2; lut[19]=4'd2;
-lut[20]=4'd2; lut[21]=4'd2; lut[22]=4'd2; lut[23]=4'd2;
-lut[24]=4'd3; lut[25]=4'd3; lut[26]=4'd3; lut[27]=4'd3;
-lut[28]=4'd3; lut[29]=4'd3; lut[30]=4'd3; lut[31]=4'd3;
-lut[32]=4'd4; lut[33]=4'd4; lut[34]=4'd4; lut[35]=4'd4;
-lut[36]=4'd4; lut[37]=4'd4; lut[38]=4'd4; lut[39]=4'd4;
-lut[40]=4'd5; lut[41]=4'd5; lut[42]=4'd5; lut[43]=4'd5;
-lut[44]=4'd5; lut[45]=4'd5; lut[46]=4'd5; lut[47]=4'd5;
-lut[48]=4'd6; lut[49]=4'd6; lut[50]=4'd6; lut[51]=4'd6;
-lut[52]=4'd6; lut[53]=4'd6; lut[54]=4'd6; lut[55]=4'd6;
-lut[56]=4'd7; lut[57]=4'd7; lut[58]=4'd7; lut[59]=4'd7;
-lut[60]=4'd7; lut[61]=4'd7; lut[62]=4'd7; lut[63]=4'd7;
-            horiz_8_row = lut[pos];
-        end
-    endfunction
-    function automatic [3:0] horiz_8_col;
-        input [5:0] pos;
-        reg [3:0] lut [0:63];
-        begin
-lut[ 0]=4'd0; lut[ 1]=4'd1; lut[ 2]=4'd2; lut[ 3]=4'd3;
-lut[ 4]=4'd4; lut[ 5]=4'd5; lut[ 6]=4'd6; lut[ 7]=4'd7;
-lut[ 8]=4'd0; lut[ 9]=4'd1; lut[10]=4'd2; lut[11]=4'd3;
-lut[12]=4'd4; lut[13]=4'd5; lut[14]=4'd6; lut[15]=4'd7;
-lut[16]=4'd0; lut[17]=4'd1; lut[18]=4'd2; lut[19]=4'd3;
-lut[20]=4'd4; lut[21]=4'd5; lut[22]=4'd6; lut[23]=4'd7;
-lut[24]=4'd0; lut[25]=4'd1; lut[26]=4'd2; lut[27]=4'd3;
-lut[28]=4'd4; lut[29]=4'd5; lut[30]=4'd6; lut[31]=4'd7;
-lut[32]=4'd0; lut[33]=4'd1; lut[34]=4'd2; lut[35]=4'd3;
-lut[36]=4'd4; lut[37]=4'd5; lut[38]=4'd6; lut[39]=4'd7;
-lut[40]=4'd0; lut[41]=4'd1; lut[42]=4'd2; lut[43]=4'd3;
-lut[44]=4'd4; lut[45]=4'd5; lut[46]=4'd6; lut[47]=4'd7;
-lut[48]=4'd0; lut[49]=4'd1; lut[50]=4'd2; lut[51]=4'd3;
-lut[52]=4'd4; lut[53]=4'd5; lut[54]=4'd6; lut[55]=4'd7;
-lut[56]=4'd0; lut[57]=4'd1; lut[58]=4'd2; lut[59]=4'd3;
-lut[60]=4'd4; lut[61]=4'd5; lut[62]=4'd6; lut[63]=4'd7;
-            horiz_8_col = lut[pos];
-        end
-    endfunction
+
     function automatic [1:0] vert_4_row;
         input [3:0] pos;
-        reg [1:0] lut [0:15];
         begin
-lut[ 0]=2'd0; lut[ 1]=2'd1; lut[ 2]=2'd2; lut[ 3]=2'd3;
-lut[ 4]=2'd0; lut[ 5]=2'd1; lut[ 6]=2'd2; lut[ 7]=2'd3;
-lut[ 8]=2'd0; lut[ 9]=2'd1; lut[10]=2'd2; lut[11]=2'd3;
-lut[12]=2'd0; lut[13]=2'd1; lut[14]=2'd2; lut[15]=2'd3;
-            vert_4_row = lut[pos];
+            vert_4_row = pos[1:0];
         end
     endfunction
+
     function automatic [1:0] vert_4_col;
         input [3:0] pos;
-        reg [1:0] lut [0:15];
         begin
-lut[ 0]=2'd0; lut[ 1]=2'd0; lut[ 2]=2'd0; lut[ 3]=2'd0;
-lut[ 4]=2'd1; lut[ 5]=2'd1; lut[ 6]=2'd1; lut[ 7]=2'd1;
-lut[ 8]=2'd2; lut[ 9]=2'd2; lut[10]=2'd2; lut[11]=2'd2;
-lut[12]=2'd3; lut[13]=2'd3; lut[14]=2'd3; lut[15]=2'd3;
-            vert_4_col = lut[pos];
-        end
-    endfunction
-    function automatic [3:0] vert_8_row;
-        input [5:0] pos;
-        reg [3:0] lut [0:63];
-        begin
-lut[ 0]=4'd0; lut[ 1]=4'd1; lut[ 2]=4'd2; lut[ 3]=4'd3;
-lut[ 4]=4'd4; lut[ 5]=4'd5; lut[ 6]=4'd6; lut[ 7]=4'd7;
-lut[ 8]=4'd0; lut[ 9]=4'd1; lut[10]=4'd2; lut[11]=4'd3;
-lut[12]=4'd4; lut[13]=4'd5; lut[14]=4'd6; lut[15]=4'd7;
-lut[16]=4'd0; lut[17]=4'd1; lut[18]=4'd2; lut[19]=4'd3;
-lut[20]=4'd4; lut[21]=4'd5; lut[22]=4'd6; lut[23]=4'd7;
-lut[24]=4'd0; lut[25]=4'd1; lut[26]=4'd2; lut[27]=4'd3;
-lut[28]=4'd4; lut[29]=4'd5; lut[30]=4'd6; lut[31]=4'd7;
-lut[32]=4'd0; lut[33]=4'd1; lut[34]=4'd2; lut[35]=4'd3;
-lut[36]=4'd4; lut[37]=4'd5; lut[38]=4'd6; lut[39]=4'd7;
-lut[40]=4'd0; lut[41]=4'd1; lut[42]=4'd2; lut[43]=4'd3;
-lut[44]=4'd4; lut[45]=4'd5; lut[46]=4'd6; lut[47]=4'd7;
-lut[48]=4'd0; lut[49]=4'd1; lut[50]=4'd2; lut[51]=4'd3;
-lut[52]=4'd4; lut[53]=4'd5; lut[54]=4'd6; lut[55]=4'd7;
-lut[56]=4'd0; lut[57]=4'd1; lut[58]=4'd2; lut[59]=4'd3;
-lut[60]=4'd4; lut[61]=4'd5; lut[62]=4'd6; lut[63]=4'd7;
-            vert_8_row = lut[pos];
-        end
-    endfunction
-    function automatic [3:0] vert_8_col;
-        input [5:0] pos;
-        reg [3:0] lut [0:63];
-        begin
-lut[ 0]=4'd0; lut[ 1]=4'd0; lut[ 2]=4'd0; lut[ 3]=4'd0;
-lut[ 4]=4'd0; lut[ 5]=4'd0; lut[ 6]=4'd0; lut[ 7]=4'd0;
-lut[ 8]=4'd1; lut[ 9]=4'd1; lut[10]=4'd1; lut[11]=4'd1;
-lut[12]=4'd1; lut[13]=4'd1; lut[14]=4'd1; lut[15]=4'd1;
-lut[16]=4'd2; lut[17]=4'd2; lut[18]=4'd2; lut[19]=4'd2;
-lut[20]=4'd2; lut[21]=4'd2; lut[22]=4'd2; lut[23]=4'd2;
-lut[24]=4'd3; lut[25]=4'd3; lut[26]=4'd3; lut[27]=4'd3;
-lut[28]=4'd3; lut[29]=4'd3; lut[30]=4'd3; lut[31]=4'd3;
-lut[32]=4'd4; lut[33]=4'd4; lut[34]=4'd4; lut[35]=4'd4;
-lut[36]=4'd4; lut[37]=4'd4; lut[38]=4'd4; lut[39]=4'd4;
-lut[40]=4'd5; lut[41]=4'd5; lut[42]=4'd5; lut[43]=4'd5;
-lut[44]=4'd5; lut[45]=4'd5; lut[46]=4'd5; lut[47]=4'd5;
-lut[48]=4'd6; lut[49]=4'd6; lut[50]=4'd6; lut[51]=4'd6;
-lut[52]=4'd6; lut[53]=4'd6; lut[54]=4'd6; lut[55]=4'd6;
-lut[56]=4'd7; lut[57]=4'd7; lut[58]=4'd7; lut[59]=4'd7;
-lut[60]=4'd7; lut[61]=4'd7; lut[62]=4'd7; lut[63]=4'd7;
-            vert_8_col = lut[pos];
+            vert_4_col = pos[3:2];
         end
     endfunction
 
@@ -219,7 +116,7 @@ lut[60]=4'd7; lut[61]=4'd7; lut[62]=4'd7; lut[63]=4'd7;
     reg [2:0] cg_x, cg_y;
     reg [1:0] sub_x, sub_y;
 
-    always @* begin
+    always @(tu_size_log2 or scan_mode or cg_idx or sub_idx) begin
         // By default, assume 4x4 Diagonal
         cg_x = 3'd0;
         cg_y = 3'd0;

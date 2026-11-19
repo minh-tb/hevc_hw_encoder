@@ -62,18 +62,42 @@ module intra_pred_top (
 );
 
     //-------------------------------------------------------------------------
+    // Latch PU context on the first accepted/presented sample (ref_idx == 0)
+    // so external control changes mid-block cannot corrupt ongoing reconstruction.
+    //-------------------------------------------------------------------------
+    reg [2:0] pu_size_log2_r;
+    reg [5:0] intra_mode_r;
+    reg       is_luma_r;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            pu_size_log2_r <= 3'd2;
+            intra_mode_r   <= 6'd0;
+            is_luma_r      <= 1'b1;
+        end else if (ref_valid && ref_ready && (ref_idx == 8'd0)) begin
+            pu_size_log2_r <= pu_size_log2;
+            intra_mode_r   <= intra_mode;
+            is_luma_r      <= is_luma;
+        end
+    end
+
+    wire [2:0] eff_pu_size_log2 = (ref_valid && (ref_idx == 8'd0)) ? pu_size_log2 : pu_size_log2_r;
+    wire [5:0] eff_intra_mode   = (ref_valid && (ref_idx == 8'd0)) ? intra_mode   : intra_mode_r;
+    wire       eff_is_luma      = (ref_valid && (ref_idx == 8'd0)) ? is_luma      : is_luma_r;
+
+    //-------------------------------------------------------------------------
     // Mode decode
     //-------------------------------------------------------------------------
-    wire sel_planar = (intra_mode == `INTRA_PLANAR);
-    wire sel_dc     = (intra_mode == `INTRA_DC);
-    wire sel_ang    = (intra_mode >= `INTRA_ANG_FIRST) &&
-                      (intra_mode <= `INTRA_ANG_LAST);
+    wire sel_planar = (eff_intra_mode == `INTRA_PLANAR);
+    wire sel_dc     = (eff_intra_mode == `INTRA_DC);
+    wire sel_ang    = (eff_intra_mode >= `INTRA_ANG_FIRST) &&
+                      (eff_intra_mode <= `INTRA_ANG_LAST);
 
     // synthesis translate_off
     always @(posedge clk) begin
         if (rst_n && ref_valid && !sel_planar && !sel_dc && !sel_ang)
             $display("ERROR [intra_pred_top] invalid intra_mode=%0d at time=%0t",
-                     intra_mode, $time);
+                     eff_intra_mode, $time);
     end
     // synthesis translate_on
 
@@ -94,9 +118,9 @@ module intra_pred_top (
     ref_sample_filter u_ref_filter (
         .clk            (clk),
         .rst_n          (rst_n),
-        .pu_size_log2   (pu_size_log2),
-        .intra_mode     (intra_mode),
-        .is_luma        (is_luma),
+        .pu_size_log2   (eff_pu_size_log2),
+        .intra_mode     (eff_intra_mode),
+        .is_luma        (eff_is_luma),
         .in_valid       (ref_valid),
         .in_ready       (ref_ready),
         .in_sample      (ref_sample),
@@ -137,7 +161,7 @@ module intra_pred_top (
     intra_planar u_planar (
         .clk            (clk),
         .rst_n          (rst_n),
-        .pu_size_log2   (pu_size_log2),
+        .pu_size_log2   (eff_pu_size_log2),
         .in_valid       (filt_valid_planar),
         .in_ready       (filt_ready_planar),
         .in_sample      (filt_sample),
@@ -162,8 +186,8 @@ module intra_pred_top (
     intra_dc u_dc (
         .clk            (clk),
         .rst_n          (rst_n),
-        .pu_size_log2   (pu_size_log2),
-        .is_luma        (is_luma),
+        .pu_size_log2   (eff_pu_size_log2),
+        .is_luma        (eff_is_luma),
         .in_valid       (filt_valid_dc),
         .in_ready       (filt_ready_dc),
         .in_sample      (filt_sample),
@@ -188,9 +212,9 @@ module intra_pred_top (
     intra_angular u_angular (
         .clk            (clk),
         .rst_n          (rst_n),
-        .pu_size_log2   (pu_size_log2),
-        .intra_mode     (intra_mode),
-        .is_luma        (is_luma),
+        .pu_size_log2   (eff_pu_size_log2),
+        .intra_mode     (eff_intra_mode),
+        .is_luma        (eff_is_luma),
         .in_valid       (filt_valid_ang),
         .in_ready       (filt_ready_ang),
         .in_sample      (filt_sample),

@@ -118,8 +118,8 @@ module ctu_partitioner (
     //-------------------------------------------------------------------------
     // State machine
     //-------------------------------------------------------------------------
-    localparam S_IDLE     = 2'd0;   // waiting for CTU
-    localparam S_PUSH_CTU = 2'd1;   // push root CU onto stack
+    localparam S_IDLE     = 2'd0;   // waiting for CTU (merges root CU push)
+    // 2'd1 retired (root push folded into S_IDLE)
     localparam S_EVAL     = 2'd2;   // present top CU to mode_decision
     localparam S_SPLIT    = 2'd3;   // received split decision, act on it
 
@@ -128,7 +128,6 @@ module ctu_partitioner (
     // Count leaf CUs output (to detect last in CTU)
     // Max leaves = 64 (all depth-3), fits in 7 bits
     reg [6:0]  leaf_count;
-    reg [6:0]  expected_leaves; // set when CTU is fully determined (not used in simplified version)
 
     assign ctu_ready    = (state == S_IDLE);
     assign ctu_accepted = (state == S_IDLE) && ctu_valid;
@@ -210,6 +209,11 @@ module ctu_partitioner (
                             state <= S_EVAL;
                         end
                     end
+                end
+
+                default: begin
+                    cu_valid <= 1'b0;
+                    state    <= S_IDLE;
                 end
             endcase
         end

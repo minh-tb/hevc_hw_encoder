@@ -353,6 +353,7 @@ module syntax_coeff #(
         S_STUB_CBFCR0 = 5'd14,  // stub cbf_cr at depth 0
         S_STUB_CBFLUMA= 5'd15,  // stub cbf_luma
         S_STUB_ROOT   = 5'd16,  // stub rq_root_cbf
+        // 5'd17 reserved (formerly unused state encoding)
         S_STUB_CBFCB1 = 5'd18,  // stub cbf_cb at depth 1
         S_STUB_CBFCR1 = 5'd19,  // stub cbf_cr at depth 1
 

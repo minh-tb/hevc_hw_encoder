@@ -15,10 +15,10 @@
 //       Pass 2 col transform -> Output register array)
 //
 // Latency:
-//   - 4x4:   ~12 cycles
-//   - 8x8:   ~20 cycles
-//   - 16x16: ~36 cycles
-//   - 32x32: ~68 cycles
+//   - 4x4:   2N+6 = 14 cycles
+//   - 8x8:   2N+6 = 22 cycles
+//   - 16x16: 2N+6 = 38 cycles
+//   - 32x32: 2N+6 = 70 cycles
 //   (Far faster than downstream serialization/quantization budget of N^2 cycles)
 //
 // Pin & Interface Compatibility:

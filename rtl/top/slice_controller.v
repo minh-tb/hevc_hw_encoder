@@ -30,6 +30,7 @@ module slice_controller #(
     output reg  [5:0]   out_nal_type,
     output reg  [2:0]   out_temporal_id,
     output reg          nal_end,
+    input  wire         nal_ready,
 
     output wire         rbsp_valid,
     input  wire         rbsp_ready,
@@ -127,7 +128,7 @@ module slice_controller #(
                 if (psw_vps_done) next_state = S_VPS_WAIT;
             end
             S_VPS_WAIT: begin
-                if (wait_cnt == 3'd3) next_state = S_SPS_START;
+                if (wait_cnt == 3'd3 && nal_ready) next_state = S_SPS_START;
             end
             S_SPS_START: begin
                 next_state = S_SPS_SEND;
@@ -136,7 +137,7 @@ module slice_controller #(
                 if (psw_sps_done) next_state = S_SPS_WAIT;
             end
             S_SPS_WAIT: begin
-                if (wait_cnt == 3'd3) next_state = S_PPS_START;
+                if (wait_cnt == 3'd3 && nal_ready) next_state = S_PPS_START;
             end
             S_PPS_START: begin
                 next_state = S_PPS_SEND;
@@ -145,7 +146,7 @@ module slice_controller #(
                 if (psw_pps_done) next_state = S_PPS_WAIT;
             end
             S_PPS_WAIT: begin
-                if (wait_cnt == 3'd3) next_state = S_NAL_START;
+                if (wait_cnt == 3'd3 && nal_ready) next_state = S_NAL_START;
             end
             S_NAL_START: begin
                 next_state = S_HDR_PACK;
@@ -230,7 +231,7 @@ module slice_controller #(
                 end
                 
                 S_VPS_WAIT: begin
-                    wait_cnt <= wait_cnt + 3'd1;
+                    if (wait_cnt < 3'd3) wait_cnt <= wait_cnt + 3'd1;
                 end
 
                 S_SPS_START: begin
@@ -248,7 +249,7 @@ module slice_controller #(
                 end
                 
                 S_SPS_WAIT: begin
-                    wait_cnt <= wait_cnt + 3'd1;
+                    if (wait_cnt < 3'd3) wait_cnt <= wait_cnt + 3'd1;
                 end
 
                 S_PPS_START: begin
@@ -266,7 +267,7 @@ module slice_controller #(
                 end
                 
                 S_PPS_WAIT: begin
-                    wait_cnt <= wait_cnt + 3'd1;
+                    if (wait_cnt < 3'd3) wait_cnt <= wait_cnt + 3'd1;
                 end
 
                 S_NAL_START: begin
@@ -293,13 +294,13 @@ module slice_controller #(
                     
                     if (hdr_bits_left <= 8) begin
                         int_rbsp_last <= 1'b0;
-                        if (rbsp_ready) begin
+                        if (int_rbsp_valid && rbsp_ready) begin
                             ctu_frame_start <= 1'b1;
                             hdr_bits_left <= 0;
                             int_rbsp_valid <= 1'b0;
                         end
                     end else begin
-                        if (rbsp_ready) begin
+                        if (int_rbsp_valid && rbsp_ready) begin
                             hdr_shift_reg <= hdr_shift_reg << 8;
                             hdr_bits_left <= hdr_bits_left - 7'd8;
                         end

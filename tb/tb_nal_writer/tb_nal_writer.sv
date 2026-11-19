@@ -13,6 +13,7 @@ module tb_nal_writer;
     logic [5:0]  nal_type;
     logic [2:0]  temporal_id;
     logic        nal_end;
+    logic        nal_ready;
 
     logic        rbsp_valid;
     logic        rbsp_ready;
@@ -93,6 +94,46 @@ module tb_nal_writer;
         $display("--- Test 2: Emulation Prevention (Expect 0x03 insertion) ---");
          write_rbsp('{8'h00, 8'h00, 8'h00, 8'h01, 8'h02, 8'h03}, 6'd1, 3'd0);
         if (out_stream[8] !== 8'h03) begin $display("ERROR: EPB 03 not inserted correctly."); errors++; end
+
+        // Test 3: Backpressure During 1-Cycle nal_end & Final-Byte EPB Overlap
+        $display("--- Test 3: Stalled nal_end_pending & Final-Byte EPB Integrity ---");
+        out_stream.delete();
+        out_ready = 1'b1;
+        @(posedge clk); #1;
+        nal_start   = 1'b1;
+        nal_type    = 6'd32;
+        temporal_id = 3'd0;
+        @(posedge clk); #1;
+        nal_start   = 1'b0;
+        // Stream 00 00 with final byte 01 accompanied by nal_end while stalled
+        begin
+            static logic [7:0] bp_data [0:2] = '{8'h00, 8'h00, 8'h01};
+            for (int k = 0; k < 3; k++) begin
+                rbsp_valid = 1'b1;
+                rbsp_byte  = bp_data[k];
+                rbsp_last  = 1'b0; // Test explicit nal_end termination instead of rbsp_last
+                if (k == 2) begin
+                    nal_end = 1'b1;
+                    out_ready = 1'b0; // Stall while 0x03 EPB & nal_end coincide
+                    @(posedge clk); #1;
+                    nal_end = 1'b0;   // Drop 1-cycle nal_end while still stalled!
+                    repeat (3) @(posedge clk); #1;
+                    out_ready = 1'b1;
+                end
+                wait(rbsp_ready);
+                @(posedge clk); #1;
+            end
+        end
+        rbsp_valid = 1'b0;
+        while (!nal_ready) @(posedge clk);
+        @(posedge clk);
+        if (out_stream.size() != 10) begin
+            $display("ERROR: Test 3 backpressure size mismatch: expected 10, got %0d", out_stream.size());
+            errors++;
+        end else if (out_stream[8] !== 8'h03 || out_stream[9] !== 8'h01) begin
+            $display("ERROR: Test 3 final-byte EPB truncated under stall! [8]=%02x [9]=%02x", out_stream[8], out_stream[9]);
+            errors++;
+        end
 
         if (errors == 0) $display("=== [PASS] All nal_writer tests passed! ===");
         else             $display("=== [FAIL] %0d errors found ===", errors);

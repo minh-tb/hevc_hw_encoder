@@ -17,6 +17,9 @@ Each major subsystem is documented in detail with its dedicated algorithm flowch
 | **Transform & Quantization** | [`dct_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/transform/dct_top.v) | [**Transform & Quantization Flowchart**](file:///d:/UIT_Doc/hevc_hw_encoder/docs/bif_modules/transform_quant_flowchart.md) | 2-pass row-serial 2D DCT-II ($4..32$) and DST-VII ($4\times 4$ Intra Luma) with transpose RAM, deadzone scalar quantization. |
 | **Rate Control** | [`rate_controller.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/rate_control/rate_controller.v) | [**Rate Controller Flowchart**](file:///d:/UIT_Doc/hevc_hw_encoder/docs/bif_modules/rate_controller_flowchart.md) | VBV buffer occupancy accumulator, target bit allocation, frame-level feedback $\Delta\text{QP}$ clamping, dividerless fullness estimator. |
 
+> [!TIP]
+> **RTL Finite State Machine (FSM) Reference Suite:** For cycle-accurate state encodings, `localparam` tables, transition guards, and reset/backpressure semantics across every RTL block, see the [**Master FSM Reference Index**](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm_reference.md) and its 7 subsystem specs: [Top & Control](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/top_and_control_fsms.md) · [Partition & Mode Decision](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/partition_and_mode_decision_fsms.md) · [Intra Prediction](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/intra_prediction_fsms.md) · [Inter Prediction](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/inter_prediction_fsms.md) · [Transform, Quant, Recon, DPB & RC](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/transform_quant_recon_fsms.md) · [In-Loop Filters](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/inloop_filters_fsms.md) · [Entropy & NAL](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/entropy_and_nal_fsms.md).
+
 ---
 
 ## 2. System-Level Subsystem Interaction Diagram (Mermaid)

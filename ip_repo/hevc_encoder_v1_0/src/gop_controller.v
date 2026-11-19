@@ -90,126 +90,8 @@ module gop_controller #(
     assign ref_l0 = {int_ref_l0[4], int_ref_l0[3], int_ref_l0[2], int_ref_l0[1], int_ref_l0[0]};
     assign ref_l1 = {int_ref_l1[4], int_ref_l1[3], int_ref_l1[2], int_ref_l1[1], int_ref_l1[0]};
 
-    //-------------------------------------------------------------------------
-    // GOP ROM Definition (encoder_randomaccess_main10.cfg)
-    // Structure: {POC Offset, TempID, L0 Count, L1 Count,
-    //             L0 Delta 0, 1, 2, 3, 4, L1 Delta 0, 1, 2, 3, 4}
-    // Note: Deltas are signed 6-bit (-32 to +31)
-    //-------------------------------------------------------------------------
-    reg [4:0]  rom_poc_offset;
-    reg [2:0]  rom_temp_id;
-    reg [2:0]  rom_l0_cnt;
-    reg [2:0]  rom_l1_cnt;
-    
-    reg signed [5:0] rom_l0_d0, rom_l0_d1, rom_l0_d2, rom_l0_d3, rom_l0_d4;
-    reg signed [5:0] rom_l1_d0, rom_l1_d1, rom_l1_d2, rom_l1_d3, rom_l1_d4;
-
-    always @(*) begin
-        // Defaults to avoid latches
-        rom_poc_offset = 0; rom_temp_id = 0;
-        rom_l0_cnt = 0; rom_l1_cnt = 0;
-        rom_l0_d0 = 0; rom_l0_d1 = 0; rom_l0_d2 = 0; rom_l0_d3 = 0; rom_l0_d4 = 0;
-        rom_l1_d0 = 0; rom_l1_d1 = 0; rom_l1_d2 = 0; rom_l1_d3 = 0; rom_l1_d4 = 0;
-
-        case (gop_idx)
-            // Frame1: B 16 1  ... 2 2  -16 -32 
-            0: begin
-                rom_poc_offset=16; rom_temp_id=1; rom_l0_cnt=2; rom_l1_cnt=2;
-                rom_l0_d0=-16; rom_l0_d1=-32;
-                rom_l1_d0=-16; rom_l1_d1=-32; // In HM, if L1 empty, copies L0
-            end
-            // Frame2: B 8 1 ... 2 3  -8 -24 8
-            1: begin
-                rom_poc_offset=8; rom_temp_id=1; rom_l0_cnt=2; rom_l1_cnt=3;
-                rom_l0_d0=-8;  rom_l0_d1=-24;
-                rom_l1_d0=8;   rom_l1_d1=-8;  rom_l1_d2=-24;
-            end
-            // Frame3: B 4 4 ... 2 4  -4 -20 4 12
-            2: begin
-                rom_poc_offset=4; rom_temp_id=4; rom_l0_cnt=2; rom_l1_cnt=4;
-                rom_l0_d0=-4;  rom_l0_d1=-20;
-                rom_l1_d0=4;   rom_l1_d1=12;  rom_l1_d2=-4; rom_l1_d3=-20;
-            end
-            // Frame4: B 2 5 ... 2 5  -2 -18 2 6 14
-            3: begin
-                rom_poc_offset=2; rom_temp_id=5; rom_l0_cnt=2; rom_l1_cnt=5;
-                rom_l0_d0=-2;  rom_l0_d1=-18;
-                rom_l1_d0=2;   rom_l1_d1=6;   rom_l1_d2=14; rom_l1_d3=-2; rom_l1_d4=-18;
-            end
-            // Frame5: B 1 6 ... 2 5  -1 1 3 7 15
-            4: begin
-                rom_poc_offset=1; rom_temp_id=6; rom_l0_cnt=2; rom_l1_cnt=5;
-                rom_l0_d0=-1;  rom_l0_d1=1;
-                rom_l1_d0=1;   rom_l1_d1=3;   rom_l1_d2=7;  rom_l1_d3=15; rom_l1_d4=-1;
-            end
-            // Frame6: B 3 6 ... 2 5  -1 -3 1 5 13
-            5: begin
-                rom_poc_offset=3; rom_temp_id=6; rom_l0_cnt=2; rom_l1_cnt=5;
-                rom_l0_d0=-1;  rom_l0_d1=-3;
-                rom_l1_d0=1;   rom_l1_d1=5;   rom_l1_d2=13; rom_l1_d3=-1; rom_l1_d4=-3;
-            end
-            // Frame7: B 6 5 ... 2 4  -2 -6 2 10
-            6: begin
-                rom_poc_offset=6; rom_temp_id=5; rom_l0_cnt=2; rom_l1_cnt=4;
-                rom_l0_d0=-2;  rom_l0_d1=-6;
-                rom_l1_d0=2;   rom_l1_d1=10;  rom_l1_d2=-2; rom_l1_d3=-6;
-            end
-            // Frame8: B 5 6 ... 2 5  -1 -5 1 3 11
-            7: begin
-                rom_poc_offset=5; rom_temp_id=6; rom_l0_cnt=2; rom_l1_cnt=5;
-                rom_l0_d0=-1;  rom_l0_d1=-5;
-                rom_l1_d0=1;   rom_l1_d1=3;   rom_l1_d2=11; rom_l1_d3=-1; rom_l1_d4=-5;
-            end
-            // Frame9: B 7 6 ... 2 4  -1 -7 1 9
-            8: begin
-                rom_poc_offset=7; rom_temp_id=6; rom_l0_cnt=2; rom_l1_cnt=4;
-                rom_l0_d0=-1;  rom_l0_d1=-7;
-                rom_l1_d0=1;   rom_l1_d1=9;   rom_l1_d2=-1; rom_l1_d3=-7;
-            end
-            // Frame10: B 12 4 ... 2 3  -4 -12 4
-            9: begin
-                rom_poc_offset=12; rom_temp_id=4; rom_l0_cnt=2; rom_l1_cnt=3;
-                rom_l0_d0=-4;  rom_l0_d1=-12;
-                rom_l1_d0=4;   rom_l1_d1=-4;  rom_l1_d2=-12;
-            end
-            // Frame11: B 10 5 ... 2 4  -2 -10 2 6
-            10: begin
-                rom_poc_offset=10; rom_temp_id=5; rom_l0_cnt=2; rom_l1_cnt=4;
-                rom_l0_d0=-2;  rom_l0_d1=-10;
-                rom_l1_d0=2;   rom_l1_d1=6;   rom_l1_d2=-2; rom_l1_d3=-10;
-            end
-            // Frame12: B 9 6 ... 2 5  -1 -9 1 3 7
-            11: begin
-                rom_poc_offset=9; rom_temp_id=6; rom_l0_cnt=2; rom_l1_cnt=5;
-                rom_l0_d0=-1;  rom_l0_d1=-9;
-                rom_l1_d0=1;   rom_l1_d1=3;   rom_l1_d2=7;  rom_l1_d3=-1; rom_l1_d4=-9;
-            end
-            // Frame13: B 11 6 ... 2 4  -1 -11 1 5
-            12: begin
-                rom_poc_offset=11; rom_temp_id=6; rom_l0_cnt=2; rom_l1_cnt=4;
-                rom_l0_d0=-1;  rom_l0_d1=-11;
-                rom_l1_d0=1;   rom_l1_d1=5;   rom_l1_d2=-1; rom_l1_d3=-11;
-            end
-            // Frame14: B 14 5 ... 2 3  -2 -14 2
-            13: begin
-                rom_poc_offset=14; rom_temp_id=5; rom_l0_cnt=2; rom_l1_cnt=3;
-                rom_l0_d0=-2;  rom_l0_d1=-14;
-                rom_l1_d0=2;   rom_l1_d1=-2;  rom_l1_d2=-14;
-            end
-            // Frame15: B 13 6 ... 2 4  -1 -13 1 3
-            14: begin
-                rom_poc_offset=13; rom_temp_id=6; rom_l0_cnt=2; rom_l1_cnt=4;
-                rom_l0_d0=-1;  rom_l0_d1=-13;
-                rom_l1_d0=1;   rom_l1_d1=3;   rom_l1_d2=-1; rom_l1_d3=-13;
-            end
-            // Frame16: B 15 6 ... 2 4  -1 -3 -15 1
-            15: begin
-                rom_poc_offset=15; rom_temp_id=6; rom_l0_cnt=2; rom_l1_cnt=4;
-                rom_l0_d0=-1;  rom_l0_d1=-3;
-                rom_l1_d0=1;   rom_l1_d1=-1;  rom_l1_d2=-3; rom_l1_d3=-15; // Adjusted delta logic
-            end
-        endcase
-    end
+    // Active sequential IP / Low-Delay IPBB control; hierarchical-B ROM removed
+    // (can be reconstructed from git history if B-frame reordering is added later).
 
     //-------------------------------------------------------------------------
     // Function: Find physical slot for a given POC
@@ -229,8 +111,6 @@ module gop_controller #(
     endfunction
 
     // FSM State Register
-    wire [9:0] target_frame_poc = base_poc + {5'b0, rom_poc_offset};
-
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) state <= S_IDLE;
         else        state <= next_state;
@@ -241,7 +121,7 @@ module gop_controller #(
         next_state = state;
         case (state)
             S_IDLE: begin
-                if (encode_start) next_state = S_CRA;
+                if (encode_start) next_state = (total_frames == 16'd0) ? S_DONE : S_CRA;
             end
             S_CRA: begin
                 next_state = S_ALLOC;
@@ -355,7 +235,7 @@ module gop_controller #(
                     end
 
                     // DPB Slot Recycling: Free POC - 2 when base_poc >= 2 (sliding window RPS delta=-1)
-                    if (base_poc >= 10'd2) begin
+                    if (alloc_ready && base_poc >= 10'd2) begin
                         free_valid <= 1'b1;
                         free_slot  <= find_slot(base_poc - 10'd2);
                         slot_map_valid[find_slot(base_poc - 10'd2)] <= 1'b0;

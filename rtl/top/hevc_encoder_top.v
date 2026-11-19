@@ -272,8 +272,7 @@ module hevc_encoder_top #(
     localparam [3:0] CABAC_WAIT_COEFF       = 4'd4;
     localparam [3:0] CABAC_TRM_CTU          = 4'd5;
     localparam [3:0] CABAC_WAIT_COEFF_DONE  = 4'd6;
-    localparam [3:0] CABAC_TRM_SLICE        = 4'd7;
-    localparam [3:0] CABAC_FLUSH            = 4'd8;
+    // 4'd7, 4'd8 retired (slice termination/flush handled via CABAC_TRM_CTU + cabac_flush_state)
     localparam [3:0] CABAC_WAIT_SAO_DONE    = 4'd9;
     localparam [3:0] CABAC_WAIT_SAO_STATS   = 4'd10;
     localparam [3:0] CABAC_DRAIN_CTU_BINS   = 4'd11;
@@ -427,6 +426,7 @@ module hevc_encoder_top #(
     );
 
     wire cabac_flush_done;
+    wire nal_writer_ready;
     wire slice_frame_done;
     wire [5:0]        rc_frame_qp;
     wire signed [6:0] rc_slice_qp_delta;
@@ -453,6 +453,7 @@ module hevc_encoder_top #(
         .out_nal_type     (nal_type),
         .out_temporal_id  (nal_temporal_id),
         .nal_end          (nal_end),
+        .nal_ready        (nal_writer_ready),
         .rbsp_valid       (rbsp_valid),
         .rbsp_ready       (rbsp_ready),
         .rbsp_byte        (rbsp_byte),
@@ -1381,12 +1382,19 @@ module hevc_encoder_top #(
     assign pred_pixel = latched_cu_is_intra ? intra_pred_pixel : inter_pred_pixel;
 
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) mc_data_ready <= 1'b0;
-        else if (mc_start) mc_data_ready <= 1'b0;
-        else if (mc_done)  mc_data_ready <= 1'b1;
+        if (!rst_n)
+            mc_data_ready <= 1'b0;
+        else if (ctu_frame_start)
+            mc_data_ready <= 1'b0;
+        else if (trigger_leaf_cu)
+            mc_data_ready <= !md_eff_is_intra;
+        else if (mc_start)
+            mc_data_ready <= 1'b1;
+        else if (cabac_state == CABAC_WAIT_COEFF_DONE && cabac_coeff_done && reg_tu_is_last_in_cu)
+            mc_data_ready <= 1'b0;
     end
     
-    // Trigger mc_unit right after mode_decision asserts mode_valid and best is Inter
+    // Keep mc_start pulse for mode_decision tracking while Pillar 1 mc_window_fetch serves TU MC
     assign mc_start = md_mode_valid && !md_best_is_intra;
     //-------------------------------------------------------------------------
     // TU Sequencer & Neighbor Buffer for Intra Prediction
@@ -2114,7 +2122,7 @@ module hevc_encoder_top #(
         .best_mv_y        (search_best_mv_y_raw),
         .best_sad         (search_best_sad),
         
-        .mc_start         (mc_start),
+        .mc_start         (1'b0), // Pillar 1 TDP u_mc_window_fetch handles TU prediction; keep u_mc_unit idle at top level
         .mc_ready         (),
         .mc_mv_x          (mc_mv_x_qp),
         .mc_mv_y          (mc_mv_y_qp),
@@ -2560,6 +2568,7 @@ module hevc_encoder_top #(
           .addr_y       (p2s_y)
       );
   
+      wire fwd_quant_in_ready;
       always @(posedge clk or negedge rst_n) begin
           if (!rst_n) begin
               p2s_active <= 0;
@@ -2572,7 +2581,7 @@ module hevc_encoder_top #(
                   p2s_idx <= 10'd0;
                   p2s_max <= (10'd1 << (dct_out_tu_size_log2 * 2)) - 10'd1;
                   p2s_coeff <= dct_out_data[0][0];
-              end else if (p2s_active) begin
+              end else if (p2s_active && fwd_quant_in_ready) begin
                   if (p2s_idx == p2s_max) begin
                       p2s_active <= 1'b0;
                   end else begin
@@ -2590,7 +2599,7 @@ module hevc_encoder_top #(
         .tu_size_log2     (dct_out_tu_size_log2),
         .is_intra         (latched_cu_is_intra),
         .in_valid         (p2s_active),
-        .in_ready         (),  // streaming pipeline, always accepts
+        .in_ready         (fwd_quant_in_ready),
         .in_coeff         (p2s_coeff), 
         .in_scan_idx      (p2s_idx),
         .in_last          (p2s_idx == p2s_max),
@@ -3298,11 +3307,7 @@ module hevc_encoder_top #(
                 end
                 CABAC_WAIT_COEFF_DONE: begin
                     if (cabac_coeff_done) begin
-                        if (!latched_cu_is_intra && !latched_cu_merge && !cu_cbf_latched) begin
-                            if (cabac_cu_is_last_in_ctu) begin
-                                cabac_state <= cfg_sao_enable ? CABAC_WAIT_SAO_STATS : CABAC_TRM_CTU;
-                            end else cabac_state <= CABAC_IDLE;
-                        end else if (!reg_tu_is_last_in_cu) begin
+                        if (!reg_tu_is_last_in_cu) begin
                             cabac_state <= CABAC_WAIT_COEFF;
                         end else begin
                             if (cabac_cu_is_last_in_ctu) begin
@@ -3333,6 +3338,7 @@ module hevc_encoder_top #(
                         cabac_state <= CABAC_IDLE;
                     end
                 end
+                default: cabac_state <= CABAC_IDLE;
             endcase
         end
     end
@@ -3728,6 +3734,7 @@ module hevc_encoder_top #(
         .nal_type         (nal_type),
         .temporal_id      (nal_temporal_id),
         .nal_end          (nal_end),
+        .nal_ready        (nal_writer_ready),
         .rbsp_valid       (rbsp_valid | cabac_out_valid),
         .rbsp_ready       (rbsp_ready),
         .rbsp_byte        (rbsp_valid ? rbsp_byte : cabac_out_byte),

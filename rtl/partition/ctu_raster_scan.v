@@ -75,7 +75,6 @@ module ctu_raster_scan #(
     output reg          frame_active,   // 1 while scanning a frame
     output reg          frame_done      // pulse when last CTU accepted
 );
-    reg                 frame_wait_last;
 
     //-------------------------------------------------------------------------
     // Frame dimension derivation
@@ -119,7 +118,6 @@ module ctu_raster_scan #(
         if (!rst_n) begin
             ctu_valid      <= 1'b0;
             frame_active   <= 1'b0;
-            frame_wait_last<= 1'b0;
             frame_done     <= 1'b0;
             cur_x          <= 0;
             cur_y          <= 0;
@@ -138,7 +136,6 @@ module ctu_raster_scan #(
                 cur_x           <= 0;
                 cur_y           <= 0;
                 cur_addr        <= 0;
-                frame_wait_last <= 1'b0;
                 poc             <= frame_poc;
                 slice_type      <= frame_slice_type;
                 $display("Time=%0t: [CTU_RASTER] Frame started. Latching slice_type=%0d, qp=%0d", $time, frame_slice_type, (frame_qp_in != 6'd0) ? frame_qp_in : `QP_DEFAULT);

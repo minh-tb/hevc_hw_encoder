@@ -49,8 +49,8 @@ module fme_search #(
         S_HPEL_FEED = 4'd3,
         S_HPEL_WAIT = 4'd4,
         S_QPEL_FEED = 4'd5,
-        S_QPEL_WAIT = 4'd6,
-        S_DONE      = 4'd7;
+        S_QPEL_WAIT = 4'd6;
+        // 4'd7 reserved (unused S_DONE; S_QPEL_WAIT returns directly to S_IDLE)
         
     reg [3:0] state;
     
@@ -283,6 +283,8 @@ module fme_search #(
                         end
                     end
                 end
+
+                default: state <= S_IDLE;
             endcase
         end
     end

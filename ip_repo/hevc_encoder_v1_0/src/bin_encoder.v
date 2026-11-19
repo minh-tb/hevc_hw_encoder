@@ -31,21 +31,21 @@
 //     - ctx_model_store applies transition: transIdx[MPS|LPS][pStateIdx]
 //     - Ready for next bin (if range_coder accepted T's bin)
 //
-// RAW Hazard — same context on consecutive bins:
+// RAW Hazard — same context on consecutive regular bins:
 //   If bin_n uses ctx=K and bin_{n+1} also uses ctx=K:
-//   - At cycle T+1, the ctx_model_store WRITE for bin_n completes
-//   - The ctx_model_store READ for bin_{n+1} at T+1 sees the UPDATED state ✓
-//   - Because ctx_model_store read is combinational AFTER the registered write
-//   - This holds for back-to-back bins to the same ctx with NO stall required
+//   - At cycle T+1, the ctx_model_store WRITE for bin_n completes via upd_valid
+//   - A 1-cycle raw_hazard stall (!is_ep && upd_valid && (ctx_id == upd_ctx_id))
+//     holds bin_rdy_out low at T+1 so bin_{n+1} reads the updated context state
 //
 // Bypass encoding (EP):
-//   Sent to range_coder via rc_ep_valid/rc_ep_value.
-//   No ctx_model_store interaction.
+//   Sent to range_coder via rc_ep_valid.
+//   No ctx_model_store interaction and no raw_hazard stall.
 //   range_coder handles: low = (low<<1) + (ep_bin ? range : 0)
 //
 // Stall conditions:
-//   bin_rdy_out = rc_bin_ready && !init_busy
-//   (Stalls while range_coder is renormalizing or ctx store is initializing)
+//   bin_rdy_out = !init_busy && !raw_hazard && rc_bin_ready
+//   (Stalls while range_coder is renormalizing, ctx store is initializing,
+//    or a back-to-back same-ctx regular bin write-back is completing)
 //
 // Interface note:
 //   range_coder.v uses a shared bin_value and bin_ready port for both

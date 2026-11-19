@@ -206,10 +206,8 @@ module mode_decision #(
     wire [31:0] lambda_amvp_rate_cost  = (lambda_mode_q8 * amvp_est_rate_q8[15:8]) >> 8;
 
     //=========================================================================
-    // Skip Threshold & Split Threshold — Lambda Adaptive
+    // Split Threshold — Lambda Adaptive
     //=========================================================================
-    wire [31:0] skip_threshold = (lambda_mode_q8 >> 8) + 32'd8;
-
     wire [31:0] split_threshold = (cur_pu_depth == 2'd0) ? (32'd250000 + (lambda_mode_q8 >> 4)) :
                                   (cur_pu_depth == 2'd1) ? (32'd60000  + (lambda_mode_q8 >> 5)) :
                                   (cur_pu_depth == 2'd2) ? (32'd15000  + (lambda_mode_q8 >> 6)) :
@@ -471,9 +469,6 @@ module mode_decision #(
                     // Fast Encoder Decision Logic
                     if (cur_pu_depth == 2'd3) begin
                         // Max depth (8x8) MUST be a leaf
-                        split_flag <= 1'b0;
-                    end else if (best_skip_flag) begin
-                        // Skip mode: no need to split further
                         split_flag <= 1'b0;
 `ifdef REMEDIATION
                     end else if (cur_pu_depth == 2'd0) begin

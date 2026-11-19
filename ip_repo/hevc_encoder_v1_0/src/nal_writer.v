@@ -52,6 +52,7 @@ module nal_writer (
     input  wire [5:0]   nal_type,           // NAL_VPS_NUT, NAL_SPS_NUT, etc.
     input  wire [2:0]   temporal_id,        // 0..6 (nuh_temporal_id_plus1 = +1)
     input  wire         nal_end,            // pulse: all RBSP bytes sent
+    output wire         nal_ready,          // 1 when idle and ready for next nal_start
 
     //=========================================================================
     // RBSP input — from output_fifo
@@ -83,14 +84,15 @@ module nal_writer (
     localparam S_START_CODE  = 4'd1;   // write 00 00 00 01
     localparam S_NAL_HDR0    = 4'd2;   // write NAL header byte 0
     localparam S_NAL_HDR1    = 4'd3;   // write NAL header byte 1
-    localparam S_RBSP        = 4'd4;   // write RBSP payload bytes
-    localparam S_EPB         = 4'd5;   // insert emulation prevention byte 03
+    localparam S_RBSP        = 4'd4;   // write RBSP payload bytes (handles inline 0x03 EPB)
+    // 4'd5 retired (EPB insertion folded inline inside S_RBSP)
     localparam S_DONE        = 4'd6;
 
     reg [3:0]  state;
     reg [1:0]  sc_cnt;      // start code byte counter (0=0x00, 1=0x00, 2=0x00, 3=0x01)
     reg [5:0]  cur_nal_type;
     reg [2:0]  cur_temp_id;
+    reg        nal_end_pending;
 
     //-------------------------------------------------------------------------
     // NAL unit header (HEVC spec 7.3.1.2)
@@ -122,8 +124,10 @@ module nal_writer (
                     (rbsp_byte <= 8'h03) && rbsp_valid;
 
     //-------------------------------------------------------------------------
-    // rbsp_ready: accept RBSP byte when in RBSP state and not inserting EPB
+    // nal_ready & rbsp_ready: accept RBSP byte when in S_RBSP, not inserting
+    // EPB, and downstream output register can accept next byte.
     //-------------------------------------------------------------------------
+    assign nal_ready  = (state == S_IDLE) && !nal_start;
     assign rbsp_ready = (state == S_RBSP) && !need_epb &&
                         (out_ready || !out_valid);
 
@@ -132,24 +136,30 @@ module nal_writer (
     //-------------------------------------------------------------------------
     always @(posedge clk) begin
         if (!rst_n) begin
-            state         <= S_IDLE;
-            sc_cnt        <= 2'd0;
-            out_valid     <= 1'b0;
-            out_byte      <= 8'h00;
+            state           <= S_IDLE;
+            sc_cnt          <= 2'd0;
+            out_valid       <= 1'b0;
+            out_byte        <= 8'h00;
             out_last_in_nal <= 1'b0;
-            nal_byte_count<= 32'd0;
-            total_nal_count<=32'd0;
-            prev0         <= 8'hFF;
-            prev1         <= 8'hFF;
-            inserting_epb <= 1'b0;
-            cur_nal_type  <= 6'd0;
-            cur_temp_id   <= 3'd0;
+            nal_byte_count  <= 32'd0;
+            total_nal_count <= 32'd0;
+            prev0           <= 8'hFF;
+            prev1           <= 8'hFF;
+            inserting_epb   <= 1'b0;
+            nal_end_pending <= 1'b0;
+            cur_nal_type    <= 6'd0;
+            cur_temp_id     <= 3'd0;
         end else begin
+            if (nal_end && state != S_IDLE && state != S_DONE) begin
+                nal_end_pending <= 1'b1;
+            end
+
             case (state)
                 //--------------------------------------------------------------
                 S_IDLE: begin
                     out_valid       <= 1'b0;
                     out_last_in_nal <= 1'b0;
+                    nal_end_pending <= 1'b0;
                     if (nal_start) begin
                         cur_nal_type   <= nal_type;
                         cur_temp_id    <= temporal_id;
@@ -215,7 +225,10 @@ module nal_writer (
                 // RBSP payload — with emulation prevention
                 //--------------------------------------------------------------
                 S_RBSP: begin
-                    if (nal_end && !rbsp_valid && (!out_valid || out_ready)) begin
+                    if ((nal_end || nal_end_pending) && !rbsp_valid && !need_epb && (!out_valid || out_ready)) begin
+                        out_valid       <= 1'b0;
+                        out_last_in_nal <= 1'b0;
+                        nal_end_pending <= 1'b0;
                         total_nal_count <= total_nal_count + 32'd1;
                         state <= S_DONE;
                     end else if (out_ready || !out_valid) begin
@@ -253,11 +266,19 @@ module nal_writer (
 
                 //--------------------------------------------------------------
                 S_DONE: begin
+                    nal_end_pending <= 1'b0;
                     if (out_ready || !out_valid) begin
                         out_valid       <= 1'b0;
                         out_last_in_nal <= 1'b0;
                         state           <= S_IDLE;
                     end
+                end
+
+                default: begin
+                    out_valid       <= 1'b0;
+                    out_last_in_nal <= 1'b0;
+                    nal_end_pending <= 1'b0;
+                    state           <= S_IDLE;
                 end
 
             endcase

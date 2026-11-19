@@ -128,7 +128,7 @@ module ref_frame_buffer #(
         S_ROW_AR2   = 4'd4,   // AXI AR for beat 2 (if row spans 2 beats)
         S_ROW_R2    = 4'd5,   // AXI R  for beat 2
         S_ROW_STORE = 4'd6,   // extract + store row pixels into ext_block
-        S_NEXT_ROW  = 4'd7,   // increment row counter
+        // 4'd7 reserved (next-row step folded directly into S_ROW_STORE)
         S_DONE      = 4'd8;
 
     reg [3:0] state;
@@ -400,18 +400,6 @@ module ref_frame_buffer #(
                     end
                 end
                 if (row_idx == blk_ext_cur - 4'd1) begin
-                    state <= S_DONE;
-                end else begin
-                    row_idx <= row_idx + 4'd1;
-                    state   <= S_ROW_AR1;
-                end
-            end
-
-            // ---------------------------------------------------------------
-            // NEXT_ROW — advance row, check completion
-            // ---------------------------------------------------------------
-            S_NEXT_ROW: begin
-                if (row_idx == blk_ext_cur - 1) begin
                     state <= S_DONE;
                 end else begin
                     row_idx <= row_idx + 4'd1;
