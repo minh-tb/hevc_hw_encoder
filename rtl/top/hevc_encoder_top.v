@@ -2168,6 +2168,7 @@ module hevc_encoder_top #(
     ) u_inter_pred (
         .clk              (clk),
         .rst_n            (rst_n),
+        .cache_invalidate (gop_frame_start),
         .ref_slot_in      (ref_l0[2:0]),   // DPB slot for ref frame L0[0]
         .ref_slot_l1      (ref_l1[2:0]),   // DPB slot for ref frame L1[0]
         .inter_pred_idc   (ctu_slice_type == 2'd0 ? 2'd2 : 2'd0), // B-slice: Bi-prediction

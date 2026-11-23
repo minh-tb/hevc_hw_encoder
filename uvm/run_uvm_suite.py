@@ -34,7 +34,7 @@ XSIM_BAT = VIVADO_BIN / "xsim.bat"
 DEFAULT_LICENSE_FILE = r"C:\Users\Admin\.Xilinx\Xilinx.lic"
 
 EXPECTED_YUV_BYTES_64X64_10BIT = 12288  # 64*64*2 (Y) + 2*32*32*2 (Cb, Cr)
-EXPECTED_RTL_FILE_COUNT = 63
+EXPECTED_RTL_FILE_COUNT = 64
 
 
 @dataclass

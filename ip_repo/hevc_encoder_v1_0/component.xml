@@ -672,7 +672,7 @@
         <spirit:parameters>
           <spirit:parameter>
             <spirit:name>viewChecksum</spirit:name>
-            <spirit:value>211eec2e</spirit:value>
+            <spirit:value>4dcfca46</spirit:value>
           </spirit:parameter>
         </spirit:parameters>
       </spirit:view>
@@ -688,7 +688,7 @@
         <spirit:parameters>
           <spirit:parameter>
             <spirit:name>viewChecksum</spirit:name>
-            <spirit:value>383474a3</spirit:value>
+            <spirit:value>544598ee</spirit:value>
           </spirit:parameter>
         </spirit:parameters>
       </spirit:view>
@@ -2132,6 +2132,11 @@
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
+        <spirit:name>src/ref_search_cache.v</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
+      </spirit:file>
+      <spirit:file>
         <spirit:name>src/residual_sub.v</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
@@ -2461,6 +2466,11 @@
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
       </spirit:file>
       <spirit:file>
+        <spirit:name>src/ref_search_cache.v</spirit:name>
+        <spirit:fileType>systemVerilogSource</spirit:fileType>
+        <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
+      </spirit:file>
+      <spirit:file>
         <spirit:name>src/residual_sub.v</spirit:name>
         <spirit:fileType>systemVerilogSource</spirit:fileType>
         <spirit:userFileType>IMPORTED_FILE</spirit:userFileType>
@@ -2646,14 +2656,14 @@
       <xilinx:vendorDisplayName>UIT</xilinx:vendorDisplayName>
       <xilinx:vendorURL>https://uit.edu.vn</xilinx:vendorURL>
       <xilinx:coreRevision>1</xilinx:coreRevision>
-      <xilinx:coreCreationDateTime>2026-11-23T16:15:17Z</xilinx:coreCreationDateTime>
+      <xilinx:coreCreationDateTime>2026-11-23T17:50:14Z</xilinx:coreCreationDateTime>
     </xilinx:coreExtensions>
     <xilinx:packagingInfo>
       <xilinx:xilinxVersion>2026.1</xilinx:xilinxVersion>
       <xilinx:checksum xilinx:scope="busInterfaces" xilinx:value="45de688c"/>
       <xilinx:checksum xilinx:scope="addressSpaces" xilinx:value="69bc2842"/>
       <xilinx:checksum xilinx:scope="memoryMaps" xilinx:value="238fe90c"/>
-      <xilinx:checksum xilinx:scope="fileGroups" xilinx:value="6fa26364"/>
+      <xilinx:checksum xilinx:scope="fileGroups" xilinx:value="cc8d3056"/>
       <xilinx:checksum xilinx:scope="ports" xilinx:value="5084528c"/>
       <xilinx:checksum xilinx:scope="hdlParameters" xilinx:value="29b0a8c8"/>
       <xilinx:checksum xilinx:scope="parameters" xilinx:value="e6e20369"/>

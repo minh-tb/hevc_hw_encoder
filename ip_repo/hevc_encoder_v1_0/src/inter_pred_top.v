@@ -18,6 +18,7 @@ module inter_pred_top #(
 )(
     input  wire                        clk,
     input  wire                        rst_n,
+    input  wire                        cache_invalidate,
 
     // DPB reference slots
     input  wire [2:0]                  ref_slot_in,    // Default / L0 slot
@@ -98,6 +99,64 @@ module inter_pred_top #(
     wire [1439:0] ref_resp_y_flat; // 12x12
     wire [249:0]  ref_resp_cb_flat, ref_resp_cr_flat;
 
+    // Bypass & AXI signals between ref_search_cache and ref_frame_buffer
+    wire               buf_ref_req_valid;
+    wire               buf_ref_req_ready;
+    wire [1:0]         buf_ref_req_comp;
+    wire [2:0]         buf_ref_req_slot;
+    wire [11:0]        buf_ref_req_x;
+    wire [11:0]        buf_ref_req_y;
+    wire               buf_ref_req_is_4x4;
+    wire               buf_ref_resp_valid;
+    wire [1439:0]      buf_ref_resp_y_flat;
+    wire [249:0]       buf_ref_resp_cb_flat;
+    wire [249:0]       buf_ref_resp_cr_flat;
+
+    wire               cache_axi_active;
+    wire               cache_axi_arvalid;
+    wire               cache_axi_arready;
+    wire [AXI_AW-1:0]  cache_axi_araddr;
+    wire [7:0]         cache_axi_arlen;
+    wire [2:0]         cache_axi_arsize;
+    wire [1:0]         cache_axi_arburst;
+    wire               cache_axi_rvalid;
+    wire               cache_axi_rready;
+    wire [AXI_DW-1:0]  cache_axi_rdata;
+    wire               cache_axi_rlast;
+
+    wire               buf_axi_arvalid;
+    wire               buf_axi_arready;
+    wire [AXI_AW-1:0]  buf_axi_araddr;
+    wire [7:0]         buf_axi_arlen;
+    wire [2:0]         buf_axi_arsize;
+    wire [1:0]         buf_axi_arburst;
+    wire               buf_axi_rvalid;
+    wire               buf_axi_rready;
+    wire [AXI_DW-1:0]  buf_axi_rdata;
+    wire               buf_axi_rlast;
+
+    wire [11:0] cu_x_12      = cu_x;
+    wire [11:0] cu_y_12      = cu_y;
+    wire [11:0] ctu_base_x_w = {cu_x_12[11:6], 6'd0};
+    wire [11:0] ctu_base_y_w = {cu_y_12[11:6], 6'd0};
+
+    assign axi_arvalid = cache_axi_active ? cache_axi_arvalid : buf_axi_arvalid;
+    assign axi_araddr  = cache_axi_active ? cache_axi_araddr  : buf_axi_araddr;
+    assign axi_arlen   = cache_axi_active ? cache_axi_arlen   : buf_axi_arlen;
+    assign axi_arsize  = cache_axi_active ? cache_axi_arsize  : buf_axi_arsize;
+    assign axi_arburst = cache_axi_active ? cache_axi_arburst : buf_axi_arburst;
+    assign axi_rready  = cache_axi_active ? cache_axi_rready  : buf_axi_rready;
+
+    assign cache_axi_arready = cache_axi_active ? axi_arready : 1'b0;
+    assign cache_axi_rvalid  = cache_axi_active ? axi_rvalid  : 1'b0;
+    assign cache_axi_rdata   = axi_rdata;
+    assign cache_axi_rlast   = axi_rlast;
+
+    assign buf_axi_arready   = !cache_axi_active ? axi_arready : 1'b0;
+    assign buf_axi_rvalid    = !cache_axi_active ? axi_rvalid  : 1'b0;
+    assign buf_axi_rdata     = axi_rdata;
+    assign buf_axi_rlast     = axi_rlast;
+
     // =========================================================================
     // Response Routing State (Client Tracking)
     // =========================================================================
@@ -127,6 +186,61 @@ module inter_pred_top #(
         end
     endgenerate
 
+    ref_search_cache #(
+        .PIXEL_WIDTH      (PIXEL_WIDTH),
+        .BLK_EXT_Y        (12),
+        .BLK_EXT_C        (5),
+        .FRAME_W_Y        (FRAME_W_Y),
+        .FRAME_H_Y        (FRAME_H_Y),
+        .FRAME_W_C        (FRAME_W_C),
+        .FRAME_H_C        (FRAME_H_C),
+        .AXI_DW           (AXI_DW),
+        .AXI_AW           (AXI_AW)
+    ) u_ref_search_cache (
+        .clk              (clk),
+        .rst_n            (rst_n),
+        .cache_invalidate (cache_invalidate),
+        .ctu_base_x       (ctu_base_x_w),
+        .ctu_base_y       (ctu_base_y_w),
+
+        .req_valid        (ref_req_valid_in),
+        .req_ready        (ref_req_ready),
+        .req_comp         (ref_req_comp),
+        .req_slot         (ref_req_slot),
+        .req_x            (ref_req_x[11:0]),
+        .req_y            (ref_req_y[11:0]),
+        .req_is_4x4       (ref_req_is_4x4),
+        .req_force_bypass (mc_ref_req_valid),
+        .resp_valid       (ref_resp_valid),
+        .resp_y_flat      (ref_resp_y_flat),
+        .resp_cb_flat     (ref_resp_cb_flat),
+        .resp_cr_flat     (ref_resp_cr_flat),
+
+        .buf_req_valid    (buf_ref_req_valid),
+        .buf_req_ready    (buf_ref_req_ready),
+        .buf_req_comp     (buf_ref_req_comp),
+        .buf_req_slot     (buf_ref_req_slot),
+        .buf_req_x        (buf_ref_req_x),
+        .buf_req_y        (buf_ref_req_y),
+        .buf_req_is_4x4   (buf_ref_req_is_4x4),
+        .buf_resp_valid   (buf_ref_resp_valid),
+        .buf_resp_y_flat  (buf_ref_resp_y_flat),
+        .buf_resp_cb_flat (buf_ref_resp_cb_flat),
+        .buf_resp_cr_flat (buf_ref_resp_cr_flat),
+
+        .axi_active       (cache_axi_active),
+        .axi_arvalid      (cache_axi_arvalid),
+        .axi_arready      (cache_axi_arready),
+        .axi_araddr       (cache_axi_araddr),
+        .axi_arlen        (cache_axi_arlen),
+        .axi_arsize       (cache_axi_arsize),
+        .axi_arburst      (cache_axi_arburst),
+        .axi_rvalid       (cache_axi_rvalid),
+        .axi_rready       (cache_axi_rready),
+        .axi_rdata        (cache_axi_rdata),
+        .axi_rlast        (cache_axi_rlast)
+    );
+
     ref_frame_buffer #(
         .FRAME_W_Y(FRAME_W_Y),
         .FRAME_H_Y(FRAME_H_Y),
@@ -144,29 +258,29 @@ module inter_pred_top #(
     ) u_ref_frame_buffer (
         .clk              (clk),
         .rst_n            (rst_n),
-        .ref_req_valid    (ref_req_valid_in),
-        .ref_req_ready    (ref_req_ready),
-        .ref_req_comp     (ref_req_comp),
-        .ref_req_slot     (ref_req_slot),
-        .ref_req_x        (ref_req_x[11:0]),
-        .ref_req_y        (ref_req_y[11:0]),
-        .ref_req_is_4x4   (ref_req_is_4x4),
+        .ref_req_valid    (buf_ref_req_valid),
+        .ref_req_ready    (buf_ref_req_ready),
+        .ref_req_comp     (buf_ref_req_comp),
+        .ref_req_slot     (buf_ref_req_slot),
+        .ref_req_x        (buf_ref_req_x),
+        .ref_req_y        (buf_ref_req_y),
+        .ref_req_is_4x4   (buf_ref_req_is_4x4),
         
-        .ref_resp_valid   (ref_resp_valid),
-        .ref_resp_y_flat  (ref_resp_y_flat),
-        .ref_resp_cb_flat (ref_resp_cb_flat),
-        .ref_resp_cr_flat (ref_resp_cr_flat),
+        .ref_resp_valid   (buf_ref_resp_valid),
+        .ref_resp_y_flat  (buf_ref_resp_y_flat),
+        .ref_resp_cb_flat (buf_ref_resp_cb_flat),
+        .ref_resp_cr_flat (buf_ref_resp_cr_flat),
         
-        .axi_arvalid      (axi_arvalid),
-        .axi_arready      (axi_arready),
-        .axi_araddr       (axi_araddr),
-        .axi_arlen        (axi_arlen),
-        .axi_arsize       (axi_arsize),
-        .axi_arburst      (axi_arburst),
-        .axi_rvalid       (axi_rvalid),
-        .axi_rready       (axi_rready),
-        .axi_rdata        (axi_rdata),
-        .axi_rlast        (axi_rlast)
+        .axi_arvalid      (buf_axi_arvalid),
+        .axi_arready      (buf_axi_arready),
+        .axi_araddr       (buf_axi_araddr),
+        .axi_arlen        (buf_axi_arlen),
+        .axi_arsize       (buf_axi_arsize),
+        .axi_arburst      (buf_axi_arburst),
+        .axi_rvalid       (buf_axi_rvalid),
+        .axi_rready       (buf_axi_rready),
+        .axi_rdata        (buf_axi_rdata),
+        .axi_rlast        (buf_axi_rlast)
     );
 
     // =========================================================================

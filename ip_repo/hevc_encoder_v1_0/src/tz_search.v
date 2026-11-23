@@ -121,23 +121,18 @@ module tz_search #(
 );
 
     // =========================================================================
-    // FSM state encoding
+    // FSM state encoding (overlapped ring pipeline)
     // =========================================================================
-    localparam [3:0]
-        S_IDLE       = 4'd0,   // wait for search_valid
-        S_INIT       = 4'd1,   // latch inputs, set center = MVP, check center
-        S_REQ_REF    = 4'd2,   // assert ref_req to fetch reference block
-        S_WAIT_REF   = 4'd3,   // wait 1 cy for ref_resp_valid
-        S_SAD_S1     = 4'd4,   // SAD pipeline cycle 1 (valid_in to sad_4x4)
-        S_SAD_S2     = 4'd5,   // SAD pipeline cycle 2
-        S_SAD_S3     = 4'd6,   // SAD pipeline cycle 3 (valid_out from sad_4x4)
-        S_CMP        = 4'd7,   // compare sad_out vs best_sad, update best
-        S_NEXT_PT    = 4'd8,   // advance point index (0..7) or next step
-        S_NEXT_STEP  = 4'd9,   // decrease step level, re-center on best
-        // 4'd10 reserved (diamond refinement entered via S_NEXT_PT with phase_refine=1)
-        S_DONE       = 4'd11;  // assert result_valid, return to IDLE
+    localparam [2:0]
+        S_IDLE        = 3'd0,   // wait for search_valid
+        S_INIT        = 3'd1,   // latch inputs, set center = MVP
+        S_CENTER_REQ  = 3'd2,   // issue MVP center ref request
+        S_CENTER_WAIT = 3'd3,   // wait for MVP center ref response
+        S_RING        = 3'd4,   // overlapped ref fetch + 3-stage sad_4x4 + cmp
+        S_DRAIN_ZERO  = 3'd5,   // drain in-flight ref response after sad_out==0
+        S_DONE        = 3'd6;   // assert result_valid, return to IDLE
 
-    reg [3:0] state;
+    reg [2:0] state;
 
     // =========================================================================
     // 8-point square offset LUT
@@ -182,8 +177,14 @@ module tz_search #(
     reg                        phase_refine;          // 0=square, 1=diamond refine
     reg [2:0]                  refine_round;          // refinement round counter
 
-    // Current candidate MV being evaluated
-    reg signed [MV_W-1:0]     cand_x, cand_y;
+    // Overlapped request / SAD MV tracking pipeline
+    reg signed [MV_W-1:0]     req_mv_x, req_mv_y;
+    reg signed [MV_W-1:0]     ref_mv_x, ref_mv_y;
+    reg                       ref_in_flight;
+    reg                       early_zero;
+    reg  [3:0]                sad_pipe_v;
+    reg signed [MV_W-1:0]     sad_mv_x [0:3];
+    reg signed [MV_W-1:0]     sad_mv_y [0:3];
 
     // SAD unit interface
     reg                        sad_valid_in;
@@ -240,20 +241,29 @@ module tz_search #(
         (next_y_ext >= (mvp_y_ext - $signed(SRCH_RNG))) &&
         (next_y_ext <= (mvp_y_ext + $signed(SRCH_RNG)));
 
-    // Reference frame pixel address (signed to pass negative coords to buffer for padding)
-    wire signed [12:0] ref_x_req = $signed({1'b0, cu_x_r}) + cand_x;
-    wire signed [12:0] ref_y_req = $signed({1'b0, cu_y_r}) + cand_y;
+    wire req_accepted   = ref_req_valid && ref_req_ready;
+    wire next_in_flight = (ref_in_flight && !ref_resp_valid) || req_accepted;
+    wire zero_sad_hit   = sad_valid_out && sad_pipe_v[3] && !early_zero && (sad_out == {SAD_W{1'b0}});
 
     // =========================================================================
-    // Main FSM
+    // Main FSM (Overlapped Ring Pipeline)
     // =========================================================================
+    integer si;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state         <= S_IDLE;
             search_ready  <= 1'b1;
             result_valid  <= 1'b0;
             ref_req_valid <= 1'b0;
+            ref_req_x     <= 12'sd0;
+            ref_req_y     <= 12'sd0;
             sad_valid_in  <= 1'b0;
+            sad_ref_flat  <= {(PIXEL_WIDTH*16){1'b0}};
+            orig_r        <= {(PIXEL_WIDTH*16){1'b0}};
+            cu_x_r        <= {CU_COORD_W{1'b0}};
+            cu_y_r        <= {CU_COORD_W{1'b0}};
+            mvp_x_r       <= {MV_W{1'b0}};
+            mvp_y_r       <= {MV_W{1'b0}};
             best_sad      <= {BEST_SAD_W{1'b1}}; // MAX
             best_mv_x     <= {MV_W{1'b0}};
             best_mv_y     <= {MV_W{1'b0}};
@@ -263,13 +273,26 @@ module tz_search #(
             pt_idx        <= 4'd0;
             phase_refine  <= 1'b0;
             refine_round  <= 3'd0;
-            cand_x        <= {MV_W{1'b0}};
-            cand_y        <= {MV_W{1'b0}};
+            req_mv_x      <= {MV_W{1'b0}};
+            req_mv_y      <= {MV_W{1'b0}};
+            ref_mv_x      <= {MV_W{1'b0}};
+            ref_mv_y      <= {MV_W{1'b0}};
+            ref_in_flight <= 1'b0;
+            early_zero    <= 1'b0;
+            sad_pipe_v    <= 4'd0;
+            for (si = 0; si < 4; si = si + 1) begin
+                sad_mv_x[si] <= {MV_W{1'b0}};
+                sad_mv_y[si] <= {MV_W{1'b0}};
+            end
         end else begin
-            // Default: deassert pulse outputs
-            ref_req_valid <= 1'b0;
+            // Default pulse clears & SAD MV shift register
             sad_valid_in  <= 1'b0;
             result_valid  <= 1'b0;
+            sad_pipe_v    <= {sad_pipe_v[2:0], 1'b0};
+            for (si = 1; si < 4; si = si + 1) begin
+                sad_mv_x[si] <= sad_mv_x[si-1];
+                sad_mv_y[si] <= sad_mv_y[si-1];
+            end
 
             case (state)
 
@@ -277,9 +300,17 @@ module tz_search #(
             // IDLE — wait for search request
             // ---------------------------------------------------------------
             S_IDLE: begin
-                search_ready <= 1'b1;
+                search_ready  <= 1'b1;
+                ref_req_valid <= 1'b0;
+                ref_in_flight <= 1'b0;
+                sad_pipe_v    <= 4'd0;
                 if (search_valid) begin
                     search_ready <= 1'b0;
+                    orig_r       <= cu_orig_flat;
+                    cu_x_r       <= cu_x;
+                    cu_y_r       <= cu_y;
+                    mvp_x_r      <= mvp_x;
+                    mvp_y_r      <= mvp_y;
                     state        <= S_INIT;
                     // synthesis translate_off
                     $display("Time=%0t: [tz_search] search_valid accepted, going to S_INIT", $time);
@@ -288,164 +319,141 @@ module tz_search #(
             end
 
             // ---------------------------------------------------------------
-            // INIT — latch all inputs, initialize search
-            // HM: rcStruct.uiBestSad = MAX_UINT; iBestX = mvp.x; iBestY = mvp.y
+            // INIT — issue MVP center ref fetch & initialize search
             // ---------------------------------------------------------------
             S_INIT: begin
-                orig_r       <= cu_orig_flat;
-                cu_x_r       <= cu_x;
-                cu_y_r       <= cu_y;
-                mvp_x_r      <= mvp_x;
-                mvp_y_r      <= mvp_y;
-                // Center search at MVP
-                center_x     <= mvp_x;
-                center_y     <= mvp_y;
-                cand_x       <= mvp_x;   // first candidate = MVP
-                cand_y       <= mvp_y;
-                best_sad     <= {BEST_SAD_W{1'b1}};
-                best_mv_x    <= mvp_x;
-                best_mv_y    <= mvp_y;
-                step_idx     <= 3'd0;     // start at largest step
-                pt_idx       <= 4'd9;     // 9 = "center check" sentinel
-                phase_refine <= 1'b0;
-                refine_round <= 3'd0;
-                state        <= S_REQ_REF;
-            end
-
-            // ---------------------------------------------------------------
-            // REQ_REF — issue reference block fetch for cand_x, cand_y
-            // HM: xTZSearchHelp fetches piCur at (cu + mv) offset
-            // ---------------------------------------------------------------
-            S_REQ_REF: begin
+                center_x      <= mvp_x_r;
+                center_y      <= mvp_y_r;
+                req_mv_x      <= mvp_x_r;
+                req_mv_y      <= mvp_y_r;
                 ref_req_valid <= 1'b1;
-                ref_req_x     <= ref_x_req;
-                ref_req_y     <= ref_y_req;
-                if (ref_req_valid && ref_req_ready) begin
-                    // synthesis translate_off
-`ifdef DEBUG_TZ
-                    $display("Time=%0t: [tz_search] REQ_REF accepted for x=%0d, y=%0d", $time, ref_x_req, ref_y_req);
-`endif
-                    // synthesis translate_on
+                ref_req_x     <= $signed({1'b0, cu_x_r}) + mvp_x_r;
+                ref_req_y     <= $signed({1'b0, cu_y_r}) + mvp_y_r;
+                best_sad      <= {BEST_SAD_W{1'b1}};
+                best_mv_x     <= mvp_x_r;
+                best_mv_y     <= mvp_y_r;
+                step_idx      <= 3'd0;
+                pt_idx        <= 4'd0;
+                phase_refine  <= 1'b0;
+                refine_round  <= 3'd0;
+                early_zero    <= 1'b0;
+                ref_in_flight <= 1'b0;
+                sad_pipe_v    <= 4'd0;
+                state         <= S_CENTER_REQ;
+            end
+
+            // ---------------------------------------------------------------
+            // CENTER_REQ / CENTER_WAIT — fetch MVP center block
+            // ---------------------------------------------------------------
+            S_CENTER_REQ: begin
+                if (req_accepted) begin
                     ref_req_valid <= 1'b0;
-                    state <= S_WAIT_REF;
+                    ref_mv_x      <= req_mv_x;
+                    ref_mv_y      <= req_mv_y;
+                    ref_in_flight <= 1'b1;
+                    state         <= S_CENTER_WAIT;
                 end
             end
 
-            // ---------------------------------------------------------------
-            // WAIT_REF — reference block arrives (1-cycle latency assumed)
-            // ---------------------------------------------------------------
-            S_WAIT_REF: begin
+            S_CENTER_WAIT: begin
                 if (ref_resp_valid) begin
-                    // synthesis translate_off
-`ifdef DEBUG_TZ
-                    $display("Time=%0t: [tz_search] WAIT_REF got resp_valid", $time);
-`endif
-                    // synthesis translate_on
-                    sad_ref_flat <= ref_resp_data;
-                    sad_valid_in <= 1'b1;    // launch SAD computation
-                    state        <= S_SAD_S1;
+                    sad_ref_flat  <= ref_resp_data;
+                    sad_valid_in  <= 1'b1;
+                    sad_pipe_v[0] <= 1'b1;
+                    sad_mv_x[0]   <= ref_mv_x;
+                    sad_mv_y[0]   <= ref_mv_y;
+                    ref_in_flight <= 1'b0;
+                    state         <= S_RING;
                 end
-                // else stay — variable latency ref buffer support
             end
 
             // ---------------------------------------------------------------
-            // SAD pipeline wait — 3 cycles for sad_4x4 (PIPELINED=1)
-            // S_SAD_S1 → S_SAD_S2 → S_SAD_S3 → wait for sad_valid_out
+            // RING — overlapped 8-point square / diamond pipeline
             // ---------------------------------------------------------------
-            S_SAD_S1: state <= S_SAD_S2;
-            S_SAD_S2: state <= S_SAD_S3;
-            S_SAD_S3: begin
-                if (sad_valid_out)
-                    state <= S_CMP;
-                // sad_valid_out should fire here; else wait one more cycle
-            end
+            S_RING: begin
+                ref_in_flight <= next_in_flight;
 
-            // ---------------------------------------------------------------
-            // CMP — compare with current best
-            // HM: if (uiSad < rcStruct.uiBestSad) { update best }
-            // ---------------------------------------------------------------
-            S_CMP: begin
-                if (sad_out < best_sad) begin
-                    best_sad  <= sad_out;
-                    best_mv_x <= cand_x;
-                    best_mv_y <= cand_y;
-                    if (sad_out == 0) begin
-                        state <= S_DONE;
-                    end else begin
-                        state <= S_NEXT_PT;
+                if (ref_resp_valid) begin
+                    sad_ref_flat  <= ref_resp_data;
+                    sad_valid_in  <= 1'b1;
+                    sad_pipe_v[0] <= 1'b1;
+                    sad_mv_x[0]   <= ref_mv_x;
+                    sad_mv_y[0]   <= ref_mv_y;
+                end
+
+                if (req_accepted) begin
+                    ref_req_valid <= 1'b0;
+                    ref_mv_x      <= req_mv_x;
+                    ref_mv_y      <= req_mv_y;
+                end else if (!ref_req_valid && (pt_idx < 4'd8) && !early_zero && !zero_sad_hit) begin
+                    pt_idx <= pt_idx + 4'd1;
+                    if (cand_in_range) begin
+                        ref_req_valid <= 1'b1;
+                        req_mv_x      <= next_cand_x;
+                        req_mv_y      <= next_cand_y;
+                        ref_req_x     <= $signed({1'b0, cu_x_r}) + next_cand_x;
+                        ref_req_y     <= $signed({1'b0, cu_y_r}) + next_cand_y;
                     end
-                end else begin
-                    state <= S_NEXT_PT;
                 end
-            end
 
-            // ---------------------------------------------------------------
-            // NEXT_PT — advance to next search point
-            // pt_idx == 9: MVP center check done, start 8-point square (pt 0..7)
-            // pt_idx == 8: all 8 points done, go to NEXT_STEP
-            // ---------------------------------------------------------------
-            S_NEXT_PT: begin
-                if (pt_idx == 4'd9) begin
-                    // Center (MVP) check done — begin 8-point search at step[0]
-                    pt_idx <= 4'd0;
-                    state  <= S_NEXT_PT; // compute next cand for pt=0
-                end else if (pt_idx == 4'd8) begin
-                    // All 8 points of this step done
-                    if (phase_refine) begin
-                        // Diamond refinement
-                        if (refine_round == N_REFINE - 1)
+                if (sad_valid_out && sad_pipe_v[3] && !early_zero) begin
+                    if (sad_out < best_sad) begin
+                        best_sad  <= sad_out;
+                        best_mv_x <= sad_mv_x[3];
+                        best_mv_y <= sad_mv_y[3];
+                    end
+                    if (sad_out == {SAD_W{1'b0}}) begin
+                        early_zero <= 1'b1;
+                        if (!req_accepted) begin
+                            ref_req_valid <= 1'b0;
+                        end
+                        if (next_in_flight) begin
+                            state <= S_DRAIN_ZERO;
+                        end else begin
                             state <= S_DONE;
-                        else begin
-                            refine_round <= refine_round + 1;
-                            // Re-center on best for next refinement round
-                            center_x <= best_mv_x;
-                            center_y <= best_mv_y;
-                            pt_idx   <= 4'd0;
-                            state    <= S_NEXT_PT;
+                        end
+                    end
+                end
+
+                if (!zero_sad_hit && !early_zero &&
+                    (pt_idx == 4'd8) && !ref_req_valid && !ref_in_flight && (sad_pipe_v == 4'd0)) begin
+                    center_x <= best_mv_x;
+                    center_y <= best_mv_y;
+                    pt_idx   <= 4'd0;
+                    if (phase_refine) begin
+                        if ((refine_round == N_REFINE - 1) ||
+                            ((best_mv_x == center_x) && (best_mv_y == center_y))) begin
+                            state <= S_DONE;
+                        end else begin
+                            refine_round <= refine_round + 3'd1;
                         end
                     end else begin
-                        state <= S_NEXT_STEP;
-                    end
-                end else begin
-                    // Advance to next of 8 points
-                    pt_idx <= pt_idx + 4'd1;
-                    // Skip if out of search range
-                    if (cand_in_range) begin
-                        cand_x <= next_cand_x;
-                        cand_y <= next_cand_y;
-                        state  <= S_REQ_REF;
-                    end else begin
-                        // Skip this point (out of range) — stay in NEXT_PT
-                        state <= S_NEXT_PT;
+                        if (step_idx == N_STEPS - 1) begin
+                            if ((best_mv_x == center_x) && (best_mv_y == center_y)) begin
+                                state <= S_DONE;
+                            end else begin
+                                phase_refine <= 1'b1;
+                                refine_round <= 3'd0;
+                            end
+                        end else begin
+                            step_idx <= step_idx + 3'd1;
+                        end
                     end
                 end
             end
 
             // ---------------------------------------------------------------
-            // NEXT_STEP — move to next (smaller) step level
-            // HM: re-center on best, halve the step
-            // After N_STEPS square search → start diamond refinement
+            // DRAIN_ZERO — finish any already-accepted cache lookup cleanly
             // ---------------------------------------------------------------
-            S_NEXT_STEP: begin
-                // Re-center on best position found so far
-                center_x <= best_mv_x;
-                center_y <= best_mv_y;
-                pt_idx   <= 4'd0;
-
-                if (step_idx == N_STEPS - 1) begin
-                    // All step levels done — begin diamond refinement
-                    phase_refine <= 1'b1;
-                    refine_round <= 3'd0;
-                    state        <= S_NEXT_PT;
-                end else begin
-                    step_idx <= step_idx + 3'd1;
-                    state    <= S_NEXT_PT;
+            S_DRAIN_ZERO: begin
+                ref_in_flight <= next_in_flight;
+                if (!next_in_flight) begin
+                    state <= S_DONE;
                 end
             end
 
             // ---------------------------------------------------------------
             // DONE — output best MV, return to idle
-            // HM: rcMv = MV(rcStruct.iBestX, rcStruct.iBestY)
             // ---------------------------------------------------------------
             S_DONE: begin
                 // synthesis translate_off
@@ -473,7 +481,7 @@ module tz_search #(
     // =========================================================================
     // synthesis translate_off
     always @(posedge clk) begin
-        if (state == S_CMP) begin
+        if (state == S_RING && sad_valid_out && sad_pipe_v[3]) begin
             // if (sad_out > 12'd4092)
                 // $display("WARN [tz_search] sad_out=%0d at t=%0t — exceeds 4×4 max (4092)", sad_out, $time);
         end

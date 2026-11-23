@@ -97,6 +97,7 @@ RTL_SRCS = \
 	$(RTL_DIR)/inter/mc_unit.v \
 	$(RTL_DIR)/inter/mvp_predictor.v \
 	$(RTL_DIR)/inter/ref_frame_buffer.v \
+	$(RTL_DIR)/inter/ref_search_cache.v \
 	$(RTL_DIR)/inter/sad_4x4.v \
 	$(RTL_DIR)/inter/mc_window_fetch.v \
 	$(RTL_DIR)/inter/subpel_interpolation_core.v \

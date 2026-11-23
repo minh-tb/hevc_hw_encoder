@@ -73,6 +73,7 @@ set rtl_files [list \
     "rtl/inter/mc_unit.v" \
     "rtl/inter/mvp_predictor.v" \
     "rtl/inter/ref_frame_buffer.v" \
+    "rtl/inter/ref_search_cache.v" \
     "rtl/inter/sad_4x4.v" \
     "rtl/inter/mc_window_fetch.v" \
     "rtl/inter/subpel_interpolation_core.v" \

@@ -39,6 +39,7 @@ module tb_b_prediction;
     inter_pred_top uut (
         .clk(clk),
         .rst_n(rst_n),
+        .cache_invalidate(1'b0),
         .ref_slot_in(ref_slot_in),
         .ref_slot_l1(ref_slot_l1),
         .inter_pred_idc(inter_pred_idc),
