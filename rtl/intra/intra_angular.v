@@ -181,6 +181,14 @@ module intra_angular (
 
     reg [1:0] state;
 
+    // Latched block parameters for S_OUTPUT timing isolation
+    reg signed [6:0] angle_r;
+    reg              pure_mode_r;
+    reg              is_vertical_r;
+    reg              is_luma_r;
+    reg [2:0]        pu_size_log2_r;
+    reg [5:0]        N_r;
+
     //-------------------------------------------------------------------------
     // Extension build — combinational, registered into refExt on S_EXTEND
     //
@@ -212,7 +220,13 @@ module intra_angular (
 `endif
     always @(posedge clk) begin
         if (!rst_n) begin
-            state <= S_BUF;
+            state          <= S_BUF;
+            angle_r        <= 7'sd0;
+            pure_mode_r    <= 1'b1;
+            is_vertical_r  <= 1'b0;
+            is_luma_r      <= 1'b1;
+            pu_size_log2_r <= 3'd2;
+            N_r            <= 6'd4;
         end else begin
             case (state)
                 //--------------------------------------------------------------
@@ -269,6 +283,12 @@ module intra_angular (
                 //                                              for i=0..N-1
                 //--------------------------------------------------------------
                 S_EXTEND: begin
+                    angle_r        <= pred_angle(intra_mode);
+                    pure_mode_r    <= (pred_angle(intra_mode) == 7'sd0);
+                    is_vertical_r  <= is_vertical;
+                    is_luma_r      <= is_luma;
+                    pu_size_log2_r <= pu_size_log2;
+                    N_r            <= N;
                     for (k = 0; k <= 64; k = k + 1) begin
                         refExt[32 + k] <= refMain[k];
                     end
@@ -311,8 +331,8 @@ module intra_angular (
     reg [5:0] px;
     reg [5:0] py;
 
-    wire signed [6:0]  angle     = pred_angle(intra_mode);
-    wire               pure_mode = (angle == 7'sd0);
+    wire signed [6:0]  angle     = angle_r;
+    wire               pure_mode = pure_mode_r;
 
     // Transpose is handled cleanly by mapping out_x=py, out_y=px later
     wire [5:0]  delta_driver  = py;
@@ -348,7 +368,7 @@ module intra_angular (
     wire [`PIXEL_WIDTH-1:0] s1 = refExt[ref_idx1];
 
     // Pure horizontal/vertical edge filtering (Luma only, N<32, x=0 or y=0)
-    wire apply_edge_filter = is_luma && (pu_size_log2 < 3'd5) && pure_mode && (px == 6'd0);
+    wire apply_edge_filter = is_luma_r && (pu_size_log2_r < 3'd5) && pure_mode && (px == 6'd0);
     wire signed [11:0] edge_diff = $signed({1'b0, refSide[py + 6'd1]}) - $signed({1'b0, refSide[0]});
     wire signed [11:0] edge_val  = $signed({1'b0, refMain[1]}) + (edge_diff >>> 1);
     wire [`PIXEL_WIDTH-1:0] edge_pred = (edge_val < 0) ? {`PIXEL_WIDTH{1'b0}} :
@@ -389,19 +409,19 @@ module intra_angular (
                     out_pixel <= ang_pred;
 
                     // Horizontal modes: transpose output coordinates
-                    out_x     <= is_vertical ? px : py;
-                    out_y     <= is_vertical ? py : px;
-                    out_last  <= (px == N - 6'd1) && (py == N - 6'd1);
+                    out_x     <= is_vertical_r ? px : py;
+                    out_y     <= is_vertical_r ? py : px;
+                    out_last  <= (px == N_r - 6'd1) && (py == N_r - 6'd1);
 
                     // Raster scan advance
-                    if (px == N - 6'd1) begin
+                    if (px == N_r - 6'd1) begin
                         px <= 6'd0;
                         py <= py + 6'd1;
                     end else begin
                         px <= px + 6'd1;
                     end
 
-                    if ((px == N - 6'd1) && (py == N - 6'd1)) begin
+                    if ((px == N_r - 6'd1) && (py == N_r - 6'd1)) begin
                         px <= 6'd0;
                         py <= 6'd0;
                     end

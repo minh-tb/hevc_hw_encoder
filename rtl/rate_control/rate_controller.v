@@ -61,35 +61,59 @@ module rate_controller (
     // K_buf scaling: Delta QP per 10% buffer deviation
     wire [47:0] kbps_x100_div3 = ({32'd0, target_bitrate_kbps} * 48'd2184600) >> 16;
 
-    // Synthesizable shift-threshold comparison tree computes [0..100] without dividers
-    function automatic [15:0] calc_fullness_pct;
-        input signed [31:0] b_bits;
+    // 2-stage pipelined shift-threshold comparison tree computes [0..100] without dividers
+    wire s1_sat_hi_w = (vbv_buffer_bits >= vbv_buffer_max);
+    wire s1_sat_lo_w = (vbv_buffer_bits <= -vbv_buffer_max);
+    wire s1_neg_w    = (vbv_buffer_bits < 32'sd0);
+
+    reg signed [31:0] s1_rem_comb;
+    reg [5:0]         s1_dpct_comb;
+    reg signed [31:0] abs_b_comb;
+    always @(*) begin
+        abs_b_comb   = (vbv_buffer_bits >= 32'sd0) ? vbv_buffer_bits : -vbv_buffer_bits;
+        s1_rem_comb  = abs_b_comb;
+        s1_dpct_comb = 6'd0;
+        if (!s1_sat_hi_w && !s1_sat_lo_w) begin
+            if (s1_rem_comb >= (vbv_buffer_max >>> 1)) begin
+                s1_dpct_comb = s1_dpct_comb + 6'd25;
+                s1_rem_comb  = s1_rem_comb - (vbv_buffer_max >>> 1);
+            end
+            if (s1_rem_comb >= (vbv_buffer_max >>> 2)) begin
+                s1_dpct_comb = s1_dpct_comb + 6'd12;
+                s1_rem_comb  = s1_rem_comb - (vbv_buffer_max >>> 2);
+            end
+            if (s1_rem_comb >= (vbv_buffer_max >>> 3)) begin
+                s1_dpct_comb = s1_dpct_comb + 6'd6;
+                s1_rem_comb  = s1_rem_comb - (vbv_buffer_max >>> 3);
+            end
+        end
+    end
+
+    reg               vbv_s1_sat_hi;
+    reg               vbv_s1_sat_lo;
+    reg               vbv_s1_neg;
+    reg signed [31:0] vbv_s1_rem;
+    reg [5:0]         vbv_s1_dpct;
+    reg signed [31:0] vbv_s1_bmax;
+
+    function automatic [15:0] calc_fullness_pct_s2;
+        input               s1_hi;
+        input               s1_lo;
+        input               s1_neg;
+        input signed [31:0] s1_rem;
+        input [5:0]         s1_dpct;
         input signed [31:0] b_max;
-        reg signed [31:0] abs_b;
         reg signed [31:0] rem_b;
         reg [5:0]         d_pct;
         reg signed [31:0] calc;
         begin
-            if (b_bits >= b_max) begin
-                calc_fullness_pct = 16'd100;
-            end else if (b_bits <= -b_max) begin
-                calc_fullness_pct = 16'd0;
+            if (s1_hi) begin
+                calc_fullness_pct_s2 = 16'd100;
+            end else if (s1_lo) begin
+                calc_fullness_pct_s2 = 16'd0;
             end else begin
-                abs_b = (b_bits >= 32'sd0) ? b_bits : -b_bits;
-                rem_b = abs_b;
-                d_pct = 6'd0;
-                if (rem_b >= (b_max >>> 1)) begin
-                    d_pct = d_pct + 6'd25;
-                    rem_b = rem_b - (b_max >>> 1);
-                end
-                if (rem_b >= (b_max >>> 2)) begin
-                    d_pct = d_pct + 6'd12;
-                    rem_b = rem_b - (b_max >>> 2);
-                end
-                if (rem_b >= (b_max >>> 3)) begin
-                    d_pct = d_pct + 6'd6;
-                    rem_b = rem_b - (b_max >>> 3);
-                end
+                rem_b = s1_rem;
+                d_pct = s1_dpct;
                 if (rem_b >= (b_max >>> 4)) begin
                     d_pct = d_pct + 6'd3;
                     rem_b = rem_b - (b_max >>> 4);
@@ -102,17 +126,17 @@ module rate_controller (
                     d_pct = d_pct + 6'd1;
                     rem_b = rem_b - (b_max >>> 6);
                 end
-                if (b_bits >= 32'sd0)
+                if (!s1_neg)
                     calc = 32'sd50 + $signed({26'd0, d_pct});
                 else
                     calc = 32'sd50 - $signed({26'd0, d_pct});
 
                 if (calc < 32'sd0)
-                    calc_fullness_pct = 16'd0;
+                    calc_fullness_pct_s2 = 16'd0;
                 else if (calc > 32'sd100)
-                    calc_fullness_pct = 16'd100;
+                    calc_fullness_pct_s2 = 16'd100;
                 else
-                    calc_fullness_pct = calc[15:0];
+                    calc_fullness_pct_s2 = calc[15:0];
             end
         end
     endfunction
@@ -129,7 +153,20 @@ module rate_controller (
             target_bits_p    <= 32'sd166666;
             target_bits_i    <= 32'sd500000;
             target_bits_frame<= 32'sd500000;
+            vbv_s1_sat_hi    <= 1'b0;
+            vbv_s1_sat_lo    <= 1'b0;
+            vbv_s1_neg       <= 1'b0;
+            vbv_s1_rem       <= 32'sd0;
+            vbv_s1_dpct      <= 6'd0;
+            vbv_s1_bmax      <= 32'sd5000000;
         end else begin
+            vbv_s1_sat_hi <= s1_sat_hi_w;
+            vbv_s1_sat_lo <= s1_sat_lo_w;
+            vbv_s1_neg    <= s1_neg_w;
+            vbv_s1_rem    <= s1_rem_comb;
+            vbv_s1_dpct   <= s1_dpct_comb;
+            vbv_s1_bmax   <= vbv_buffer_max;
+
             rc_active_d <= rc_enable;
             if (!rc_enable || (!rc_active_d && rc_enable)) begin
                 current_qp_r <= base_qp;
@@ -173,7 +210,7 @@ module rate_controller (
                     if (current_qp_r > 6'd11) current_qp_r <= current_qp_r - 6'd1;
                 end
 
-                vbv_fullness_pct <= calc_fullness_pct(vbv_buffer_bits, vbv_buffer_max);
+                vbv_fullness_pct <= calc_fullness_pct_s2(vbv_s1_sat_hi, vbv_s1_sat_lo, vbv_s1_neg, vbv_s1_rem, vbv_s1_dpct, vbv_s1_bmax);
             end
         end
     end

@@ -324,6 +324,7 @@ module hevc_encoder_top #(
     wire [`PIXEL_WIDTH-1:0] recon_out_pixel;
     wire [5:0]  recon_out_x;
     wire [5:0]  recon_out_y;
+    wire        recon_out_last;
     wire [1:0]  recon_out_comp;
 
     //-------------------------------------------------------------------------
@@ -530,6 +531,11 @@ module hevc_encoder_top #(
     wire leaf_cu_start = split_ready && (!split_flag || cu_depth == 2'd3);
     wire node_split_start = split_ready && split_flag && cu_depth < 2'd3;
 
+    reg [1:0] tu_fifo_count;
+    reg       tu_fifo_wr_ptr;
+    reg       tu_fifo_rd_ptr;
+    reg       tu_fifo_is_last [0:1];
+
     reg md_result_latched;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -540,7 +546,9 @@ module hevc_encoder_top #(
         end
     end
 
-    assign master_cu_ready = leaf_cu_start ? (pu_cu_splitter_cu_ready && cabac_cu_ready && (md_mode_valid || md_result_latched))
+    wire tq_cu_idle;
+
+    assign master_cu_ready = leaf_cu_start ? (pu_cu_splitter_cu_ready && cabac_cu_ready && tq_cu_idle && (tu_fifo_count == 2'd0) && (md_mode_valid || md_result_latched))
                            : node_split_start ? (cabac_cu_ready)
                            : 1'b0;
     wire trigger_cu = (leaf_cu_start || node_split_start) && master_cu_ready;
@@ -968,6 +976,15 @@ module hevc_encoder_top #(
     reg [5:0]   map_update_qp_r;
     reg [15:0]  map_update_mvx_r, map_update_mvy_r;
 
+    reg         map_cbf_pending;
+    reg [5:0]   map_cbf_pend_x, map_cbf_pend_y;
+    reg [6:0]   map_cbf_pend_size;
+    reg [1:0]   map_cbf_pend_comp;
+    reg         map_cbf_pend_pred_mode;
+    reg         map_cbf_pend_cbf;
+    reg [5:0]   map_cbf_pend_qp;
+    reg [15:0]  map_cbf_pend_mvx, map_cbf_pend_mvy;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             map_update_valid_r     <= 1'b0;
@@ -981,6 +998,19 @@ module hevc_encoder_top #(
             map_update_qp_r        <= 6'd0;
             map_update_mvx_r       <= 16'd0;
             map_update_mvy_r       <= 16'd0;
+            map_cbf_pending        <= 1'b0;
+            map_cbf_pend_x         <= 6'd0;
+            map_cbf_pend_y         <= 6'd0;
+            map_cbf_pend_size      <= 7'd0;
+            map_cbf_pend_comp      <= 2'd0;
+            map_cbf_pend_pred_mode <= 1'b0;
+            map_cbf_pend_cbf       <= 1'b0;
+            map_cbf_pend_qp        <= 6'd0;
+            map_cbf_pend_mvx       <= 16'd0;
+            map_cbf_pend_mvy       <= 16'd0;
+        end else if (ctu_frame_start) begin
+            map_update_valid_r     <= 1'b0;
+            map_cbf_pending        <= 1'b0;
         end else begin
             map_update_valid_r <= 1'b0;
             if (md_mode_valid) begin
@@ -995,6 +1025,43 @@ module hevc_encoder_top #(
                 map_update_mvx_r       <= {{4{md_best_inter_mv_x[11]}}, md_best_inter_mv_x};
                 map_update_mvy_r       <= {{4{md_best_inter_mv_y[11]}}, md_best_inter_mv_y};
                 map_update_cbf_r       <= 1'b0;
+                if (quant_out_valid && quant_out_last) begin
+                    map_cbf_pending        <= 1'b1;
+                    map_cbf_pend_x         <= reg_tu_x;
+                    map_cbf_pend_y         <= reg_tu_y;
+                    map_cbf_pend_size      <= {4'd0, 3'd1} << dct_out_tu_size_log2;
+                    map_cbf_pend_comp      <= reg_tu_comp;
+                    map_cbf_pend_pred_mode <= latched_cu_is_intra;
+                    map_cbf_pend_qp        <= ctu_qp;
+                    map_cbf_pend_mvx       <= {{4{latched_cu_mv_x[11]}}, latched_cu_mv_x};
+                    map_cbf_pend_mvy       <= {{4{latched_cu_mv_y[11]}}, latched_cu_mv_y};
+                    map_cbf_pend_cbf       <= quant_out_cbf;
+                end
+            end else if (map_cbf_pending) begin
+                map_cbf_pending        <= 1'b0;
+                map_update_valid_r     <= 1'b1;
+                map_update_cbf_only_r  <= 1'b1;
+                map_update_x_r         <= map_cbf_pend_x;
+                map_update_y_r         <= map_cbf_pend_y;
+                map_update_size_r      <= map_cbf_pend_size;
+                map_update_comp_r      <= map_cbf_pend_comp;
+                map_update_pred_mode_r <= map_cbf_pend_pred_mode;
+                map_update_qp_r        <= map_cbf_pend_qp;
+                map_update_mvx_r       <= map_cbf_pend_mvx;
+                map_update_mvy_r       <= map_cbf_pend_mvy;
+                map_update_cbf_r       <= map_cbf_pend_cbf;
+                if (quant_out_valid && quant_out_last) begin
+                    map_cbf_pending        <= 1'b1;
+                    map_cbf_pend_x         <= reg_tu_x;
+                    map_cbf_pend_y         <= reg_tu_y;
+                    map_cbf_pend_size      <= {4'd0, 3'd1} << dct_out_tu_size_log2;
+                    map_cbf_pend_comp      <= reg_tu_comp;
+                    map_cbf_pend_pred_mode <= latched_cu_is_intra;
+                    map_cbf_pend_qp        <= ctu_qp;
+                    map_cbf_pend_mvx       <= {{4{latched_cu_mv_x[11]}}, latched_cu_mv_x};
+                    map_cbf_pend_mvy       <= {{4{latched_cu_mv_y[11]}}, latched_cu_mv_y};
+                    map_cbf_pend_cbf       <= quant_out_cbf;
+                end
             end else if (quant_out_valid && quant_out_last) begin
                 map_update_valid_r     <= 1'b1;
                 map_update_cbf_only_r  <= 1'b1;
@@ -1069,7 +1136,6 @@ module hevc_encoder_top #(
     //-------------------------------------------------------------------------
     wire [11:0] rmd_orig_rd_addr;
     wire [9:0]  rmd_orig_c_rd_addr;
-    wire        rmd_active;
 
     // Convert cu_size (pixel width: 8/16/32/64) to log2, capped at 5
     // Latched on cu_valid since cu_size goes X after cu_valid deasserts
@@ -1104,7 +1170,9 @@ module hevc_encoder_top #(
     (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_y_ram     [0:`CTU_LUMA_SAMPLES-1];
     (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_y_ram_rmd [0:`CTU_LUMA_SAMPLES-1];
     (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_u_ram     [0:`CTU_CB_SAMPLES-1];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_u_ram_rmd [0:`CTU_CB_SAMPLES-1];
     (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_v_ram     [0:`CTU_CR_SAMPLES-1];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] orig_v_ram_rmd [0:`CTU_CR_SAMPLES-1];
     reg [11:0] orig_write_ptr;
 
     // Synchronous 17-cycle pre-fetcher for search_orig_flat using orig_y_ram_rmd
@@ -1160,8 +1228,10 @@ module hevc_encoder_top #(
         if (in_valid && in_ready) begin
             orig_y_ram[orig_write_ptr]     <= in_pixel_y;
             orig_y_ram_rmd[orig_write_ptr] <= in_pixel_y;
-            orig_u_ram[{orig_write_ptr[11:7], orig_write_ptr[5:1]}] <= in_pixel_u;
-            orig_v_ram[{orig_write_ptr[11:7], orig_write_ptr[5:1]}] <= in_pixel_v;
+            orig_u_ram[{orig_write_ptr[11:7], orig_write_ptr[5:1]}]     <= in_pixel_u;
+            orig_u_ram_rmd[{orig_write_ptr[11:7], orig_write_ptr[5:1]}] <= in_pixel_u;
+            orig_v_ram[{orig_write_ptr[11:7], orig_write_ptr[5:1]}]     <= in_pixel_v;
+            orig_v_ram_rmd[{orig_write_ptr[11:7], orig_write_ptr[5:1]}] <= in_pixel_v;
         end
     end
 
@@ -1233,13 +1303,16 @@ module hevc_encoder_top #(
     wire [5:0] orig_ram_rd_x = recon_out_valid ? recon_out_x[5:0] : orig_res_rd_x;
     wire [5:0] orig_ram_rd_y = recon_out_valid ? recon_out_y[5:0] : orig_res_rd_y;
 
-    wire [9:0] orig_c_ram_rd_addr = rmd_active ? rmd_orig_c_rd_addr : {orig_ram_rd_y[4:0], orig_ram_rd_x[4:0]};
+    wire [9:0] orig_c_ram_rd_addr = {orig_ram_rd_y[4:0], orig_ram_rd_x[4:0]};
 
     reg [9:0] orig_y_data_q, orig_u_data_q, orig_v_data_q;
+    reg [9:0] rmd_orig_u_data_q, rmd_orig_v_data_q;
     always @(posedge clk) begin
-        orig_y_data_q <= orig_y_ram[{orig_ram_rd_y[5:0], orig_ram_rd_x[5:0]}];
-        orig_u_data_q <= orig_u_ram[orig_c_ram_rd_addr];
-        orig_v_data_q <= orig_v_ram[orig_c_ram_rd_addr];
+        orig_y_data_q     <= orig_y_ram[{orig_ram_rd_y[5:0], orig_ram_rd_x[5:0]}];
+        orig_u_data_q     <= orig_u_ram[orig_c_ram_rd_addr];
+        orig_v_data_q     <= orig_v_ram[orig_c_ram_rd_addr];
+        rmd_orig_u_data_q <= orig_u_ram_rmd[rmd_orig_c_rd_addr];
+        rmd_orig_v_data_q <= orig_v_ram_rmd[rmd_orig_c_rd_addr];
     end
 
     wire [9:0] orig_pixel_q = (reg_tu_comp == 2'd0) ? orig_y_data_q :
@@ -1372,7 +1445,7 @@ module hevc_encoder_top #(
             mc_data_ready <= !md_eff_is_intra;
         else if (mc_start)
             mc_data_ready <= 1'b1;
-        else if (cabac_state == CABAC_WAIT_COEFF_DONE && cabac_coeff_done && reg_tu_is_last_in_cu)
+        else if (cabac_state == CABAC_WAIT_COEFF_DONE && cabac_coeff_done && tu_fifo_is_last[tu_fifo_rd_ptr])
             mc_data_ready <= 1'b0;
     end
     
@@ -1509,6 +1582,10 @@ module hevc_encoder_top #(
             reg_pu_y <= 0;
             recon_ctu_x <= 0;
             recon_ctu_y <= 0;
+        end else if (ctu_frame_start) begin
+            intra_ref_active <= 0;
+            intra_ref_idx <= 0;
+            tu_can_start <= 1'b1;
         end else begin
             if (tu_valid && tu_ready_signal) begin
                 tu_can_start <= 1'b0;
@@ -1531,14 +1608,17 @@ module hevc_encoder_top #(
                 end else begin
                     intra_ref_idx <= intra_ref_idx + 1;
                 end
-            end else if (cabac_coeff_done) begin
+            end
+
+            if (recon_out_valid && recon_out_last) begin
                 tu_can_start <= 1'b1;
             end
         end
     end
     
-    assign tu_ready_signal = tu_can_start && !inter_p2s_active && !intra_ref_active && !p2s_active && !idct_p2s_active &&
-                             !idct_active && !idct_start && !idct_start_pre &&
+    assign tq_cu_idle      = tu_can_start && !inter_p2s_active && !intra_ref_active && !p2s_active && !idct_p2s_active &&
+                             !idct_active && !idct_start && !idct_start_pre;
+    assign tu_ready_signal = tq_cu_idle && (tu_fifo_count < 2'd2) &&
                              (latched_cu_is_intra || mc_data_ready);
     
     //-------------------------------------------------------------------------
@@ -2033,11 +2113,11 @@ module hevc_encoder_top #(
         .pu_y                  (rmd_latched_pu_y),
         .pu_size_log2          (rmd_pu_size_log2),
         .orig_rd_addr          (rmd_orig_rd_addr),
-        .rmd_active            (rmd_active),
+        .rmd_active            (),
         .orig_rd_data          (rmd_orig_data),
         .orig_c_rd_addr        (rmd_orig_c_rd_addr),
-        .orig_u_rd_data        (orig_u_data_q),
-        .orig_v_rd_data        (orig_v_data_q),
+        .orig_u_rd_data        (rmd_orig_u_data_q),
+        .orig_v_rd_data        (rmd_orig_v_data_q),
         .ref_valid             (rmd_ref_active_q),
         .ref_sample            (rmd_ref_sample),
         .ref_idx               (rmd_ref_idx_q),
@@ -2842,7 +2922,7 @@ module hevc_encoder_top #(
         .out_pixel        (recon_out_pixel),
         .out_x            (recon_out_x),
         .out_y            (recon_out_y),
-        .out_last         (),
+        .out_last         (recon_out_last),
         .out_comp         (recon_out_comp)
     );
 
@@ -3140,73 +3220,113 @@ module hevc_encoder_top #(
     wire [11:0] coeff_buf_raddr;
     wire signed [15:0] coeff_buf_rdata;
     
-    coeff_buffer u_coeff_buffer (
+    coeff_buffer #(
+        .DATA_W (16),
+        .DEPTH  (2048),
+        .ADDR_W (11)
+    ) u_coeff_buffer (
         .clk   (clk),
         .we    (quant_out_valid),
-        .waddr (quant_out_scan_idx),
+        .waddr ({tu_fifo_wr_ptr, quant_out_scan_idx}),
         .wdata (quant_out_level),
         .re    (coeff_buf_re),
-        .raddr (coeff_buf_raddr[9:0]),
+        .raddr ({tu_fifo_rd_ptr, coeff_buf_raddr[9:0]}),
         .rdata (coeff_buf_rdata)
     );
 
-    reg         cabac_coeff_ready;
     reg         cu_cbf_latched;
     reg [9:0]   tu_last_sig_idx;
-    reg [63:0]  tu_cg_nonzero_mask_y;
-    reg [15:0]  tu_cg_nonzero_mask_cb;
-    reg [15:0]  tu_cg_nonzero_mask_cr;
+    reg [63:0]  tq_cg_nonzero_mask;
 
+    // 2-entry TU Metadata FIFO decouples TQ/Recon from CABAC coeff entropy coding
+    reg [1:0]   tu_fifo_comp      [0:1];
+    reg [2:0]   tu_fifo_size_log2 [0:1];
+    reg         tu_fifo_cbf       [0:1];
+    reg [9:0]   tu_fifo_last_pos  [0:1];
+    reg [1:0]   tu_fifo_scan_mode [0:1];
+    reg [63:0]  tu_fifo_cg_mask   [0:1];
+    reg         tu_fifo_is_intra  [0:1];
+
+    wire [5:0]  quant_cg_bit      = (reg_tu_comp == 2'd0) ? quant_out_scan_idx[9:4] : {2'b00, quant_out_scan_idx[7:4]};
+    wire        quant_cur_nz      = (quant_out_level != 16'd0);
+    wire        final_tu_nz       = tu_has_nonzero | quant_cur_nz;
+    wire [9:0]  final_tu_last_idx = quant_cur_nz ? quant_out_scan_idx : tu_last_sig_idx;
+    wire [63:0] final_tu_cg_mask  = tq_cg_nonzero_mask | (quant_cur_nz ? (64'd1 << quant_cg_bit) : 64'd0);
+
+    wire        tu_fifo_push      = quant_out_valid && quant_out_last;
+    wire        tu_fifo_pop       = (cabac_state == CABAC_WAIT_COEFF_DONE) && cabac_coeff_done;
+    wire        tu_fifo_empty     = (tu_fifo_count == 2'd0);
+
+    integer tf_i;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            cabac_coeff_ready     <= 1'b0;
-            cu_cbf_latched        <= 1'b0;
-            tu_last_sig_idx       <= 10'd0;
-            tu_has_nonzero        <= 1'b0;
-            tu_cg_nonzero_mask_y  <= 64'd0;
-            tu_cg_nonzero_mask_cb <= 16'd0;
-            tu_cg_nonzero_mask_cr <= 16'd0;
+            cu_cbf_latched     <= 1'b0;
+            tu_last_sig_idx    <= 10'd0;
+            tu_has_nonzero     <= 1'b0;
+            tq_cg_nonzero_mask <= 64'd0;
+            tu_fifo_wr_ptr     <= 1'b0;
+            tu_fifo_rd_ptr     <= 1'b0;
+            tu_fifo_count      <= 2'd0;
+            for (tf_i = 0; tf_i < 2; tf_i = tf_i + 1) begin
+                tu_fifo_comp[tf_i]      <= 2'd0;
+                tu_fifo_size_log2[tf_i] <= 3'd2;
+                tu_fifo_cbf[tf_i]       <= 1'b0;
+                tu_fifo_last_pos[tf_i]  <= 10'd0;
+                tu_fifo_scan_mode[tf_i] <= 2'd0;
+                tu_fifo_cg_mask[tf_i]   <= 64'd0;
+                tu_fifo_is_intra[tf_i]  <= 1'b0;
+                tu_fifo_is_last[tf_i]   <= 1'b0;
+            end
+        end else if (ctu_frame_start) begin
+            cu_cbf_latched     <= 1'b0;
+            tu_last_sig_idx    <= 10'd0;
+            tu_has_nonzero     <= 1'b0;
+            tq_cg_nonzero_mask <= 64'd0;
+            tu_fifo_wr_ptr     <= 1'b0;
+            tu_fifo_rd_ptr     <= 1'b0;
+            tu_fifo_count      <= 2'd0;
         end else begin
-            if (trigger_leaf_cu) begin
-                cabac_coeff_ready     <= 1'b0;
-                tu_last_sig_idx       <= 10'd0;
-                tu_has_nonzero        <= 1'b0;
-                cu_cbf_latched        <= 1'b0;
-                tu_cg_nonzero_mask_y  <= 64'd0;
-                tu_cg_nonzero_mask_cb <= 16'd0;
-                tu_cg_nonzero_mask_cr <= 16'd0;
-            end else if (cabac_state == CABAC_WAIT_COEFF_DONE && cabac_coeff_done) begin
-                cabac_coeff_ready <= 1'b0;
-                tu_last_sig_idx   <= 10'd0;
-                tu_has_nonzero    <= 1'b0;
-                cu_cbf_latched    <= 1'b0;
-                if (reg_tu_comp == 2'd0)      tu_cg_nonzero_mask_y  <= 64'd0;
-                else if (reg_tu_comp == 2'd1) tu_cg_nonzero_mask_cb <= 16'd0;
-                else                          tu_cg_nonzero_mask_cr <= 16'd0;
+            if (trigger_leaf_cu || (tu_valid && tu_ready_signal)) begin
+                tu_last_sig_idx    <= 10'd0;
+                tu_has_nonzero     <= 1'b0;
+                tq_cg_nonzero_mask <= 64'd0;
+                if (trigger_leaf_cu)
+                    cu_cbf_latched <= 1'b0;
             end else if (quant_out_valid) begin
-                if (quant_out_level != 16'd0) begin
+                if (quant_cur_nz) begin
                     tu_last_sig_idx <= quant_out_scan_idx;
                     tu_has_nonzero  <= 1'b1;
-                    if (reg_tu_comp == 2'd0)
-                        tu_cg_nonzero_mask_y[quant_out_scan_idx[9:4]]  <= 1'b1;
-                    else if (reg_tu_comp == 2'd1)
-                        tu_cg_nonzero_mask_cb[quant_out_scan_idx[7:4]] <= 1'b1;
-                    else
-                        tu_cg_nonzero_mask_cr[quant_out_scan_idx[7:4]] <= 1'b1;
+                    tq_cg_nonzero_mask[quant_cg_bit] <= 1'b1;
                 end
                 cu_cbf_latched <= cu_cbf_latched | quant_out_cbf;
             end
 
-            if (quant_out_valid && quant_out_last) begin
-                cabac_coeff_ready <= 1'b1;
-                $display("Time=%0t: [HEVC_TOP] TU quant done! comp=%0d, has_nonzero=%0d, last_idx=%0d", $time, reg_tu_comp, tu_has_nonzero | (quant_out_level != 16'd0), (quant_out_level != 16'd0) ? quant_out_scan_idx : tu_last_sig_idx);
+            if (tu_fifo_push) begin
+                tu_fifo_comp[tu_fifo_wr_ptr]      <= reg_tu_comp;
+                tu_fifo_size_log2[tu_fifo_wr_ptr] <= reg_tu_size_log2;
+                tu_fifo_cbf[tu_fifo_wr_ptr]       <= final_tu_nz;
+                tu_fifo_last_pos[tu_fifo_wr_ptr]  <= final_tu_last_idx;
+                tu_fifo_scan_mode[tu_fifo_wr_ptr] <= scan_mode;
+                tu_fifo_cg_mask[tu_fifo_wr_ptr]   <= final_tu_cg_mask;
+                tu_fifo_is_intra[tu_fifo_wr_ptr]  <= latched_cu_is_intra;
+                tu_fifo_is_last[tu_fifo_wr_ptr]   <= reg_tu_is_last_in_cu;
+                tu_fifo_wr_ptr                    <= ~tu_fifo_wr_ptr;
+                // synthesis translate_off
+                $display("Time=%0t: [HEVC_TOP] TU quant done! comp=%0d, has_nonzero=%0d, last_idx=%0d", $time, reg_tu_comp, final_tu_nz, final_tu_last_idx);
+                // synthesis translate_on
             end
+
+            if (tu_fifo_pop) begin
+                tu_fifo_rd_ptr <= ~tu_fifo_rd_ptr;
+            end
+
+            case ({tu_fifo_push, tu_fifo_pop})
+                2'b10:   tu_fifo_count <= tu_fifo_count + 2'd1;
+                2'b01:   tu_fifo_count <= tu_fifo_count - 2'd1;
+                default: tu_fifo_count <= tu_fifo_count;
+            endcase
         end
     end
-
-    wire [63:0] cabac_tu_cg_nonzero_mask = (reg_tu_comp == 2'd0) ? tu_cg_nonzero_mask_y :
-                                           (reg_tu_comp == 2'd1) ? {48'd0, tu_cg_nonzero_mask_cb} :
-                                                                   {48'd0, tu_cg_nonzero_mask_cr};
 
     // In HEVC, skip_flag=1 is exclusively for Merge mode (no residual, MV from merge list).
     // Since this encoder uses AMVP (not Merge), skip_flag must always be 0 per spec.
@@ -3220,7 +3340,7 @@ module hevc_encoder_top #(
 
     wire wire_cu_req = (cabac_state == CABAC_IDLE) && trigger_cu;
     wire wire_pred_req = (cabac_state == CABAC_WAIT_PRED);
-    wire wire_coeff_req = (cabac_state == CABAC_WAIT_COEFF) && cabac_coeff_ready;
+    wire wire_coeff_req = (cabac_state == CABAC_WAIT_COEFF) && !tu_fifo_empty;
 
     reg cabac_cu_is_last_in_ctu;
     reg cabac_is_last_ctu;
@@ -3276,13 +3396,13 @@ module hevc_encoder_top #(
                     end
                 end
                 CABAC_WAIT_COEFF: begin
-                    if (cabac_coeff_ready) begin
+                    if (!tu_fifo_empty) begin
                         cabac_state <= CABAC_WAIT_COEFF_DONE;
                     end
                 end
                 CABAC_WAIT_COEFF_DONE: begin
                     if (cabac_coeff_done) begin
-                        if (!reg_tu_is_last_in_cu) begin
+                        if (!tu_fifo_is_last[tu_fifo_rd_ptr]) begin
                             cabac_state <= CABAC_WAIT_COEFF;
                         end else begin
                             if (cabac_cu_is_last_in_ctu) begin
@@ -3620,14 +3740,14 @@ module hevc_encoder_top #(
         // Coeff syntax
         .coeff_req           (wire_coeff_req),
         .coeff_done          (cabac_coeff_done),
-        .coeff_comp          (reg_tu_comp),
-        .coeff_is_intra      (latched_cu_is_intra),
-        .coeff_tu_size_log2  (reg_tu_size_log2),
-        .coeff_tu_cbf        (tu_has_nonzero),
-        .coeff_last_sig_pos  (tu_last_sig_idx),
-        .coeff_scan_mode     (scan_mode),
+        .coeff_comp          (tu_fifo_comp[tu_fifo_rd_ptr]),
+        .coeff_is_intra      (tu_fifo_is_intra[tu_fifo_rd_ptr]),
+        .coeff_tu_size_log2  (tu_fifo_size_log2[tu_fifo_rd_ptr]),
+        .coeff_tu_cbf        (tu_fifo_cbf[tu_fifo_rd_ptr]),
+        .coeff_last_sig_pos  (tu_fifo_last_pos[tu_fifo_rd_ptr]),
+        .coeff_scan_mode     (tu_fifo_scan_mode[tu_fifo_rd_ptr]),
         .tu_cg_mask_en       (1'b1),
-        .tu_cg_nonzero_mask  (cabac_tu_cg_nonzero_mask),
+        .tu_cg_nonzero_mask  (tu_fifo_cg_mask[tu_fifo_rd_ptr]),
         .coeff_rd_en         (coeff_buf_re),
         .coeff_rd_addr       (coeff_buf_raddr),
         .coeff_rd_data       (coeff_buf_rdata),
@@ -3688,6 +3808,12 @@ module hevc_encoder_top #(
     always @(posedge clk) begin
         if (rst_n && rbsp_valid && cabac_out_valid) begin
             $fatal(1, "[HEVC_TOP] RBSP collision: slice header rbsp_valid and CABAC cabac_out_valid asserted simultaneously!");
+        end
+        if (rst_n && tu_fifo_push && (tu_fifo_count == 2'd2) && !tu_fifo_pop) begin
+            $fatal(1, "[HEVC_TOP] tu_meta_fifo overflow!");
+        end
+        if (rst_n && ((cabac_state == CABAC_WAIT_SAO_STATS) || (cabac_state == CABAC_TRM_CTU)) && (tu_fifo_count != 2'd0)) begin
+            $fatal(1, "[HEVC_TOP] tu_meta_fifo not empty (%0d) at SAO/TRM boundary!", tu_fifo_count);
         end
     end
     // synthesis translate_on

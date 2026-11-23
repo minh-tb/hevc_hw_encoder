@@ -86,16 +86,20 @@ module intra_pred_top (
     wire       eff_is_luma      = (ref_valid && (ref_idx == 8'd0)) ? is_luma      : is_luma_r;
 
     //-------------------------------------------------------------------------
-    // Mode decode
+    // Mode decode (registered context for Stage 2 predictors; eff_* for Stage 1)
     //-------------------------------------------------------------------------
-    wire sel_planar = (eff_intra_mode == `INTRA_PLANAR);
-    wire sel_dc     = (eff_intra_mode == `INTRA_DC);
-    wire sel_ang    = (eff_intra_mode >= `INTRA_ANG_FIRST) &&
-                      (eff_intra_mode <= `INTRA_ANG_LAST);
+    wire sel_planar = (intra_mode_r == `INTRA_PLANAR);
+    wire sel_dc     = (intra_mode_r == `INTRA_DC);
+    wire sel_ang    = (intra_mode_r >= `INTRA_ANG_FIRST) &&
+                      (intra_mode_r <= `INTRA_ANG_LAST);
 
     // synthesis translate_off
+    wire eff_sel_planar = (eff_intra_mode == `INTRA_PLANAR);
+    wire eff_sel_dc     = (eff_intra_mode == `INTRA_DC);
+    wire eff_sel_ang    = (eff_intra_mode >= `INTRA_ANG_FIRST) &&
+                          (eff_intra_mode <= `INTRA_ANG_LAST);
     always @(posedge clk) begin
-        if (rst_n && ref_valid && !sel_planar && !sel_dc && !sel_ang)
+        if (rst_n && ref_valid && !eff_sel_planar && !eff_sel_dc && !eff_sel_ang)
             $display("ERROR [intra_pred_top] invalid intra_mode=%0d at time=%0t",
                      eff_intra_mode, $time);
     end
@@ -161,7 +165,7 @@ module intra_pred_top (
     intra_planar u_planar (
         .clk            (clk),
         .rst_n          (rst_n),
-        .pu_size_log2   (eff_pu_size_log2),
+        .pu_size_log2   (pu_size_log2_r),
         .in_valid       (filt_valid_planar),
         .in_ready       (filt_ready_planar),
         .in_sample      (filt_sample),
@@ -186,8 +190,8 @@ module intra_pred_top (
     intra_dc u_dc (
         .clk            (clk),
         .rst_n          (rst_n),
-        .pu_size_log2   (eff_pu_size_log2),
-        .is_luma        (eff_is_luma),
+        .pu_size_log2   (pu_size_log2_r),
+        .is_luma        (is_luma_r),
         .in_valid       (filt_valid_dc),
         .in_ready       (filt_ready_dc),
         .in_sample      (filt_sample),
@@ -212,9 +216,9 @@ module intra_pred_top (
     intra_angular u_angular (
         .clk            (clk),
         .rst_n          (rst_n),
-        .pu_size_log2   (eff_pu_size_log2),
-        .intra_mode     (eff_intra_mode),
-        .is_luma        (eff_is_luma),
+        .pu_size_log2   (pu_size_log2_r),
+        .intra_mode     (intra_mode_r),
+        .is_luma        (is_luma_r),
         .in_valid       (filt_valid_ang),
         .in_ready       (filt_ready_ang),
         .in_sample      (filt_sample),

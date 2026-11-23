@@ -173,19 +173,54 @@ module inv_quant (
 
     wire signed [31:0] product = $signed(in_level) * $signed({1'b0, IQS});
 
+    // Stage 1: Product & Shift Parameter Pipeline Registers
+    reg               s1_valid;
+    reg signed [31:0] s1_product;
+    reg               s1_do_right_shift;
+    reg [4:0]         s1_right_shift;
+    reg [4:0]         s1_left_shift;
+    reg [9:0]         s1_scan_idx;
+    reg               s1_last;
+
+    wire s2_ready = out_ready | ~out_valid;
+    assign in_ready = s2_ready | ~s1_valid;
+
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            s1_valid          <= 1'b0;
+            s1_product        <= 32'sd0;
+            s1_do_right_shift <= 1'b1;
+            s1_right_shift    <= 5'd0;
+            s1_left_shift     <= 5'd0;
+            s1_scan_idx       <= 10'd0;
+            s1_last           <= 1'b0;
+        end else if (in_ready) begin
+            s1_valid <= in_valid;
+            if (in_valid) begin
+                s1_product        <= product;
+                s1_do_right_shift <= do_right_shift;
+                s1_right_shift    <= right_shift;
+                s1_left_shift     <= left_shift;
+                s1_scan_idx       <= in_scan_idx;
+                s1_last           <= in_last;
+            end
+        end
+    end
+
+    // Stage 2: Right/Left Shift & Clip (2-cycle total latency)
     // Right shift path (most common: QP <= 48)
-    wire [31:0] add_right    = (right_shift > 5'd0) ?
-                               (32'd1 << (right_shift - 5'd1)) : 32'd0;
-    wire signed [31:0] sum_right = product + $signed(add_right);
-    wire signed [31:0] coeff_right = (do_right_shift && right_shift > 5'd0) ?
-                                     (sum_right >>> right_shift) :
-                                     product;  // right_shift=0: no shift
+    wire [31:0] add_right    = (s1_right_shift > 5'd0) ?
+                               (32'd1 << (s1_right_shift - 5'd1)) : 32'd0;
+    wire signed [31:0] sum_right = s1_product + $signed(add_right);
+    wire signed [31:0] coeff_right = (s1_do_right_shift && s1_right_shift > 5'd0) ?
+                                     (sum_right >>> s1_right_shift) :
+                                     s1_product;  // right_shift=0: no shift
 
     // Left shift path (QP > 48 — extremely rare at QP=32 target)
-    wire signed [31:0] coeff_left = product <<< left_shift;
+    wire signed [31:0] coeff_left = s1_product <<< s1_left_shift;
 
     // Select shift direction
-    wire signed [31:0] coeff_unclipped = do_right_shift ? coeff_right : coeff_left;
+    wire signed [31:0] coeff_unclipped = s1_do_right_shift ? coeff_right : coeff_left;
 
     // Clip to Short range [-32768, 32767] (HM CoeffMin/CoeffMax)
     wire signed [`COEFF_WIDTH-1:0] coeff_clipped =
@@ -194,21 +229,19 @@ module inv_quant (
         coeff_unclipped[`COEFF_WIDTH-1:0];
 
     //-------------------------------------------------------------------------
-    // Output register — 1-cycle latency
+    // Output register — 2-cycle total latency
     //-------------------------------------------------------------------------
-    assign in_ready = out_ready | ~out_valid;
-
     always @(posedge clk) begin
         if (!rst_n) begin
             out_valid    <= 1'b0;
             out_coeff    <= {`COEFF_WIDTH{1'b0}};
             out_scan_idx <= 10'd0;
             out_last     <= 1'b0;
-        end else if (in_ready) begin
-            out_valid    <= in_valid;
-            out_coeff    <= in_valid ? coeff_clipped : {`COEFF_WIDTH{1'b0}};
-            out_scan_idx <= in_scan_idx;
-            out_last     <= in_last;
+        end else if (s2_ready) begin
+            out_valid    <= s1_valid;
+            out_coeff    <= s1_valid ? coeff_clipped : {`COEFF_WIDTH{1'b0}};
+            out_scan_idx <= s1_scan_idx;
+            out_last     <= s1_last;
         end
     end
 

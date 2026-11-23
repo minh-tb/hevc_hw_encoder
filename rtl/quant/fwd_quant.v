@@ -203,20 +203,53 @@ module fwd_quant (
     assign coeff_sign = in_coeff[`COEFF_WIDTH-1];
     assign coeff_abs  = coeff_sign ? (-in_coeff) : in_coeff;
 
-    // Product: 16-bit unsigned * 17-bit unsigned = 33-bit
+    // Stage 1: Product, Offset & Control Pipeline Registers
     wire [32:0] product = {17'b0, coeff_abs} * {16'b0, MF};
 
-    // Add offset (27-bit), then shift
-    wire [33:0] sum = {1'b0, product} + {7'b0, offset};
+    reg        s1_valid;
+    reg [32:0] s1_product;
+    reg [26:0] s1_offset;
+    reg [4:0]  s1_qbits;
+    reg        s1_sign;
+    reg [9:0]  s1_scan_idx;
+    reg        s1_last;
 
-    // Arithmetic right shift by qbits (variable shift)
-    // qbits range 6..27, sum is 34-bit unsigned
-    wire [33:0] level_unclipped = sum >> qbits;
+    wire s2_ready = out_ready | ~out_valid;
+    assign in_ready = s2_ready | ~s1_valid;
+
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            s1_valid    <= 1'b0;
+            s1_product  <= 33'd0;
+            s1_offset   <= 27'd0;
+            s1_qbits    <= 5'd13;
+            s1_sign     <= 1'b0;
+            s1_scan_idx <= 10'd0;
+            s1_last     <= 1'b0;
+        end else if (in_ready) begin
+            s1_valid <= in_valid;
+            if (in_valid) begin
+                s1_product  <= product;
+                s1_offset   <= offset;
+                s1_qbits    <= qbits;
+                s1_sign     <= coeff_sign;
+                s1_scan_idx <= in_scan_idx;
+                s1_last     <= in_last;
+            end
+        end
+    end
+
+    // Stage 2: Offset Add, Shift, Sign Restore & Clip (2-cycle pipeline)
+    wire [33:0] sum = {1'b0, s1_product} + {7'b0, s1_offset};
+
+    // Arithmetic right shift by s1_qbits (variable shift)
+    // s1_qbits range 6..27, sum is 34-bit unsigned
+    wire [33:0] level_unclipped = sum >> s1_qbits;
 
     // Restore sign
     wire signed [34:0] level_signed =
-        coeff_sign ? (-$signed({1'b0, level_unclipped})) :
-                      $signed({1'b0, level_unclipped});
+        s1_sign ? (-$signed({1'b0, level_unclipped})) :
+                    $signed({1'b0, level_unclipped});
 
     // Clip to COEFF_WIDTH (16-bit signed)
     // Levels above 32767 are extremely rare in practice at QP=32
@@ -232,15 +265,15 @@ module fwd_quant (
 
     //-------------------------------------------------------------------------
     // CBF tracking — asserted if any non-zero level in this TU
-    // Reset at start of each TU (in_scan_idx == 0 with in_valid)
+    // Reset at start of each TU (s1_scan_idx == 0 with s1_valid)
     //-------------------------------------------------------------------------
     reg cbf_accum;
 
     always @(posedge clk) begin
         if (!rst_n) begin
             cbf_accum <= 1'b0;
-        end else if (in_valid && in_ready) begin
-            if (in_scan_idx == 10'd0)
+        end else if (s2_ready && s1_valid) begin
+            if (s1_scan_idx == 10'd0)
                 cbf_accum <= (final_level != 16'sd0);
             else
                 cbf_accum <= cbf_accum | (final_level != 16'sd0);
@@ -248,12 +281,9 @@ module fwd_quant (
     end
 
     //-------------------------------------------------------------------------
-    // Output register — 1-cycle latency
-    // in_ready is always 1 (combinational path, no backpressure within TU)
-    // Backpressure from out_ready stalls the upstream coefficient stream
+    // Output register — 2-cycle total latency
+    // Backpressure from out_ready stalls the upstream coefficient stream cleanly
     //-------------------------------------------------------------------------
-    assign in_ready = out_ready | ~out_valid;
-
     always @(posedge clk) begin
         if (!rst_n) begin
             out_valid    <= 1'b0;
@@ -261,14 +291,19 @@ module fwd_quant (
             out_scan_idx <= 10'd0;
             out_last     <= 1'b0;
             out_cbf      <= 1'b0;
-        end else if (in_ready) begin
-            out_valid    <= in_valid;
-            out_level    <= in_valid ? final_level : {`COEFF_WIDTH{1'b0}};
-            out_scan_idx <= in_scan_idx;
-            out_last     <= in_last;
+        end else if (s2_ready) begin
+            out_valid    <= s1_valid;
+            out_level    <= s1_valid ? final_level : {`COEFF_WIDTH{1'b0}};
+            out_scan_idx <= s1_scan_idx;
+            out_last     <= s1_last;
             // CBF output on last coefficient of TU
-            out_cbf      <= in_last ? (cbf_accum | (final_level != 16'sd0))
-                                    : cbf_accum;
+            if (s1_valid) begin
+                out_cbf <= s1_last ? ((s1_scan_idx == 10'd0) ? (final_level != 16'sd0)
+                                                              : (cbf_accum | (final_level != 16'sd0)))
+                                   : cbf_accum;
+            end else begin
+                out_cbf <= cbf_accum;
+            end
         end
     end
 

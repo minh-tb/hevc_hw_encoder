@@ -313,7 +313,8 @@ module syntax_coeff #(
         S_SIGN_SCAN   = 5'd8,   // sign flags (EP)
         S_REM_SCAN    = 5'd9,   // remaining levels
         S_REM_EG      = 5'd10,  // Exp-Golomb / Rice bins
-        S_TU_DONE     = 5'd11;
+        S_TU_DONE     = 5'd11,
+        S_REM_EG_CALC = 5'd23;  // Pipeline stage for calc_rice_eg
 
     reg [4:0]  state;
 
@@ -385,9 +386,16 @@ module syntax_coeff #(
     reg [2:0]  rice_param;
 
     // Exp-Golomb / Rice remaining level encoding registers
+    reg [COEFF_W-1:0] rem_sym_r;
+    reg [2:0]  rem_rp_r;
     reg [31:0] rem_val;
     reg [5:0]  rem_len;
     reg [5:0]  rem_cnt;
+
+    // Pre-registered CG context for S_SIG_SCAN (breaks cur_cg -> range_coder path)
+    reg [1:0]  sig_cg_pattern_r;
+    reg        sig_cg_not_first_r;
+    reg        sig_cg_is_zero_r;
 
     // Exact Context IDs matching HM
     function automatic [CTX_ID_W-1:0] get_last_x_ctx;
@@ -460,21 +468,17 @@ module syntax_coeff #(
         end
     endfunction
 
-    function automatic [CTX_ID_W-1:0] get_sig_ctx;
-        input [1:0]  comp;
-        input [2:0]  log2_size;
-        input [5:0]  cg;
-        input [3:0]  sub_pos;
-        input [63:0] flags;
-        input [1:0]  s_mode;
+    function automatic [CTX_ID_W-1:0] get_sig_ctx_fast;
+        input [1:0] comp;
+        input [2:0] log2_size;
+        input [3:0] sub_pos;
+        input [1:0] s_mode;
+        input       cg_is_zero;
+        input       not_first;
+        input [1:0] pattern;
         reg [1:0] r, c;
-        reg [2:0] cg_x, cg_y, max_cg;
-        reg [5:0] pos_x, pos_y;
         reg [1:0] cnt;
         reg [2:0] pos_total;
-        reg [1:0] pattern;
-        reg       r_flag, b_flag;
-        reg       not_first;
         reg [3:0] lut4x4 [0:15];
         begin
             lut4x4[ 0]=4'd0; lut4x4[ 1]=4'd1; lut4x4[ 2]=4'd4; lut4x4[ 3]=4'd5;
@@ -485,26 +489,11 @@ module syntax_coeff #(
             r = get_sub_row(sub_pos, s_mode);
             c = get_sub_col(sub_pos, s_mode);
 
-            max_cg = (log2_size == 3'd3) ? 3'd1 : (log2_size == 3'd4) ? 3'd3 : 3'd7;
-            if (log2_size == 3'd2) begin
-                cg_x = 3'd0; cg_y = 3'd0;
-            end else begin
-                cg_x = get_cg_col(log2_size, cg, s_mode);
-                cg_y = get_cg_row(log2_size, cg, s_mode);
-            end
-
-            pos_x = {3'd0, cg_x, 2'd0} + {4'd0, c};
-            pos_y = {3'd0, cg_y, 2'd0} + {4'd0, r};
-
-            if (pos_x == 6'd0 && pos_y == 6'd0) begin
-                get_sig_ctx = (comp == 2'd0) ? 8'd46 : 8'd74;
+            if (cg_is_zero && (c == 2'd0) && (r == 2'd0)) begin
+                get_sig_ctx_fast = (comp == 2'd0) ? 8'd46 : 8'd74;
             end else if (log2_size == 3'd2) begin
-                get_sig_ctx = (comp == 2'd0) ? (8'd46 + {4'd0, lut4x4[{r, c}]}) : (8'd74 + {4'd0, lut4x4[{r, c}]});
+                get_sig_ctx_fast = (comp == 2'd0) ? (8'd46 + {4'd0, lut4x4[{r, c}]}) : (8'd74 + {4'd0, lut4x4[{r, c}]});
             end else begin
-                r_flag = (cg_x < max_cg) ? flags[get_cg_raster(log2_size, cg_x + 3'd1, cg_y)] : 1'b0;
-                b_flag = (cg_y < max_cg) ? flags[get_cg_raster(log2_size, cg_x, cg_y + 3'd1)] : 1'b0;
-                pattern = {b_flag, r_flag};
-
                 case (pattern)
                     2'd0: begin
                         pos_total = {1'b0, c} + {1'b0, r};
@@ -515,22 +504,30 @@ module syntax_coeff #(
                     default: cnt = 2'd2;
                 endcase
 
-                not_first = (cg_x + cg_y > 0);
-
                 if (comp == 2'd0) begin
                     if (log2_size == 3'd3)
-                        get_sig_ctx = 8'd46 + (s_mode != 2'd0 ? 8'd15 : 8'd9) + (not_first ? 8'd3 : 8'd0) + {6'd0, cnt};
+                        get_sig_ctx_fast = 8'd46 + (s_mode != 2'd0 ? 8'd15 : 8'd9) + (not_first ? 8'd3 : 8'd0) + {6'd0, cnt};
                     else
-                        get_sig_ctx = 8'd46 + 8'd21 + (not_first ? 8'd3 : 8'd0) + {6'd0, cnt};
+                        get_sig_ctx_fast = 8'd46 + 8'd21 + (not_first ? 8'd3 : 8'd0) + {6'd0, cnt};
                 end else begin
                     if (log2_size == 3'd3)
-                        get_sig_ctx = 8'd74 + 8'd9  + {6'd0, cnt};
+                        get_sig_ctx_fast = 8'd74 + 8'd9  + {6'd0, cnt};
                     else
-                        get_sig_ctx = 8'd74 + 8'd12 + {6'd0, cnt};
+                        get_sig_ctx_fast = 8'd74 + 8'd12 + {6'd0, cnt};
                 end
             end
         end
     endfunction
+
+    // Pre-decoded CG neighborhood wires registered during S_LOAD_CG_REQ / S_LOAD_CG_WAIT
+    wire [2:0] pre_max_cg       = (tu_size_log2_r == 3'd3) ? 3'd1 : (tu_size_log2_r == 3'd4) ? 3'd3 : 3'd7;
+    wire [2:0] pre_cg_x         = (tu_size_log2_r == 3'd2) ? 3'd0 : get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r);
+    wire [2:0] pre_cg_y         = (tu_size_log2_r == 3'd2) ? 3'd0 : get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r);
+    wire       pre_r_flag       = (tu_size_log2_r > 3'd2 && pre_cg_x < pre_max_cg) ? cg_flags[get_cg_raster(tu_size_log2_r, pre_cg_x + 3'd1, pre_cg_y)] : 1'b0;
+    wire       pre_b_flag       = (tu_size_log2_r > 3'd2 && pre_cg_y < pre_max_cg) ? cg_flags[get_cg_raster(tu_size_log2_r, pre_cg_x, pre_cg_y + 3'd1)] : 1'b0;
+    wire [1:0] pre_cg_pattern   = {pre_b_flag, pre_r_flag};
+    wire       pre_cg_not_first = (pre_cg_x + pre_cg_y > 0);
+    wire       pre_cg_is_zero   = (pre_cg_x == 3'd0) && (pre_cg_y == 3'd0);
 
     // =========================================================================
     // Combinational Output Multiplexer
@@ -606,8 +603,7 @@ module syntax_coeff #(
                 coeff_rd_addr = {6'd0, cur_cg, 4'd0} + {8'd0, load_cnt};
             end
             S_LOAD_CG_WAIT: begin
-                coeff_rd_en   = 1'b1;
-                coeff_rd_addr = {6'd0, cur_cg, 4'd0} + {8'd0, load_cnt};
+                coeff_rd_en   = 1'b0;
             end
 
             S_CG_FLAG: begin
@@ -624,7 +620,7 @@ module syntax_coeff #(
                 end else begin
                     bin_valid  = 1'b1;
                     bin_value  = cg_sig_map[scan_ptr[3:0]];
-                    bin_ctx_id = get_sig_ctx(comp_r, tu_size_log2_r, cur_cg, scan_ptr[3:0], cg_flags, scan_mode_r);
+                    bin_ctx_id = get_sig_ctx_fast(comp_r, tu_size_log2_r, scan_ptr[3:0], scan_mode_r, sig_cg_is_zero_r, sig_cg_not_first_r, sig_cg_pattern_r);
                 end
             end
 
@@ -783,10 +779,15 @@ module syntax_coeff #(
             ctx_set             <= 2'd0;
             prev_cg_had_gt1     <= 1'b0;
             rice_param          <= 3'd0;
+            rem_sym_r           <= {COEFF_W{1'b0}};
+            rem_rp_r            <= 3'd0;
             rem_val             <= 32'd0;
             rem_len             <= 6'd0;
             rem_cnt             <= 6'd0;
             scan_mode_r         <= 2'd0;
+            sig_cg_pattern_r    <= 2'd0;
+            sig_cg_not_first_r  <= 1'b0;
+            sig_cg_is_zero_r    <= 1'b0;
             for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
                 cg_coeffs[c_i]    <= {COEFF_W{1'b0}};
                 sig_pos_list[c_i] <= 4'd0;
@@ -942,7 +943,7 @@ module syntax_coeff #(
                     end
                 end
 
-                // --- Phase 1: Load 16 Coefficients for current CG ---
+                // --- Phase 1: Load 16 Coefficients for current CG (17-cycle streaming pipeline) ---
                 S_LOAD_CG_REQ: begin
                     if ((load_cnt == 4'd0) && cur_cg_skip) begin
                         // Pillar 3: Zero-subblock (CG) 1-cycle fast-skip (with all 4 safeguards)
@@ -962,60 +963,68 @@ module syntax_coeff #(
                             cg_flags[get_cg_raster(tu_size_log2_r,
                                 get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r),
                                 get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r))] <= 1'b1;
+                            sig_cg_pattern_r   <= pre_cg_pattern;
+                            sig_cg_not_first_r <= pre_cg_not_first;
+                            sig_cg_is_zero_r   <= pre_cg_is_zero;
                             state <= S_SIG_SCAN;
                         end else begin
                             // cur_cg > 0 -> emit coded_sub_block_flag = 0 via S_CG_FLAG
                             state <= S_CG_FLAG;
                         end
                     end else begin
-                        state <= S_LOAD_CG_WAIT;
+                        if (load_cnt != 4'd0) begin
+                            cg_coeffs[load_cnt - 4'd1] <= coeff_rd_data;
+                        end
+                        if (load_cnt == 4'd15) begin
+                            state <= S_LOAD_CG_WAIT;
+                        end else begin
+                            load_cnt <= load_cnt + 4'd1;
+                        end
                     end
                 end
 
                 S_LOAD_CG_WAIT: begin
-                    cg_coeffs[load_cnt] <= coeff_rd_data;
-                    if (load_cnt == 4'd15) begin
-                        state <= (cur_cg == last_cg_idx || cur_cg == 6'd0) ? S_SIG_SCAN : S_CG_FLAG;
-                        cg_flags[get_cg_raster(tu_size_log2_r,
-                            get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r),
-                            get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r))] <= 1'b1;
-                        scan_ptr <= (cur_cg == last_cg_idx) ? {1'b0, last_sig_pos_r[3:0]} : 5'd15;
+                    cg_coeffs[4'd15] <= coeff_rd_data;
+                    sig_cg_pattern_r   <= pre_cg_pattern;
+                    sig_cg_not_first_r <= pre_cg_not_first;
+                    sig_cg_is_zero_r   <= pre_cg_is_zero;
+                    state <= (cur_cg == last_cg_idx || cur_cg == 6'd0) ? S_SIG_SCAN : S_CG_FLAG;
+                    cg_flags[get_cg_raster(tu_size_log2_r,
+                        get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r),
+                        get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r))] <= 1'b1;
+                    scan_ptr <= (cur_cg == last_cg_idx) ? {1'b0, last_sig_pos_r[3:0]} : 5'd15;
 
-                        // Procedural accumulation with blocking assignments
-                        v_sig_map = 16'd0;
-                        v_num_sig = 5'd0;
-                        for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
-                            v_pos_list[c_i] = 4'd0;
-                            v_val_list[c_i] = {COEFF_W{1'b0}};
-                        end
-                        for (c_i = 15; c_i >= 0; c_i = c_i - 1) begin
-                            c_val = (c_i == 15) ? coeff_rd_data : cg_coeffs[c_i];
-                            if (c_val != 16'd0) begin
-                                if (cur_cg != last_cg_idx || c_i <= last_sig_pos_r[3:0]) begin
-                                    v_sig_map[c_i] = 1'b1;
-                                    v_pos_list[v_num_sig[3:0]] = c_i[3:0];
-                                    v_val_list[v_num_sig[3:0]] = c_val;
-                                    v_num_sig = v_num_sig + 5'd1;
-                                end
+                    // Procedural accumulation with blocking assignments
+                    v_sig_map = 16'd0;
+                    v_num_sig = 5'd0;
+                    for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
+                        v_pos_list[c_i] = 4'd0;
+                        v_val_list[c_i] = {COEFF_W{1'b0}};
+                    end
+                    for (c_i = 15; c_i >= 0; c_i = c_i - 1) begin
+                        c_val = (c_i == 15) ? coeff_rd_data : cg_coeffs[c_i];
+                        if (c_val != 16'd0) begin
+                            if (cur_cg != last_cg_idx || c_i <= last_sig_pos_r[3:0]) begin
+                                v_sig_map[c_i] = 1'b1;
+                                v_pos_list[v_num_sig[3:0]] = c_i[3:0];
+                                v_val_list[v_num_sig[3:0]] = c_val;
+                                v_num_sig = v_num_sig + 5'd1;
                             end
                         end
-                        if (v_num_sig == 5'd0 && cur_cg == last_cg_idx) begin
-                            v_sig_map[0] = 1'b1;
-                            v_pos_list[0] = 4'd0;
-                            v_val_list[0] = 16'd1;
-                            v_num_sig = 5'd1;
-                        end
-                        cg_sig_map <= v_sig_map;
-                        cg_num_sig <= v_num_sig;
-                        ctx_set    <= (comp_r == 2'd0) ? ((cur_cg > 6'd0 ? 2'd2 : 2'd0) + {1'b0, prev_cg_had_gt1}) :
-                                                         {1'b0, prev_cg_had_gt1};
-                        for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
-                            sig_pos_list[c_i] <= v_pos_list[c_i];
-                            sig_val_list[c_i] <= v_val_list[c_i];
-                        end
-                    end else begin
-                        load_cnt <= load_cnt + 4'd1;
-                        state    <= S_LOAD_CG_REQ;
+                    end
+                    if (v_num_sig == 5'd0 && cur_cg == last_cg_idx) begin
+                        v_sig_map[0] = 1'b1;
+                        v_pos_list[0] = 4'd0;
+                        v_val_list[0] = 16'd1;
+                        v_num_sig = 5'd1;
+                    end
+                    cg_sig_map <= v_sig_map;
+                    cg_num_sig <= v_num_sig;
+                    ctx_set    <= (comp_r == 2'd0) ? ((cur_cg > 6'd0 ? 2'd2 : 2'd0) + {1'b0, prev_cg_had_gt1}) :
+                                                     {1'b0, prev_cg_had_gt1};
+                    for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
+                        sig_pos_list[c_i] <= v_pos_list[c_i];
+                        sig_val_list[c_i] <= v_val_list[c_i];
                     end
                 end
 
@@ -1122,13 +1131,11 @@ module syntax_coeff #(
                                 cur_abs_val    = abs_coeff(sig_val_list[0]);
                                 base_level_val = (first_gt1_found && 0 == first_gt1_idx) ? 5'd3 : (0 < 4'd8) ? 5'd2 : 5'd1;
                                 if (cur_abs_val >= base_level_val) begin
-                                    eg_result = calc_rice_eg(cur_abs_val - base_level_val, 3'd0);
-                                    rem_val   <= eg_result[31:0];
-                                    rem_len   <= eg_result[37:32];
-                                    rem_cnt   <= eg_result[37:32] - 6'd1;
+                                    rem_sym_r <= cur_abs_val - base_level_val;
+                                    rem_rp_r  <= 3'd0;
                                     if (cur_abs_val > (16'd3 << 3'd0)) rice_param <= 3'd1;
                                     else rice_param <= 3'd0;
-                                    state     <= S_REM_EG;
+                                    state     <= S_REM_EG_CALC;
                                 end else begin
                                     state <= S_REM_SCAN;
                                 end
@@ -1152,12 +1159,10 @@ module syntax_coeff #(
                         cur_abs_val = abs_coeff(sig_val_list[rem_ptr + 4'd1]);
                         base_level_val = (first_gt1_found && (rem_ptr + 4'd1) == first_gt1_idx) ? 5'd3 : ((rem_ptr + 4'd1) < 4'd8) ? 5'd2 : 5'd1;
                         if (cur_abs_val >= base_level_val) begin
-                            eg_result = calc_rice_eg(cur_abs_val - base_level_val, rice_param);
-                            rem_val   <= eg_result[31:0];
-                            rem_len   <= eg_result[37:32];
-                            rem_cnt   <= eg_result[37:32] - 6'd1;
+                            rem_sym_r <= cur_abs_val - base_level_val;
+                            rem_rp_r  <= rice_param;
                             if (cur_abs_val > (16'd3 << rice_param) && rice_param < 3'd4) rice_param <= rice_param + 3'd1;
-                            state     <= S_REM_EG;
+                            state     <= S_REM_EG_CALC;
                         end
                     end else begin
                         if (cur_cg > 6'd0) begin
@@ -1170,6 +1175,14 @@ module syntax_coeff #(
                     end
                 end
 
+                S_REM_EG_CALC: begin
+                    eg_result = calc_rice_eg(rem_sym_r, rem_rp_r);
+                    rem_val   <= eg_result[31:0];
+                    rem_len   <= eg_result[37:32];
+                    rem_cnt   <= eg_result[37:32] - 6'd1;
+                    state     <= S_REM_EG;
+                end
+
                 S_REM_EG: begin
                     if (bin_rdy) begin
                         if (rem_cnt > 0) begin
@@ -1180,12 +1193,10 @@ module syntax_coeff #(
                                 cur_abs_val = abs_coeff(sig_val_list[rem_ptr + 4'd1]);
                                 base_level_val = (first_gt1_found && (rem_ptr + 4'd1) == first_gt1_idx) ? 5'd3 : ((rem_ptr + 4'd1) < 4'd8) ? 5'd2 : 5'd1;
                                 if (cur_abs_val >= base_level_val) begin
-                                    eg_result = calc_rice_eg(cur_abs_val - base_level_val, rice_param);
-                                    rem_val   <= eg_result[31:0];
-                                    rem_len   <= eg_result[37:32];
-                                    rem_cnt   <= eg_result[37:32] - 6'd1;
+                                    rem_sym_r <= cur_abs_val - base_level_val;
+                                    rem_rp_r  <= rice_param;
                                     if (cur_abs_val > (16'd3 << rice_param) && rice_param < 3'd4) rice_param <= rice_param + 3'd1;
-                                    state     <= S_REM_EG;
+                                    state     <= S_REM_EG_CALC;
                                 end else begin
                                     state <= S_REM_SCAN;
                                 end

@@ -204,7 +204,7 @@ module db_filter_luma (
     wire blk_do_q1     = blk_dq < {1'b0, blk_side_thresh};
 
     //-------------------------------------------------------------------------
-    // Combinational filter for readout line (rd_bank, rd_idx)
+    // Stage 0 -> Stage 1: Bank Readout & Strong-Sum / Weak-Delta Metrics
     //-------------------------------------------------------------------------
     wire [`PIXEL_WIDTH-1:0] cur_p0 = b_p0[rd_bank][rd_idx];
     wire [`PIXEL_WIDTH-1:0] cur_p1 = b_p1[rd_bank][rd_idx];
@@ -216,105 +216,111 @@ module db_filter_luma (
     wire [`PIXEL_WIDTH-1:0] cur_q3 = b_q3[rd_bank][rd_idx];
 
     wire [9:0] cur_tc = b_tc[rd_bank];
-    wire signed [13:0] tc2_sel = $signed({4'b0, cur_tc}) << 1;
 
-    // Strong filter outputs
-    wire [`PIXEL_WIDTH-1:0] sp0 = clip_strong($signed({4'b0, cur_p0}),
-        ($signed({4'b0, cur_p2}) + $signed({3'b0, cur_p1, 1'b0}) + $signed({3'b0, cur_p0, 1'b0})
-         + $signed({3'b0, cur_q0, 1'b0}) + $signed({4'b0, cur_q1}) + 14'sd4) >>> 3, tc2_sel);
+    // Strong filter pre-clip averages
+    wire signed [13:0] sp0_flt = ($signed({4'b0, cur_p2}) + $signed({3'b0, cur_p1, 1'b0}) + $signed({3'b0, cur_p0, 1'b0})
+                                 + $signed({3'b0, cur_q0, 1'b0}) + $signed({4'b0, cur_q1}) + 14'sd4) >>> 3;
+    wire signed [13:0] sp1_flt = ($signed({4'b0, cur_p2}) + $signed({4'b0, cur_p1}) + $signed({4'b0, cur_p0})
+                                 + $signed({4'b0, cur_q0}) + 14'sd2) >>> 2;
+    wire signed [13:0] sp2_flt = ($signed({3'b0, cur_p3, 1'b0}) + $signed({3'b0, cur_p2, 1'b0}) + $signed({4'b0, cur_p2})
+                                 + $signed({4'b0, cur_p1}) + $signed({4'b0, cur_p0}) + $signed({4'b0, cur_q0}) + 14'sd4) >>> 3;
 
-    wire [`PIXEL_WIDTH-1:0] sp1 = clip_strong($signed({4'b0, cur_p1}),
-        ($signed({4'b0, cur_p2}) + $signed({4'b0, cur_p1}) + $signed({4'b0, cur_p0})
-         + $signed({4'b0, cur_q0}) + 14'sd2) >>> 2, tc2_sel);
+    wire signed [13:0] sq0_flt = ($signed({4'b0, cur_p1}) + $signed({3'b0, cur_p0, 1'b0}) + $signed({3'b0, cur_q0, 1'b0})
+                                 + $signed({3'b0, cur_q1, 1'b0}) + $signed({4'b0, cur_q2}) + 14'sd4) >>> 3;
+    wire signed [13:0] sq1_flt = ($signed({4'b0, cur_p0}) + $signed({4'b0, cur_q0}) + $signed({4'b0, cur_q1})
+                                 + $signed({4'b0, cur_q2}) + 14'sd2) >>> 2;
+    wire signed [13:0] sq2_flt = ($signed({4'b0, cur_p0}) + $signed({4'b0, cur_q0}) + $signed({4'b0, cur_q1})
+                                 + $signed({3'b0, cur_q2, 1'b0}) + $signed({4'b0, cur_q2}) + $signed({3'b0, cur_q3, 1'b0})
+                                 + 14'sd4) >>> 3;
 
-    wire [`PIXEL_WIDTH-1:0] sp2 = clip_strong($signed({4'b0, cur_p2}),
-        ($signed({3'b0, cur_p3, 1'b0}) + $signed({3'b0, cur_p2, 1'b0}) + $signed({4'b0, cur_p2})
-         + $signed({4'b0, cur_p1}) + $signed({4'b0, cur_p0}) + $signed({4'b0, cur_q0}) + 14'sd4) >>> 3, tc2_sel);
-
-    wire [`PIXEL_WIDTH-1:0] sq0 = clip_strong($signed({4'b0, cur_q0}),
-        ($signed({4'b0, cur_p1}) + $signed({3'b0, cur_p0, 1'b0}) + $signed({3'b0, cur_q0, 1'b0})
-         + $signed({3'b0, cur_q1, 1'b0}) + $signed({4'b0, cur_q2}) + 14'sd4) >>> 3, tc2_sel);
-
-    wire [`PIXEL_WIDTH-1:0] sq1 = clip_strong($signed({4'b0, cur_q1}),
-        ($signed({4'b0, cur_p0}) + $signed({4'b0, cur_q0}) + $signed({4'b0, cur_q1})
-         + $signed({4'b0, cur_q2}) + 14'sd2) >>> 2, tc2_sel);
-
-    wire [`PIXEL_WIDTH-1:0] sq2 = clip_strong($signed({4'b0, cur_q2}),
-        ($signed({4'b0, cur_p0}) + $signed({4'b0, cur_q0}) + $signed({4'b0, cur_q1})
-         + $signed({3'b0, cur_q2, 1'b0}) + $signed({4'b0, cur_q2}) + $signed({3'b0, cur_q3, 1'b0})
-         + 14'sd4) >>> 3, tc2_sel);
-
-    // Weak filter outputs
-    wire signed [11:0] q0_p0  = $signed({2'b0, cur_q0}) - $signed({2'b0, cur_p0});
-    wire signed [11:0] q1_p1  = $signed({2'b0, cur_q1}) - $signed({2'b0, cur_p1});
+    // Weak filter Stage 1: raw delta & endpoint averages
+    wire signed [11:0] q0_p0      = $signed({2'b0, cur_q0}) - $signed({2'b0, cur_p0});
+    wire signed [11:0] q1_p1      = $signed({2'b0, cur_q1}) - $signed({2'b0, cur_p1});
     wire signed [14:0] nine_diff  = $signed({{3{q0_p0[11]}}, q0_p0}) * 15'sd9;
     wire signed [14:0] three_diff = $signed({{3{q1_p1[11]}}, q1_p1}) * 15'sd3;
     wire signed [14:0] raw_delta  = (nine_diff - three_diff + 15'sd8) >>> 4;
 
     wire [14:0] abs_raw_delta = raw_delta[14] ? (~raw_delta + 15'd1) : raw_delta;
-    wire [13:0] tc10_v = ({4'b0, cur_tc} << 3) + ({4'b0, cur_tc} << 1);
-    wire delta_valid = (abs_raw_delta < {1'b0, tc10_v});
+    wire [13:0] tc10_v        = ({4'b0, cur_tc} << 3) + ({4'b0, cur_tc} << 1);
+    wire        delta_valid   = (abs_raw_delta < {1'b0, tc10_v});
 
     wire signed [11:0] tc_pos = $signed({2'b0, cur_tc});
     wire signed [11:0] tc_neg = -$signed({2'b0, cur_tc});
     wire signed [11:0] delta  = delta_valid ? clip3(tc_neg, tc_pos, raw_delta[11:0]) : 12'sd0;
 
-    wire do_p1 = delta_valid && b_do_p1_adj[rd_bank];
-    wire do_q1 = delta_valid && b_do_q1_adj[rd_bank];
+    wire signed [11:0] p2_p0_avg = ($signed({2'b0, cur_p2}) + $signed({2'b0, cur_p0}) + 12'sd1) >>> 1;
+    wire signed [11:0] q2_q0_avg = ($signed({2'b0, cur_q2}) + $signed({2'b0, cur_q0}) + 12'sd1) >>> 1;
 
-    wire signed [11:0] tc_half_pos = $signed({3'b0, cur_tc[9:1]});
-    wire signed [11:0] tc_half_neg = -$signed({3'b0, cur_tc[9:1]});
+    // Stage 1 Pipeline Registers
+    reg                       s1_valid;
+    reg [`PIXEL_WIDTH-1:0]    s1_p0, s1_p1, s1_p2;
+    reg [`PIXEL_WIDTH-1:0]    s1_q0, s1_q1, s1_q2;
+    reg [9:0]                 s1_tc;
+    reg                       s1_bs_nz;
+    reg                       s1_strong;
+    reg                       s1_weak;
+    reg                       s1_do_p1;
+    reg                       s1_do_q1;
+    reg signed [13:0]         s1_sp0_flt, s1_sp1_flt, s1_sp2_flt;
+    reg signed [13:0]         s1_sq0_flt, s1_sq1_flt, s1_sq2_flt;
+    reg signed [11:0]         s1_delta;
+    reg signed [11:0]         s1_p2_p0_avg;
+    reg signed [11:0]         s1_q2_q0_avg;
 
-    wire signed [11:0] p2_p0_avg  = ($signed({2'b0, cur_p2}) + $signed({2'b0, cur_p0}) + 12'sd1) >>> 1;
-    wire signed [12:0] deltap_raw = (p2_p0_avg - $signed({2'b0, cur_p1}) + delta) >>> 1;
+    // Stage 1 -> Stage 2: Clip & Filter Mode Selection
+    wire signed [13:0] s1_tc2_sel = $signed({4'b0, s1_tc}) << 1;
+
+    wire [`PIXEL_WIDTH-1:0] sp0 = clip_strong($signed({4'b0, s1_p0}), s1_sp0_flt, s1_tc2_sel);
+    wire [`PIXEL_WIDTH-1:0] sp1 = clip_strong($signed({4'b0, s1_p1}), s1_sp1_flt, s1_tc2_sel);
+    wire [`PIXEL_WIDTH-1:0] sp2 = clip_strong($signed({4'b0, s1_p2}), s1_sp2_flt, s1_tc2_sel);
+    wire [`PIXEL_WIDTH-1:0] sq0 = clip_strong($signed({4'b0, s1_q0}), s1_sq0_flt, s1_tc2_sel);
+    wire [`PIXEL_WIDTH-1:0] sq1 = clip_strong($signed({4'b0, s1_q1}), s1_sq1_flt, s1_tc2_sel);
+    wire [`PIXEL_WIDTH-1:0] sq2 = clip_strong($signed({4'b0, s1_q2}), s1_sq2_flt, s1_tc2_sel);
+
+    wire signed [11:0] tc_half_pos = $signed({3'b0, s1_tc[9:1]});
+    wire signed [11:0] tc_half_neg = -$signed({3'b0, s1_tc[9:1]});
+
+    wire signed [12:0] deltap_raw = (s1_p2_p0_avg - $signed({2'b0, s1_p1}) + s1_delta) >>> 1;
     wire signed [11:0] deltap     = clip3(tc_half_neg, tc_half_pos, deltap_raw[11:0]);
 
-    wire signed [11:0] q2_q0_avg  = ($signed({2'b0, cur_q2}) + $signed({2'b0, cur_q0}) + 12'sd1) >>> 1;
-    wire signed [12:0] deltaq_raw = (q2_q0_avg - $signed({2'b0, cur_q1}) - delta) >>> 1;
+    wire signed [12:0] deltaq_raw = (s1_q2_q0_avg - $signed({2'b0, s1_q1}) - s1_delta) >>> 1;
     wire signed [11:0] deltaq     = clip3(tc_half_neg, tc_half_pos, deltaq_raw[11:0]);
 
-    wire [`PIXEL_WIDTH-1:0] wp0 = clip1($signed({2'b0, cur_p0}) + delta);
-    wire [`PIXEL_WIDTH-1:0] wq0 = clip1($signed({2'b0, cur_q0}) - delta);
-    wire [`PIXEL_WIDTH-1:0] wp1 = do_p1 ? clip1($signed({2'b0, cur_p1}) + deltap) : cur_p1;
-    wire [`PIXEL_WIDTH-1:0] wq1 = do_q1 ? clip1($signed({2'b0, cur_q1}) + deltaq) : cur_q1;
+    wire [`PIXEL_WIDTH-1:0] wp0 = clip1($signed({2'b0, s1_p0}) + s1_delta);
+    wire [`PIXEL_WIDTH-1:0] wq0 = clip1($signed({2'b0, s1_q0}) - s1_delta);
+    wire [`PIXEL_WIDTH-1:0] wp1 = s1_do_p1 ? clip1($signed({2'b0, s1_p1}) + deltap) : s1_p1;
+    wire [`PIXEL_WIDTH-1:0] wq1 = s1_do_q1 ? clip1($signed({2'b0, s1_q1}) + deltaq) : s1_q1;
 
-    // Filtered selection
-    wire [`PIXEL_WIDTH-1:0] cur_p0f = (b_bs[rd_bank] == 2'd0)     ? cur_p0 :
-                                      b_use_strong[rd_bank]       ? sp0 :
-                                      b_use_weak[rd_bank]         ? wp0 : cur_p0;
-    wire [`PIXEL_WIDTH-1:0] cur_p1f = (b_bs[rd_bank] == 2'd0)     ? cur_p1 :
-                                      b_use_strong[rd_bank]       ? sp1 :
-                                      b_use_weak[rd_bank]         ? wp1 : cur_p1;
-    wire [`PIXEL_WIDTH-1:0] cur_p2f = (b_bs[rd_bank] == 2'd0)     ? cur_p2 :
-                                      b_use_strong[rd_bank]       ? sp2 : cur_p2;
+    wire [`PIXEL_WIDTH-1:0] s1_p0f = (!s1_bs_nz) ? s1_p0 : s1_strong ? sp0 : s1_weak ? wp0 : s1_p0;
+    wire [`PIXEL_WIDTH-1:0] s1_p1f = (!s1_bs_nz) ? s1_p1 : s1_strong ? sp1 : s1_weak ? wp1 : s1_p1;
+    wire [`PIXEL_WIDTH-1:0] s1_p2f = (!s1_bs_nz) ? s1_p2 : s1_strong ? sp2 : s1_p2;
 
-    wire [`PIXEL_WIDTH-1:0] cur_q0f = (b_bs[rd_bank] == 2'd0)     ? cur_q0 :
-                                      b_use_strong[rd_bank]       ? sq0 :
-                                      b_use_weak[rd_bank]         ? wq0 : cur_q0;
-    wire [`PIXEL_WIDTH-1:0] cur_q1f = (b_bs[rd_bank] == 2'd0)     ? cur_q1 :
-                                      b_use_strong[rd_bank]       ? sq1 :
-                                      b_use_weak[rd_bank]         ? wq1 : cur_q1;
-    wire [`PIXEL_WIDTH-1:0] cur_q2f = (b_bs[rd_bank] == 2'd0)     ? cur_q2 :
-                                      b_use_strong[rd_bank]       ? sq2 : cur_q2;
+    wire [`PIXEL_WIDTH-1:0] s1_q0f = (!s1_bs_nz) ? s1_q0 : s1_strong ? sq0 : s1_weak ? wq0 : s1_q0;
+    wire [`PIXEL_WIDTH-1:0] s1_q1f = (!s1_bs_nz) ? s1_q1 : s1_strong ? sq1 : s1_weak ? wq1 : s1_q1;
+    wire [`PIXEL_WIDTH-1:0] s1_q2f = (!s1_bs_nz) ? s1_q2 : s1_strong ? sq2 : s1_q2;
 
-    wire cur_mod_p = (b_bs[rd_bank] != 2'd0) && (b_use_strong[rd_bank] || b_use_weak[rd_bank]);
-    wire cur_mod_q = (b_bs[rd_bank] != 2'd0) && (b_use_strong[rd_bank] || b_use_weak[rd_bank]);
+    wire s1_mod = s1_bs_nz && (s1_strong || s1_weak);
+
+    // Stage 2 Registered Outputs
+    reg [`PIXEL_WIDTH-1:0] p0_f_r, p1_f_r, p2_f_r;
+    reg [`PIXEL_WIDTH-1:0] q0_f_r, q1_f_r, q2_f_r;
+    reg                    modified_p_r, modified_q_r;
 
     // Handshake helper wires
     wire in_fire  = in_valid && in_ready;
-    wire out_fire = out_valid && out_ready;
+    wire s2_ready = !out_valid || out_ready;
+    wire s1_ready = !s1_valid  || s2_ready;
+    wire s0_valid = b_ready[rd_bank];
+    wire s0_fire  = s0_valid && s1_ready;
 
-    // Check if read bank has data ready to output
-    wire rd_bank_has_data = b_ready[rd_bank] || (in_fire && (wr_idx == 2'd3) && (wr_bank == rd_bank));
-
-    assign p0_f       = cur_p0f;
-    assign p1_f       = cur_p1f;
-    assign p2_f       = cur_p2f;
-    assign q0_f       = cur_q0f;
-    assign q1_f       = cur_q1f;
-    assign q2_f       = cur_q2f;
-    assign modified_p = cur_mod_p;
-    assign modified_q = cur_mod_q;
+    assign p0_f       = p0_f_r;
+    assign p1_f       = p1_f_r;
+    assign p2_f       = p2_f_r;
+    assign q0_f       = q0_f_r;
+    assign q1_f       = q1_f_r;
+    assign q2_f       = q2_f_r;
+    assign modified_p = modified_p_r;
+    assign modified_q = modified_q_r;
 
     //-------------------------------------------------------------------------
     // Main Sequential Process
@@ -327,7 +333,37 @@ module db_filter_luma (
             rd_idx       <= 2'd0;
             b_ready[0]   <= 1'b0;
             b_ready[1]   <= 1'b0;
+            s1_valid     <= 1'b0;
+            s1_p0        <= {`PIXEL_WIDTH{1'b0}};
+            s1_p1        <= {`PIXEL_WIDTH{1'b0}};
+            s1_p2        <= {`PIXEL_WIDTH{1'b0}};
+            s1_q0        <= {`PIXEL_WIDTH{1'b0}};
+            s1_q1        <= {`PIXEL_WIDTH{1'b0}};
+            s1_q2        <= {`PIXEL_WIDTH{1'b0}};
+            s1_tc        <= 10'd0;
+            s1_bs_nz     <= 1'b0;
+            s1_strong    <= 1'b0;
+            s1_weak      <= 1'b0;
+            s1_do_p1     <= 1'b0;
+            s1_do_q1     <= 1'b0;
+            s1_sp0_flt   <= 14'sd0;
+            s1_sp1_flt   <= 14'sd0;
+            s1_sp2_flt   <= 14'sd0;
+            s1_sq0_flt   <= 14'sd0;
+            s1_sq1_flt   <= 14'sd0;
+            s1_sq2_flt   <= 14'sd0;
+            s1_delta     <= 12'sd0;
+            s1_p2_p0_avg <= 12'sd0;
+            s1_q2_q0_avg <= 12'sd0;
             out_valid    <= 1'b0;
+            p0_f_r       <= {`PIXEL_WIDTH{1'b0}};
+            p1_f_r       <= {`PIXEL_WIDTH{1'b0}};
+            p2_f_r       <= {`PIXEL_WIDTH{1'b0}};
+            q0_f_r       <= {`PIXEL_WIDTH{1'b0}};
+            q1_f_r       <= {`PIXEL_WIDTH{1'b0}};
+            q2_f_r       <= {`PIXEL_WIDTH{1'b0}};
+            modified_p_r <= 1'b0;
+            modified_q_r <= 1'b0;
         end else begin
             // -----------------------------------------------------------------
             // Input / Write Side
@@ -367,27 +403,57 @@ module db_filter_luma (
             end
 
             // -----------------------------------------------------------------
-            // Output / Read Side
+            // Output / Read Pipeline (Stage 0 -> Stage 1 -> Stage 2)
             // -----------------------------------------------------------------
-            if (out_fire) begin
+            if (s1_ready) begin
+                s1_valid <= s0_valid;
+                if (s0_valid) begin
+                    s1_p0        <= cur_p0;
+                    s1_p1        <= cur_p1;
+                    s1_p2        <= cur_p2;
+                    s1_q0        <= cur_q0;
+                    s1_q1        <= cur_q1;
+                    s1_q2        <= cur_q2;
+                    s1_tc        <= cur_tc;
+                    s1_bs_nz     <= (b_bs[rd_bank] != 2'd0);
+                    s1_strong    <= b_use_strong[rd_bank];
+                    s1_weak      <= b_use_weak[rd_bank];
+                    s1_do_p1     <= delta_valid && b_do_p1_adj[rd_bank];
+                    s1_do_q1     <= delta_valid && b_do_q1_adj[rd_bank];
+                    s1_sp0_flt   <= sp0_flt;
+                    s1_sp1_flt   <= sp1_flt;
+                    s1_sp2_flt   <= sp2_flt;
+                    s1_sq0_flt   <= sq0_flt;
+                    s1_sq1_flt   <= sq1_flt;
+                    s1_sq2_flt   <= sq2_flt;
+                    s1_delta     <= delta;
+                    s1_p2_p0_avg <= p2_p0_avg;
+                    s1_q2_q0_avg <= q2_q0_avg;
+                end
+            end
+
+            if (s0_fire) begin
                 if (rd_idx < 2'd3) begin
                     rd_idx <= rd_idx + 2'd1;
-                    // out_valid remains 1
                 end else begin
-                    // Finished reading current bank
                     b_ready[rd_bank] <= 1'b0;
                     rd_bank          <= ~rd_bank;
                     rd_idx           <= 2'd0;
-                    // Check if other bank has data ready
-                    if (b_ready[~rd_bank] || (in_fire && (wr_idx == 2'd3) && (wr_bank == ~rd_bank))) begin
-                        out_valid <= 1'b1;
-                    end else begin
-                        out_valid <= 1'b0;
-                    end
                 end
-            end else if (!out_valid && rd_bank_has_data) begin
-                out_valid <= 1'b1;
-                rd_idx    <= 2'd0;
+            end
+
+            if (s2_ready) begin
+                out_valid <= s1_valid;
+                if (s1_valid) begin
+                    p0_f_r       <= s1_p0f;
+                    p1_f_r       <= s1_p1f;
+                    p2_f_r       <= s1_p2f;
+                    q0_f_r       <= s1_q0f;
+                    q1_f_r       <= s1_q1f;
+                    q2_f_r       <= s1_q2f;
+                    modified_p_r <= s1_mod;
+                    modified_q_r <= s1_mod;
+                end
             end
         end
     end

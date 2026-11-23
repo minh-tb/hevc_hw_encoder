@@ -19,7 +19,7 @@ module coeff_buffer #(
     output reg  [DATA_W-1:0] rdata
 );
 
-    reg [DATA_W-1:0] mem [0:DEPTH-1];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [DATA_W-1:0] mem [0:DEPTH-1];
 `ifndef SYNTHESIS
     integer cb_i;
     initial begin

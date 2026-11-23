@@ -53,12 +53,12 @@ module decoder_inloop_filters (
     input  wire         map_update_bi_pred,
 
     // Output to DPB (Frame Store)
-    output reg          out_valid,
+    output wire         out_valid,
     input  wire         out_ready,    // backpressure from frame_store
-    output reg  [9:0]   out_pixel,
-    output reg  [1:0]   out_comp,
-    output reg  [11:0]  out_abs_x,
-    output reg  [11:0]  out_abs_y,
+    output wire [9:0]   out_pixel,
+    output wire [1:0]   out_comp,
+    output wire [11:0]  out_abs_x,
+    output wire [11:0]  out_abs_y,
 
     // SAO parameters output (for CABAC encoding)
     output wire [5:0]   out_sao_type,
@@ -193,8 +193,36 @@ module decoder_inloop_filters (
     reg [12:0] dump_count_q;
     wire [12:0] dump_count = dump_count_q;
     reg        dump_valid_q;
+    reg        dump_wait_drain;
     reg [`CTU_COORD_WIDTH-1:0] cur_ctu_x, cur_ctu_y;
     reg [`CTU_COORD_WIDTH-1:0] dump_ctu_x_q, dump_ctu_y_q;
+
+    // 2-slot registered output skid buffer (decouples db/SAO/dump combinational timing)
+    reg        pre_out_valid;
+    reg [9:0]  pre_out_pixel;
+    reg [1:0]  pre_out_comp;
+    reg [11:0] pre_out_abs_x;
+    reg [11:0] pre_out_abs_y;
+
+    reg        out_valid_r;
+    reg [9:0]  out_pixel_r;
+    reg [1:0]  out_comp_r;
+    reg [11:0] out_abs_x_r;
+    reg [11:0] out_abs_y_r;
+
+    reg        skid_valid_r;
+    reg [9:0]  skid_pixel_r;
+    reg [1:0]  skid_comp_r;
+    reg [11:0] skid_abs_x_r;
+    reg [11:0] skid_abs_y_r;
+
+    wire       pre_out_ready = !skid_valid_r;
+
+    assign out_valid = out_valid_r;
+    assign out_pixel = out_pixel_r;
+    assign out_comp  = out_comp_r;
+    assign out_abs_x = out_abs_x_r;
+    assign out_abs_y = out_abs_y_r;
 
     wire ctu_recon_done = in_valid && (pixel_count == 13'd6143);
 
@@ -433,7 +461,7 @@ module decoder_inloop_filters (
     wire        db_pix_wr_neighbor;
     wire        db_pix_wr_is_vert;
     wire        db_pix_wr_corner;
-    wire        db_pix_wr_ready = db_pix_wr_neighbor ? out_ready : 1'b1;
+    wire        db_pix_wr_ready = db_pix_wr_neighbor ? pre_out_ready : 1'b1;
 
     deblock_top u_deblock (
         .clk(clk), .rst_n(rst_n),
@@ -727,7 +755,7 @@ module decoder_inloop_filters (
     reg       sao_n0_oob_q;
     reg       sao_n1_oob_q;
 
-    wire dump_stall = (filter_state == S_DUMP) && dump_valid_q && !out_ready;
+    wire dump_stall = (filter_state == S_DUMP) && dump_valid_q && !pre_out_ready;
 
     // Synchronous reads for main pixel, SAO neighbors, and original pixels
     always @(posedge clk) begin
@@ -881,13 +909,13 @@ module decoder_inloop_filters (
             dump_ctu_y_q <= 0;
         end else begin
             if (filter_state == S_DUMP) begin
-                if (!dump_valid_q) begin
+                if (!dump_valid_q && !dump_wait_drain) begin
                     dump_valid_q <= 1'b1;
                     dump_count_q <= 13'd0;
                     dump_rd_addr <= 13'd1;
                     dump_ctu_x_q <= cur_ctu_x;
                     dump_ctu_y_q <= cur_ctu_y;
-                end else if (out_ready) begin
+                end else if (dump_valid_q && pre_out_ready) begin
                     if (dump_count_q == 13'd6143) begin
                         dump_valid_q <= 1'b0;
                         dump_rd_addr <= 13'd0;
@@ -1079,12 +1107,27 @@ module decoder_inloop_filters (
     wire [59:0] dump_eff_bo_off   = sao_enable ? out_bo_offset : 60'd0;
 
     //=========================================================================
-    // Main FSM
+    // Main FSM & 2-Slot Output Skid Buffer
     //=========================================================================
+    wire dump_last_drained = (!out_valid_r && !skid_valid_r) || (out_valid_r && out_ready && !skid_valid_r);
+    wire pre_out_push      = pre_out_valid && pre_out_ready;
+    wire out_pop           = out_valid_r && out_ready;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             filter_state           <= S_FILL;
             pixel_count            <= 13'd0;
+            dump_wait_drain        <= 1'b0;
+            out_valid_r            <= 1'b0;
+            out_pixel_r            <= 10'd0;
+            out_comp_r             <= 2'd0;
+            out_abs_x_r            <= 12'd0;
+            out_abs_y_r            <= 12'd0;
+            skid_valid_r           <= 1'b0;
+            skid_pixel_r           <= 10'd0;
+            skid_comp_r            <= 2'd0;
+            skid_abs_x_r           <= 12'd0;
+            skid_abs_y_r           <= 12'd0;
             cur_ctu_x              <= 0;
             cur_ctu_y              <= 0;
             left_sao_type          <= 6'd0;
@@ -1099,6 +1142,40 @@ module decoder_inloop_filters (
                 top_sao_bo_offset[sao_lat_i] <= 60'd0;
             end
         end else begin
+            // 2-slot output skid buffer (breaks combinational forward & backpressure paths)
+            if (!out_valid_r) begin
+                if (pre_out_push) begin
+                    out_valid_r <= 1'b1;
+                    out_pixel_r <= pre_out_pixel;
+                    out_comp_r  <= pre_out_comp;
+                    out_abs_x_r <= pre_out_abs_x;
+                    out_abs_y_r <= pre_out_abs_y;
+                end
+            end else if (out_pop) begin
+                if (skid_valid_r) begin
+                    out_valid_r  <= 1'b1;
+                    out_pixel_r  <= skid_pixel_r;
+                    out_comp_r   <= skid_comp_r;
+                    out_abs_x_r  <= skid_abs_x_r;
+                    out_abs_y_r  <= skid_abs_y_r;
+                    skid_valid_r <= 1'b0;
+                end else if (pre_out_push) begin
+                    out_valid_r <= 1'b1;
+                    out_pixel_r <= pre_out_pixel;
+                    out_comp_r  <= pre_out_comp;
+                    out_abs_x_r <= pre_out_abs_x;
+                    out_abs_y_r <= pre_out_abs_y;
+                end else begin
+                    out_valid_r <= 1'b0;
+                end
+            end else if (pre_out_push) begin
+                skid_valid_r <= 1'b1;
+                skid_pixel_r <= pre_out_pixel;
+                skid_comp_r  <= pre_out_comp;
+                skid_abs_x_r <= pre_out_abs_x;
+                skid_abs_y_r <= pre_out_abs_y;
+            end
+
             case (filter_state)
                 S_FILL: begin
                     if (in_valid) begin
@@ -1139,7 +1216,12 @@ module decoder_inloop_filters (
                     filter_state <= S_DUMP;
                 end
                 S_DUMP: begin
-                    if (out_ready && dump_valid_q && (dump_count_q == 13'd6143)) begin
+                    if (!dump_wait_drain) begin
+                        if (pre_out_ready && dump_valid_q && (dump_count_q == 13'd6143)) begin
+                            dump_wait_drain <= 1'b1;
+                        end
+                    end else if (dump_last_drained) begin
+                        dump_wait_drain              <= 1'b0;
                         filter_state                 <= S_FILL;
                         top_sao_type[cur_ctu_x]      <= dump_eff_sao_type;
                         top_sao_band_pos[cur_ctu_x]  <= dump_eff_band_pos;
@@ -1240,27 +1322,27 @@ module decoder_inloop_filters (
     end
 
     always @(*) begin
-        out_valid = 1'b0;
-        out_comp  = 2'd0;
-        out_pixel = 10'd0;
-        out_abs_x = 12'd0;
-        out_abs_y = 12'd0;
+        pre_out_valid = 1'b0;
+        pre_out_comp  = 2'd0;
+        pre_out_pixel = 10'd0;
+        pre_out_abs_x = 12'd0;
+        pre_out_abs_y = 12'd0;
 
         if (filter_state == S_DB && db_pix_wr_valid && db_pix_wr_neighbor) begin
-            out_valid = 1'b1;
-            out_comp  = db_pix_wr_comp;
-            out_pixel = db_nbr_sao_pixel;
-            out_abs_x = db_nbr_abs_x;
-            out_abs_y = db_nbr_abs_y;
+            pre_out_valid = 1'b1;
+            pre_out_comp  = db_pix_wr_comp;
+            pre_out_pixel = db_nbr_sao_pixel;
+            pre_out_abs_x = db_nbr_abs_x;
+            pre_out_abs_y = db_nbr_abs_y;
         end else if (dump_valid_q) begin
-            out_valid = 1'b1;
-            out_comp  = dump_pixel_comp;
-            out_pixel = dump_pixel_val;
-            out_abs_x = dump_pixel_abs_x;
-            out_abs_y = dump_pixel_abs_y;
+            pre_out_valid = 1'b1;
+            pre_out_comp  = dump_pixel_comp;
+            pre_out_pixel = dump_pixel_val;
+            pre_out_abs_x = dump_pixel_abs_x;
+            pre_out_abs_y = dump_pixel_abs_y;
         end else if (filter_state == S_DUMP) begin
-            out_abs_x = ({12'd0, cur_ctu_x} << 6);
-            out_abs_y = ({12'd0, cur_ctu_y} << 6);
+            pre_out_abs_x = ({12'd0, cur_ctu_x} << 6);
+            pre_out_abs_y = ({12'd0, cur_ctu_y} << 6);
         end
     end
 
@@ -1269,7 +1351,7 @@ module decoder_inloop_filters (
             inloop_ctu_done <= 1'b0;
         end else begin
             inloop_ctu_done <= 1'b0;
-            if (dump_valid_q && (dump_count_q == 13'd6143) && out_ready) begin
+            if ((filter_state == S_DUMP) && dump_wait_drain && dump_last_drained) begin
                 inloop_ctu_done <= 1'b1;
             end
         end

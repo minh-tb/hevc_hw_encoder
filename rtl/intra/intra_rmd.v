@@ -77,8 +77,9 @@ module intra_rmd (
     end
 `endif
 
-    // Iteration & pipeline registers (2-stage q1->q2 matches 1-cycle synchronous BRAM latency)
-    wire [7:0] N = 8'd1 << pu_size_log2;  // 8-bit to avoid overflow (N<<1 = 64 for log2=5)
+    // Iteration & pipeline registers (q1->q2 matches BRAM read latency; q2->q3 pipelines Chroma SAD)
+    reg [2:0] lat_pu_size_log2;
+    wire [7:0] N = 8'd1 << lat_pu_size_log2;  // 8-bit to avoid overflow (N<<1 = 64 for log2=5)
     wire [7:0] N_C = N >> 1;
 
     reg        req_active;
@@ -88,15 +89,20 @@ module intra_rmd (
     reg [2:0]  tile_x, tile_y;
     wire [3:0] tile_max_w = N[5:2] - 4'd1;
     wire [2:0] tile_max = tile_max_w[2:0];
-    wire [6:0] total_tiles = (pu_size_log2 == 3'd2) ? 7'd1 :
-                             (pu_size_log2 == 3'd3) ? 7'd4 :
-                             (pu_size_log2 == 3'd4) ? 7'd16 : 7'd64;
+    wire [6:0] total_tiles = (lat_pu_size_log2 == 3'd2) ? 7'd1 :
+                             (lat_pu_size_log2 == 3'd3) ? 7'd4 :
+                             (lat_pu_size_log2 == 3'd4) ? 7'd16 : 7'd64;
     wire [5:0] cx = {1'b0, tile_x, sub_x};
     wire [5:0] cy = {1'b0, tile_y, sub_y};
 
     reg [5:0]  cx_q1, cy_q1, cx_q2, cy_q2;
     reg        eval_q1, eval_q2;
-    reg        eval_c_q1, eval_c_q2;
+    reg        eval_c_q1, eval_c_q2, eval_c_q3;
+
+    // Corner reference samples captured during S_LOAD_REF for planar weighting
+    reg [`PIXEL_WIDTH-1:0] refT_N_r, refL_N_r;
+    reg [`PIXEL_WIDTH-1:0] refT_N_u_r, refL_N_u_r;
+    reg [`PIXEL_WIDTH-1:0] refT_N_v_r, refL_N_v_r;
 
     // Accumulators
     reg [31:0] satd_acc_p, satd_acc_d, satd_acc_h, satd_acc_v;
@@ -139,79 +145,88 @@ module intra_rmd (
         end
     end
     
-    // Divide by 2N with rounding -> (dc_sum + N) >> (pu_size_log2 + 1)
-    wire [15:0] dc_val = (dc_sum + {8'd0, N}) >> (pu_size_log2 + 1);
+    // Divide by 2N with rounding -> (dc_sum + N) >> (lat_pu_size_log2 + 1)
+    wire [15:0] dc_val = (dc_sum + {8'd0, N}) >> (lat_pu_size_log2 + 3'd1);
     wire [`PIXEL_WIDTH-1:0] pred_dc = dc_val[`PIXEL_WIDTH-1:0];
 
-    // Chroma DC: 2*N_C = N samples, rounded divide by N: (dc_sum + N_C) >> pu_size_log2
-    wire [15:0] dc_val_u = (dc_sum_u + {8'd0, N_C}) >> pu_size_log2;
-    wire [15:0] dc_val_v = (dc_sum_v + {8'd0, N_C}) >> pu_size_log2;
+    // Chroma DC: 2*N_C = N samples, rounded divide by N: (dc_sum + N_C) >> lat_pu_size_log2
+    wire [15:0] dc_val_u = (dc_sum_u + {8'd0, N_C}) >> lat_pu_size_log2;
+    wire [15:0] dc_val_v = (dc_sum_v + {8'd0, N_C}) >> lat_pu_size_log2;
     wire [`PIXEL_WIDTH-1:0] pred_dc_u = dc_val_u[`PIXEL_WIDTH-1:0];
     wire [`PIXEL_WIDTH-1:0] pred_dc_v = dc_val_v[`PIXEL_WIDTH-1:0];
 
-    // Horizontal Prediction
-    wire [7:0] idx_left = (N << 1) + 8'd1 + {2'd0, cy_q2};
-    wire [`PIXEL_WIDTH-1:0] pred_hor = ref_buf[idx_left];
+    //-------------------------------------------------------------------------
+    // Stage q1 -> q2: Pre-compute Reference Lookups & Two-Term Planar Partial Sums
+    // (runs in parallel with 1-cycle external BRAM orig_rd_data fetch)
+    //-------------------------------------------------------------------------
+    wire [7:0] idx_left_q1   = (N << 1) + 8'd1 + {2'd0, cy_q1};
+    wire [7:0] idx_top_q1    = 8'd1 + {2'd0, cx_q1};
+    wire [7:0] idx_left_c_q1 = N + 8'd1 + {3'd0, cy_q1[4:0]};
+    wire [7:0] idx_top_c_q1  = 8'd1 + {3'd0, cx_q1[4:0]};
+    wire [6:0] idx_34_q1     = {2'd0, cx_q1[4:0]} + {2'd0, cy_q1[4:0]} + 7'd2;
 
-    // Chroma Horizontal Prediction (mode 10)
-    wire [7:0] idx_left_c = N + 8'd1 + {3'd0, cy_q2[4:0]};
-    wire [`PIXEL_WIDTH-1:0] pred_hor_u = ref_buf_u[idx_left_c[6:0]];
-    wire [`PIXEL_WIDTH-1:0] pred_hor_v = ref_buf_v[idx_left_c[6:0]];
+    wire [`PIXEL_WIDTH-1:0] refL_y_q1     = ref_buf[idx_left_q1];
+    wire [`PIXEL_WIDTH-1:0] refT_x_q1     = ref_buf[idx_top_q1];
+    wire [`PIXEL_WIDTH-1:0] pred_hor_u_q1 = ref_buf_u[idx_left_c_q1[6:0]];
+    wire [`PIXEL_WIDTH-1:0] pred_ver_u_q1 = ref_buf_u[idx_top_c_q1[6:0]];
+    wire [`PIXEL_WIDTH-1:0] pred_34_u_q1  = ref_buf_u[idx_34_q1];
+    wire [`PIXEL_WIDTH-1:0] pred_hor_v_q1 = ref_buf_v[idx_left_c_q1[6:0]];
+    wire [`PIXEL_WIDTH-1:0] pred_ver_v_q1 = ref_buf_v[idx_top_c_q1[6:0]];
+    wire [`PIXEL_WIDTH-1:0] pred_34_v_q1  = ref_buf_v[idx_34_q1];
 
-    // Vertical Prediction
-    wire [7:0] idx_top = 8'd1 + {2'd0, cx_q2};
-    wire [`PIXEL_WIDTH-1:0] pred_ver = ref_buf[idx_top];
+    wire [5:0] wt_L   = N[5:0] - 6'd1 - cx_q1;
+    wire [5:0] wt_R   = cx_q1 + 6'd1;
+    wire [5:0] wt_T   = N[5:0] - 6'd1 - cy_q1;
+    wire [5:0] wt_B   = cy_q1 + 6'd1;
 
-    // Chroma Vertical Prediction (mode 26)
-    wire [7:0] idx_top_c = 8'd1 + {3'd0, cx_q2[4:0]};
-    wire [`PIXEL_WIDTH-1:0] pred_ver_u = ref_buf_u[idx_top_c[6:0]];
-    wire [`PIXEL_WIDTH-1:0] pred_ver_v = ref_buf_v[idx_top_c[6:0]];
+    wire [5:0] wt_L_c = N_C[5:0] - 6'd1 - {1'b0, cx_q1[4:0]};
+    wire [5:0] wt_R_c = {1'b0, cx_q1[4:0]} + 6'd1;
+    wire [5:0] wt_T_c = N_C[5:0] - 6'd1 - {1'b0, cy_q1[4:0]};
+    wire [5:0] wt_B_c = {1'b0, cy_q1[4:0]} + 6'd1;
 
-    // Planar Prediction
-    wire [`PIXEL_WIDTH-1:0] refL_y = ref_buf[idx_left];
-    wire [`PIXEL_WIDTH-1:0] refT_x = ref_buf[idx_top];
-    wire [7:0] idx_refT_N = 8'd1 + N[7:0];            // Top-right corner = ref_buf[1+N]
-    wire [7:0] idx_refL_N = (N << 1) + 8'd1 + N[7:0];  // Bottom-left corner = ref_buf[2N+1+N]
-    wire [`PIXEL_WIDTH-1:0] refT_N = ref_buf[idx_refT_N];
-    wire [`PIXEL_WIDTH-1:0] refL_N = ref_buf[idx_refL_N];
+    wire [16:0] wL_q1   = {11'd0, wt_L}   * {7'd0, refL_y_q1};
+    wire [16:0] wR_q1   = {11'd0, wt_R}   * {7'd0, refT_N_r};
+    wire [16:0] wT_q1   = {11'd0, wt_T}   * {7'd0, refT_x_q1};
+    wire [16:0] wB_q1   = {11'd0, wt_B}   * {7'd0, refL_N_r};
 
-    // Chroma Planar Prediction (mode 0)
-    wire [7:0] idx_refT_Nc = 8'd1 + N_C;
-    wire [7:0] idx_refL_Nc = N + 8'd1 + N_C;
-    wire [`PIXEL_WIDTH-1:0] refT_N_u = ref_buf_u[idx_refT_Nc[6:0]];
-    wire [`PIXEL_WIDTH-1:0] refL_N_u = ref_buf_u[idx_refL_Nc[6:0]];
-    wire [`PIXEL_WIDTH-1:0] refT_N_v = ref_buf_v[idx_refT_Nc[6:0]];
-    wire [`PIXEL_WIDTH-1:0] refL_N_v = ref_buf_v[idx_refL_Nc[6:0]];
+    wire [16:0] wL_u_q1 = {11'd0, wt_L_c} * {7'd0, pred_hor_u_q1};
+    wire [16:0] wR_u_q1 = {11'd0, wt_R_c} * {7'd0, refT_N_u_r};
+    wire [16:0] wT_u_q1 = {11'd0, wt_T_c} * {7'd0, pred_ver_u_q1};
+    wire [16:0] wB_u_q1 = {11'd0, wt_B_c} * {7'd0, refL_N_u_r};
 
-    wire [17:0] wL_u = (N_C - 8'd1 - {3'd0, cx_q2[4:0]}) * pred_hor_u;
-    wire [17:0] wR_u = ({3'd0, cx_q2[4:0]} + 8'd1) * refT_N_u;
-    wire [17:0] wT_u = (N_C - 8'd1 - {3'd0, cy_q2[4:0]}) * pred_ver_u;
-    wire [17:0] wB_u = ({3'd0, cy_q2[4:0]} + 8'd1) * refL_N_u;
-    wire [17:0] planar_sum_u = wL_u + wR_u + wT_u + wB_u + {10'd0, N_C};
-    wire [17:0] raw_pred_planar_u = planar_sum_u >> pu_size_log2;
+    wire [16:0] wL_v_q1 = {11'd0, wt_L_c} * {7'd0, pred_hor_v_q1};
+    wire [16:0] wR_v_q1 = {11'd0, wt_R_c} * {7'd0, refT_N_v_r};
+    wire [16:0] wT_v_q1 = {11'd0, wt_T_c} * {7'd0, pred_ver_v_q1};
+    wire [16:0] wB_v_q1 = {11'd0, wt_B_c} * {7'd0, refL_N_v_r};
+
+    // Stage q2 registered predictor terms
+    reg [16:0]              planar_h_q2, planar_v_q2;
+    reg [`PIXEL_WIDTH-1:0]  pred_hor_q2, pred_ver_q2;
+    reg [16:0]              planar_hu_q2, planar_vu_q2;
+    reg [16:0]              planar_hv_q2, planar_vv_q2;
+    reg [`PIXEL_WIDTH-1:0]  pred_hor_u_q2, pred_ver_u_q2, pred_34_u_q2;
+    reg [`PIXEL_WIDTH-1:0]  pred_hor_v_q2, pred_ver_v_q2, pred_34_v_q2;
+
+    wire [`PIXEL_WIDTH-1:0] pred_hor   = pred_hor_q2;
+    wire [`PIXEL_WIDTH-1:0] pred_ver   = pred_ver_q2;
+    wire [`PIXEL_WIDTH-1:0] pred_hor_u = pred_hor_u_q2;
+    wire [`PIXEL_WIDTH-1:0] pred_ver_u = pred_ver_u_q2;
+    wire [`PIXEL_WIDTH-1:0] pred_34_u  = pred_34_u_q2;
+    wire [`PIXEL_WIDTH-1:0] pred_hor_v = pred_hor_v_q2;
+    wire [`PIXEL_WIDTH-1:0] pred_ver_v = pred_ver_v_q2;
+    wire [`PIXEL_WIDTH-1:0] pred_34_v  = pred_34_v_q2;
+
+    wire [17:0] planar_sum        = {1'b0, planar_h_q2} + {1'b0, planar_v_q2} + {10'd0, N};
+    wire [17:0] raw_pred_planar   = planar_sum >> (lat_pu_size_log2 + 3'd1);
+    wire [`PIXEL_WIDTH-1:0] pred_planar = (raw_pred_planar > 18'd1023) ? 10'd1023 : raw_pred_planar[`PIXEL_WIDTH-1:0];
+
+    wire [17:0] planar_sum_u      = {1'b0, planar_hu_q2} + {1'b0, planar_vu_q2} + {10'd0, N_C};
+    wire [17:0] raw_pred_planar_u = planar_sum_u >> lat_pu_size_log2;
     wire [`PIXEL_WIDTH-1:0] pred_planar_u = (raw_pred_planar_u > 18'd1023) ? 10'd1023 : raw_pred_planar_u[`PIXEL_WIDTH-1:0];
 
-    wire [17:0] wL_v = (N_C - 8'd1 - {3'd0, cx_q2[4:0]}) * pred_hor_v;
-    wire [17:0] wR_v = ({3'd0, cx_q2[4:0]} + 8'd1) * refT_N_v;
-    wire [17:0] wT_v = (N_C - 8'd1 - {3'd0, cy_q2[4:0]}) * pred_ver_v;
-    wire [17:0] wB_v = ({3'd0, cy_q2[4:0]} + 8'd1) * refL_N_v;
-    wire [17:0] planar_sum_v = wL_v + wR_v + wT_v + wB_v + {10'd0, N_C};
-    wire [17:0] raw_pred_planar_v = planar_sum_v >> pu_size_log2;
+    wire [17:0] planar_sum_v      = {1'b0, planar_hv_q2} + {1'b0, planar_vv_q2} + {10'd0, N_C};
+    wire [17:0] raw_pred_planar_v = planar_sum_v >> lat_pu_size_log2;
     wire [`PIXEL_WIDTH-1:0] pred_planar_v = (raw_pred_planar_v > 18'd1023) ? 10'd1023 : raw_pred_planar_v[`PIXEL_WIDTH-1:0];
-
-    // Chroma Diagonal 34 Prediction (mode 34: ref_top[x + y + 2])
-    wire [6:0] idx_34 = {2'd0, cx_q2[4:0]} + {2'd0, cy_q2[4:0]} + 7'd2;
-    wire [`PIXEL_WIDTH-1:0] pred_34_u = ref_buf_u[idx_34];
-    wire [`PIXEL_WIDTH-1:0] pred_34_v = ref_buf_v[idx_34];
-    
-    wire [17:0] wL = (N[7:0] - 8'd1 - {2'd0, cx_q2}) * refL_y;
-    wire [17:0] wR = ({2'd0, cx_q2} + 8'd1) * refT_N;
-    wire [17:0] wT = (N[7:0] - 8'd1 - {2'd0, cy_q2}) * refT_x;
-    wire [17:0] wB = ({2'd0, cy_q2} + 8'd1) * refL_N;
-    
-    wire [17:0] planar_sum = wL + wR + wT + wB + {10'd0, N};
-    wire [17:0] raw_pred_planar = planar_sum >> (pu_size_log2 + 1);
-    wire [`PIXEL_WIDTH-1:0] pred_planar = (raw_pred_planar > 18'd1023) ? 10'd1023 : raw_pred_planar[`PIXEL_WIDTH-1:0];
 
     // Double-buffered 4x4 residual tile banks (User Safeguard #2):
     // wr_bank receives S_EVAL writes while rd_bank holds completed tile steady for u_had_*
@@ -282,18 +297,21 @@ module intra_rmd (
         .done(had_done_v), .satd_out(satd_v)
     );
 
-    // Chroma Absolute Differences
-    wire [31:0] ad_u_planar = (orig_u_rd_data > pred_planar_u) ? (orig_u_rd_data - pred_planar_u) : (pred_planar_u - orig_u_rd_data);
-    wire [31:0] ad_u_dc     = (orig_u_rd_data > pred_dc_u)     ? (orig_u_rd_data - pred_dc_u)     : (pred_dc_u - orig_u_rd_data);
-    wire [31:0] ad_u_hor    = (orig_u_rd_data > pred_hor_u)    ? (orig_u_rd_data - pred_hor_u)    : (pred_hor_u - orig_u_rd_data);
-    wire [31:0] ad_u_ver    = (orig_u_rd_data > pred_ver_u)    ? (orig_u_rd_data - pred_ver_u)    : (pred_ver_u - orig_u_rd_data);
-    wire [31:0] ad_u_34     = (orig_u_rd_data > pred_34_u)     ? (orig_u_rd_data - pred_34_u)     : (pred_34_u - orig_u_rd_data);
+    // Chroma Absolute Differences (10-bit unsigned, Stage q2 -> q3)
+    wire [9:0] ad_u_planar = (orig_u_rd_data > pred_planar_u) ? (orig_u_rd_data - pred_planar_u) : (pred_planar_u - orig_u_rd_data);
+    wire [9:0] ad_u_dc     = (orig_u_rd_data > pred_dc_u)     ? (orig_u_rd_data - pred_dc_u)     : (pred_dc_u - orig_u_rd_data);
+    wire [9:0] ad_u_hor    = (orig_u_rd_data > pred_hor_u)    ? (orig_u_rd_data - pred_hor_u)    : (pred_hor_u - orig_u_rd_data);
+    wire [9:0] ad_u_ver    = (orig_u_rd_data > pred_ver_u)    ? (orig_u_rd_data - pred_ver_u)    : (pred_ver_u - orig_u_rd_data);
+    wire [9:0] ad_u_34     = (orig_u_rd_data > pred_34_u)     ? (orig_u_rd_data - pred_34_u)     : (pred_34_u - orig_u_rd_data);
 
-    wire [31:0] ad_v_planar = (orig_v_rd_data > pred_planar_v) ? (orig_v_rd_data - pred_planar_v) : (pred_planar_v - orig_v_rd_data);
-    wire [31:0] ad_v_dc     = (orig_v_rd_data > pred_dc_v)     ? (orig_v_rd_data - pred_dc_v)     : (pred_dc_v - orig_v_rd_data);
-    wire [31:0] ad_v_hor    = (orig_v_rd_data > pred_hor_v)    ? (orig_v_rd_data - pred_hor_v)    : (pred_hor_v - orig_v_rd_data);
-    wire [31:0] ad_v_ver    = (orig_v_rd_data > pred_ver_v)    ? (orig_v_rd_data - pred_ver_v)    : (pred_ver_v - orig_v_rd_data);
-    wire [31:0] ad_v_34     = (orig_v_rd_data > pred_34_v)     ? (orig_v_rd_data - pred_34_v)     : (pred_34_v - orig_v_rd_data);
+    wire [9:0] ad_v_planar = (orig_v_rd_data > pred_planar_v) ? (orig_v_rd_data - pred_planar_v) : (pred_planar_v - orig_v_rd_data);
+    wire [9:0] ad_v_dc     = (orig_v_rd_data > pred_dc_v)     ? (orig_v_rd_data - pred_dc_v)     : (pred_dc_v - orig_v_rd_data);
+    wire [9:0] ad_v_hor    = (orig_v_rd_data > pred_hor_v)    ? (orig_v_rd_data - pred_hor_v)    : (pred_hor_v - orig_v_rd_data);
+    wire [9:0] ad_v_ver    = (orig_v_rd_data > pred_ver_v)    ? (orig_v_rd_data - pred_ver_v)    : (pred_ver_v - orig_v_rd_data);
+    wire [9:0] ad_v_34     = (orig_v_rd_data > pred_34_v)     ? (orig_v_rd_data - pred_34_v)     : (pred_34_v - orig_v_rd_data);
+
+    reg [9:0] ad_u_planar_q3, ad_u_dc_q3, ad_u_hor_q3, ad_u_ver_q3, ad_u_34_q3;
+    reg [9:0] ad_v_planar_q3, ad_v_dc_q3, ad_v_hor_q3, ad_v_ver_q3, ad_v_34_q3;
 
     assign rmd_active = (state == S_EVAL);
 
@@ -345,10 +363,22 @@ module intra_rmd (
             state <= S_IDLE;
             rmd_done <= 1'b0;
             req_active <= 1'b0;
+            lat_pu_size_log2 <= 3'd2;
             cx_q1 <= 6'd0; cy_q1 <= 6'd0;
             cx_q2 <= 6'd0; cy_q2 <= 6'd0;
             eval_q1 <= 1'b0; eval_q2 <= 1'b0;
-            eval_c_q1 <= 1'b0; eval_c_q2 <= 1'b0;
+            eval_c_q1 <= 1'b0; eval_c_q2 <= 1'b0; eval_c_q3 <= 1'b0;
+            refT_N_r <= 10'd512; refL_N_r <= 10'd512;
+            refT_N_u_r <= 10'd512; refL_N_u_r <= 10'd512;
+            refT_N_v_r <= 10'd512; refL_N_v_r <= 10'd512;
+            planar_h_q2 <= 17'd0; planar_v_q2 <= 17'd0;
+            pred_hor_q2 <= 10'd512; pred_ver_q2 <= 10'd512;
+            planar_hu_q2 <= 17'd0; planar_vu_q2 <= 17'd0;
+            planar_hv_q2 <= 17'd0; planar_vv_q2 <= 17'd0;
+            pred_hor_u_q2 <= 10'd512; pred_ver_u_q2 <= 10'd512; pred_34_u_q2 <= 10'd512;
+            pred_hor_v_q2 <= 10'd512; pred_ver_v_q2 <= 10'd512; pred_34_v_q2 <= 10'd512;
+            ad_u_planar_q3 <= 10'd0; ad_u_dc_q3 <= 10'd0; ad_u_hor_q3 <= 10'd0; ad_u_ver_q3 <= 10'd0; ad_u_34_q3 <= 10'd0;
+            ad_v_planar_q3 <= 10'd0; ad_v_dc_q3 <= 10'd0; ad_v_hor_q3 <= 10'd0; ad_v_ver_q3 <= 10'd0; ad_v_34_q3 <= 10'd0;
             sad_c_planar <= 32'd0; sad_c_dc <= 32'd0; sad_c_hor <= 32'd0; sad_c_ver <= 32'd0; sad_c_34 <= 32'd0;
             orig_c_rd_addr <= 10'd0;
             best_mode <= 6'd0;
@@ -380,10 +410,14 @@ module intra_rmd (
                             best_chroma_dir <= 6'd0;
                         end else begin
                             req_active <= 1'b1;
+                            lat_pu_size_log2 <= pu_size_log2;
                             cx_q1 <= 6'd0; cy_q1 <= 6'd0;
                             cx_q2 <= 6'd0; cy_q2 <= 6'd0;
                             eval_q1 <= 1'b0; eval_q2 <= 1'b0;
-                            eval_c_q1 <= 1'b0; eval_c_q2 <= 1'b0;
+                            eval_c_q1 <= 1'b0; eval_c_q2 <= 1'b0; eval_c_q3 <= 1'b0;
+                            refT_N_r <= 10'd512; refL_N_r <= 10'd512;
+                            refT_N_u_r <= 10'd512; refL_N_u_r <= 10'd512;
+                            refT_N_v_r <= 10'd512; refL_N_v_r <= 10'd512;
                             sad_c_planar <= 32'd0; sad_c_dc <= 32'd0; sad_c_hor <= 32'd0; sad_c_ver <= 32'd0; sad_c_34 <= 32'd0;
                             lat_pu_x <= pu_x;
                             lat_pu_y <= pu_y;
@@ -401,9 +435,21 @@ module intra_rmd (
                 S_LOAD_REF: begin
                     if (ref_valid) begin
                         ref_buf[ref_idx] <= ref_sample;
+                        if (ref_idx == (8'd1 + N))
+                            refT_N_r <= ref_sample;
+                        if (ref_idx == ((N << 1) + 8'd1 + N))
+                            refL_N_r <= ref_sample;
                         if (ref_idx <= (N << 1)) begin
                             ref_buf_u[ref_idx[6:0]] <= ref_sample_u;
                             ref_buf_v[ref_idx[6:0]] <= ref_sample_v;
+                        end
+                        if (ref_idx == (8'd1 + N_C)) begin
+                            refT_N_u_r <= ref_sample_u;
+                            refT_N_v_r <= ref_sample_v;
+                        end
+                        if (ref_idx == (N + 8'd1 + N_C)) begin
+                            refL_N_u_r <= ref_sample_u;
+                            refL_N_v_r <= ref_sample_v;
                         end
                     end
                 end
@@ -445,11 +491,29 @@ module intra_rmd (
                         eval_c_q1 <= 1'b0;
                     end
 
-                    // Stage 1 (q1 -> q2): Match 1-cycle synchronous BRAM read output register
+                    // Stage 1 (q1 -> q2): Match 1-cycle synchronous BRAM read & register partial sums
                     cx_q2 <= cx_q1;
                     cy_q2 <= cy_q1;
                     eval_q2 <= eval_q1;
                     eval_c_q2 <= eval_c_q1;
+                    if (eval_q1) begin
+                        planar_h_q2 <= wL_q1 + wR_q1;
+                        planar_v_q2 <= wT_q1 + wB_q1;
+                        pred_hor_q2 <= refL_y_q1;
+                        pred_ver_q2 <= refT_x_q1;
+                    end
+                    if (eval_c_q1) begin
+                        planar_hu_q2  <= wL_u_q1 + wR_u_q1;
+                        planar_vu_q2  <= wT_u_q1 + wB_u_q1;
+                        planar_hv_q2  <= wL_v_q1 + wR_v_q1;
+                        planar_vv_q2  <= wT_v_q1 + wB_v_q1;
+                        pred_hor_u_q2 <= pred_hor_u_q1;
+                        pred_ver_u_q2 <= pred_ver_u_q1;
+                        pred_34_u_q2  <= pred_34_u_q1;
+                        pred_hor_v_q2 <= pred_hor_v_q1;
+                        pred_ver_v_q2 <= pred_ver_v_q1;
+                        pred_34_v_q2  <= pred_34_v_q1;
+                    end
 
                     // Stage 2: Consume aligned orig_rd_data / orig_u/v_rd_data
                     if (eval_q2) begin
@@ -463,12 +527,28 @@ module intra_rmd (
                             wr_bank   <= ~wr_bank;
                         end
                     end
+
+                    eval_c_q3 <= eval_c_q2;
                     if (eval_c_q2) begin
-                        sad_c_planar <= sad_c_planar + ad_u_planar + ad_v_planar;
-                        sad_c_dc     <= sad_c_dc     + ad_u_dc     + ad_v_dc;
-                        sad_c_hor    <= sad_c_hor    + ad_u_hor    + ad_v_hor;
-                        sad_c_ver    <= sad_c_ver    + ad_u_ver    + ad_v_ver;
-                        sad_c_34     <= sad_c_34     + ad_u_34     + ad_v_34;
+                        ad_u_planar_q3 <= ad_u_planar;
+                        ad_u_dc_q3     <= ad_u_dc;
+                        ad_u_hor_q3    <= ad_u_hor;
+                        ad_u_ver_q3    <= ad_u_ver;
+                        ad_u_34_q3     <= ad_u_34;
+                        ad_v_planar_q3 <= ad_v_planar;
+                        ad_v_dc_q3     <= ad_v_dc;
+                        ad_v_hor_q3    <= ad_v_hor;
+                        ad_v_ver_q3    <= ad_v_ver;
+                        ad_v_34_q3     <= ad_v_34;
+                    end
+
+                    // Stage 3: Accumulate registered Chroma abs-diffs
+                    if (eval_c_q3) begin
+                        sad_c_planar <= sad_c_planar + {22'd0, ad_u_planar_q3} + {22'd0, ad_v_planar_q3};
+                        sad_c_dc     <= sad_c_dc     + {22'd0, ad_u_dc_q3}     + {22'd0, ad_v_dc_q3};
+                        sad_c_hor    <= sad_c_hor    + {22'd0, ad_u_hor_q3}    + {22'd0, ad_v_hor_q3};
+                        sad_c_ver    <= sad_c_ver    + {22'd0, ad_u_ver_q3}    + {22'd0, ad_v_ver_q3};
+                        sad_c_34     <= sad_c_34     + {22'd0, ad_u_34_q3}     + {22'd0, ad_v_34_q3};
                     end
 
                     // Accumulate completed 4x4 tile SATD outputs while streaming subsequent tiles
@@ -535,7 +615,7 @@ module intra_rmd (
         case (state)
             S_IDLE:     if (start && pu_size_log2 <= 3'd5) next_state = S_LOAD_REF;
             S_LOAD_REF: if (ref_valid && ref_last) next_state = S_EVAL;
-            S_EVAL:     if (!req_active && !eval_q1 && !eval_q2) next_state = S_HADAMARD;
+            S_EVAL:     if (!req_active && !eval_q1 && !eval_q2 && !eval_c_q3) next_state = S_HADAMARD;
             S_HADAMARD: if (!had_done_p && (tiles_acc == total_tiles)) next_state = S_DONE;
             S_DONE:     next_state = S_IDLE;
         endcase
