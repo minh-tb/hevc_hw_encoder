@@ -88,19 +88,40 @@ module decoder_inloop_filters (
         S_DUMP  = 3'd4;
 
     reg [2:0] filter_state;
-    assign inloop_ready = (filter_state == S_FILL);
+    reg       fill_bank;
+    reg       proc_bank;
+    reg [1:0] bank_full;
+    reg [`CTU_ADDR_WIDTH-1:0] bank_ctu_addr [0:1];
+    reg [5:0] bank_ctu_qp [0:1];
+
+    assign inloop_ready = !bank_full[fill_bank];
 
     //=========================================================================
-    // SRAM Buffers — reconstructed pixels
+    // SRAM Buffers — 2-bank CTU Ping-Pong reconstructed pixels (Block RAM)
     //=========================================================================
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] luma_ram [0:4095];   // 64x64
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] cb_ram   [0:1023];   // 32x32
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] cr_ram   [0:1023];   // 32x32
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] luma_ram_0 [0:4095]; // 64x64 bank 0
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] luma_ram_1 [0:4095]; // 64x64 bank 1
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] cb_ram_0   [0:1023]; // 32x32 bank 0
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] cb_ram_1   [0:1023]; // 32x32 bank 1
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] cr_ram_0   [0:1023]; // 32x32 bank 0
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] cr_ram_1   [0:1023]; // 32x32 bank 1
 
-    // Original pixel SRAMs (for SAO stats)
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_y_ram [0:4095];
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_u_ram [0:1023];
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_v_ram [0:1023];
+    // Original pixel SRAMs (2-bank CTU Ping-Pong for SAO stats)
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_y_ram_0 [0:4095];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_y_ram_1 [0:4095];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_u_ram_0 [0:1023];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_u_ram_1 [0:1023];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_v_ram_0 [0:1023];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] orig_v_ram_1 [0:1023];
+
+    // Pre-deblock boundary staging buffers written during S_FILL and committed
+    // atomically to col_buf / line_buf / corner_buf when proc FSM enters S_DB.
+    reg [9:0] stage_col_luma  [0:63][0:3];
+    reg [9:0] stage_col_cb    [0:31][0:3];
+    reg [9:0] stage_col_cr    [0:31][0:3];
+    reg [9:0] stage_line_luma [0:3][0:63];
+    reg [9:0] stage_line_cb   [0:1][0:31];
+    reg [9:0] stage_line_cr   [0:1][0:31];
 
     //=========================================================================
     // Cross-CTU Line Buffers and Column Buffers (Phase 2 Deblocking)
@@ -194,6 +215,7 @@ module decoder_inloop_filters (
     wire [12:0] dump_count = dump_count_q;
     reg        dump_valid_q;
     reg        dump_wait_drain;
+    wire       dump_last_drained;
     reg [`CTU_COORD_WIDTH-1:0] cur_ctu_x, cur_ctu_y;
     reg [`CTU_COORD_WIDTH-1:0] dump_ctu_x_q, dump_ctu_y_q;
 
@@ -224,24 +246,39 @@ module decoder_inloop_filters (
     assign out_abs_x = out_abs_x_r;
     assign out_abs_y = out_abs_y_r;
 
-    wire ctu_recon_done = in_valid && (pixel_count == 13'd6143);
+    wire fill_accept    = in_valid && !bank_full[fill_bank];
+    wire ctu_recon_done = fill_accept && (pixel_count == 13'd6143);
 
     //=========================================================================
-    // Shadow Maps for Deblock
+    // Shadow Maps for Deblock (2-bank Ping-Pong)
     //=========================================================================
-    reg [255:0]  cu_map_pred_mode;
-    reg [255:0]  cu_map_cbf_luma;
-    reg [255:0]  cu_map_cbf_chroma;
-    reg [767:0]  cu_map_ref_l0;
-    reg [767:0]  cu_map_ref_l1;
-    reg [255:0]  cu_map_bi_pred;
-    reg [4095:0] cu_map_mvx_l0;
-    reg [4095:0] cu_map_mvy_l0;
-    reg [4095:0] cu_map_mvx_l1;
-    reg [4095:0] cu_map_mvy_l1;
-    reg [1535:0] cu_map_qp;
-    reg [255:0]  cu_map_edge_ver;
-    reg [255:0]  cu_map_edge_hor;
+    reg [255:0]  cu_map_pred_mode_0,  cu_map_pred_mode_1;
+    reg [255:0]  cu_map_cbf_luma_0,   cu_map_cbf_luma_1;
+    reg [255:0]  cu_map_cbf_chroma_0, cu_map_cbf_chroma_1;
+    reg [767:0]  cu_map_ref_l0_0,     cu_map_ref_l0_1;
+    reg [767:0]  cu_map_ref_l1_0,     cu_map_ref_l1_1;
+    reg [255:0]  cu_map_bi_pred_0,    cu_map_bi_pred_1;
+    reg [4095:0] cu_map_mvx_l0_0,     cu_map_mvx_l0_1;
+    reg [4095:0] cu_map_mvy_l0_0,     cu_map_mvy_l0_1;
+    reg [4095:0] cu_map_mvx_l1_0,     cu_map_mvx_l1_1;
+    reg [4095:0] cu_map_mvy_l1_0,     cu_map_mvy_l1_1;
+    reg [1535:0] cu_map_qp_0,         cu_map_qp_1;
+    reg [255:0]  cu_map_edge_ver_0,   cu_map_edge_ver_1;
+    reg [255:0]  cu_map_edge_hor_0,   cu_map_edge_hor_1;
+
+    wire [255:0]  proc_cu_map_pred_mode  = proc_bank ? cu_map_pred_mode_1  : cu_map_pred_mode_0;
+    wire [255:0]  proc_cu_map_cbf_luma   = proc_bank ? cu_map_cbf_luma_1   : cu_map_cbf_luma_0;
+    wire [255:0]  proc_cu_map_cbf_chroma = proc_bank ? cu_map_cbf_chroma_1 : cu_map_cbf_chroma_0;
+    wire [767:0]  proc_cu_map_ref_l0     = proc_bank ? cu_map_ref_l0_1     : cu_map_ref_l0_0;
+    wire [767:0]  proc_cu_map_ref_l1     = proc_bank ? cu_map_ref_l1_1     : cu_map_ref_l1_0;
+    wire [255:0]  proc_cu_map_bi_pred    = proc_bank ? cu_map_bi_pred_1    : cu_map_bi_pred_0;
+    wire [4095:0] proc_cu_map_mvx_l0     = proc_bank ? cu_map_mvx_l0_1     : cu_map_mvx_l0_0;
+    wire [4095:0] proc_cu_map_mvy_l0     = proc_bank ? cu_map_mvy_l0_1     : cu_map_mvy_l0_0;
+    wire [4095:0] proc_cu_map_mvx_l1     = proc_bank ? cu_map_mvx_l1_1     : cu_map_mvx_l1_0;
+    wire [4095:0] proc_cu_map_mvy_l1     = proc_bank ? cu_map_mvy_l1_1     : cu_map_mvy_l1_0;
+    wire [1535:0] proc_cu_map_qp         = proc_bank ? cu_map_qp_1         : cu_map_qp_0;
+    wire [255:0]  proc_cu_map_edge_ver   = proc_bank ? cu_map_edge_ver_1   : cu_map_edge_ver_0;
+    wire [255:0]  proc_cu_map_edge_hor   = proc_bank ? cu_map_edge_hor_1   : cu_map_edge_hor_0;
 
     integer map_i, map_j, c_k;
     wire [3:0] map_luma_log2 = (map_update_comp == 2'd0) ? map_update_size_log2 : (map_update_size_log2 + 3'd1);
@@ -256,19 +293,19 @@ module decoder_inloop_filters (
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            cu_map_pred_mode  <= 256'd0;
-            cu_map_cbf_luma   <= 256'd0;
-            cu_map_cbf_chroma <= 256'd0;
-            cu_map_ref_l0     <= 768'd0;
-            cu_map_ref_l1     <= 768'd0;
-            cu_map_bi_pred    <= 256'd0;
-            cu_map_mvx_l0     <= 4096'd0;
-            cu_map_mvy_l0     <= 4096'd0;
-            cu_map_mvx_l1     <= 4096'd0;
-            cu_map_mvy_l1     <= 4096'd0;
-            cu_map_qp         <= 1536'd0;
-            cu_map_edge_ver   <= 256'd0;
-            cu_map_edge_hor   <= 256'd0;
+            cu_map_pred_mode_0  <= 256'd0;  cu_map_pred_mode_1  <= 256'd0;
+            cu_map_cbf_luma_0   <= 256'd0;  cu_map_cbf_luma_1   <= 256'd0;
+            cu_map_cbf_chroma_0 <= 256'd0;  cu_map_cbf_chroma_1 <= 256'd0;
+            cu_map_ref_l0_0     <= 768'd0;  cu_map_ref_l0_1     <= 768'd0;
+            cu_map_ref_l1_0     <= 768'd0;  cu_map_ref_l1_1     <= 768'd0;
+            cu_map_bi_pred_0    <= 256'd0;  cu_map_bi_pred_1    <= 256'd0;
+            cu_map_mvx_l0_0     <= 4096'd0; cu_map_mvx_l0_1     <= 4096'd0;
+            cu_map_mvy_l0_0     <= 4096'd0; cu_map_mvy_l0_1     <= 4096'd0;
+            cu_map_mvx_l1_0     <= 4096'd0; cu_map_mvx_l1_1     <= 4096'd0;
+            cu_map_mvy_l1_0     <= 4096'd0; cu_map_mvy_l1_1     <= 4096'd0;
+            cu_map_qp_0         <= 1536'd0; cu_map_qp_1         <= 1536'd0;
+            cu_map_edge_ver_0   <= 256'd0;  cu_map_edge_ver_1   <= 256'd0;
+            cu_map_edge_hor_0   <= 256'd0;  cu_map_edge_hor_1   <= 256'd0;
 
             left_map_pred_mode  <= 16'd0;
             left_map_cbf_luma   <= 16'd0;
@@ -307,66 +344,73 @@ module decoder_inloop_filters (
             corner_mvy_l1      <= 16'd0;
             corner_edge_hor    <= 1'b0;
         end else begin
-            // Clear CBFs and latch neighbor CU caches when CTU finishes dumping to frame store
-            if (filter_state == S_DUMP && out_ready && dump_valid_q && dump_count_q == 13'd6143) begin
-                cu_map_cbf_luma   <= 256'd0;
-                cu_map_cbf_chroma <= 256'd0;
-                cu_map_edge_ver   <= 256'd0;
-                cu_map_edge_hor   <= 256'd0;
+            // Clear CBFs and latch neighbor CU caches when proc_bank finishes dumping to frame store
+            if (filter_state == S_DUMP && dump_wait_drain && dump_last_drained) begin
+                if (!proc_bank) begin
+                    cu_map_cbf_luma_0   <= 256'd0;
+                    cu_map_cbf_chroma_0 <= 256'd0;
+                    cu_map_edge_ver_0   <= 256'd0;
+                    cu_map_edge_hor_0   <= 256'd0;
+                end else begin
+                    cu_map_cbf_luma_1   <= 256'd0;
+                    cu_map_cbf_chroma_1 <= 256'd0;
+                    cu_map_edge_ver_1   <= 256'd0;
+                    cu_map_edge_hor_1   <= 256'd0;
+                end
 
                 if (cur_ctu_x == 0 && cur_ctu_y == 0) begin
-                    corner_pred_mode   <= cu_map_pred_mode[(15*16) + 15];
-                    corner_qp          <= cu_map_qp[((15*16) + 15)*6 +: 6];
-                    corner_cbf_luma    <= cu_map_cbf_luma[(15*16) + 15];
-                    corner_cbf_chroma  <= cu_map_cbf_chroma[(15*16) + 15];
-                    corner_ref_l0      <= cu_map_ref_l0[((15*16) + 15)*3 +: 3];
-                    corner_ref_l1      <= cu_map_ref_l1[((15*16) + 15)*3 +: 3];
-                    corner_bi_pred     <= cu_map_bi_pred[(15*16) + 15];
-                    corner_mvx_l0      <= cu_map_mvx_l0[((15*16) + 15)*16 +: 16];
-                    corner_mvy_l0      <= cu_map_mvy_l0[((15*16) + 15)*16 +: 16];
-                    corner_mvx_l1      <= cu_map_mvx_l1[((15*16) + 15)*16 +: 16];
-                    corner_mvy_l1      <= cu_map_mvy_l1[((15*16) + 15)*16 +: 16];
-                    corner_edge_hor    <= cu_map_edge_hor[(15*16) + 15];
+                    corner_pred_mode   <= proc_cu_map_pred_mode[(15*16) + 15];
+                    corner_qp          <= proc_cu_map_qp[((15*16) + 15)*6 +: 6];
+                    corner_cbf_luma    <= proc_cu_map_cbf_luma[(15*16) + 15];
+                    corner_cbf_chroma  <= proc_cu_map_cbf_chroma[(15*16) + 15];
+                    corner_ref_l0      <= proc_cu_map_ref_l0[((15*16) + 15)*3 +: 3];
+                    corner_ref_l1      <= proc_cu_map_ref_l1[((15*16) + 15)*3 +: 3];
+                    corner_bi_pred     <= proc_cu_map_bi_pred[(15*16) + 15];
+                    corner_mvx_l0      <= proc_cu_map_mvx_l0[((15*16) + 15)*16 +: 16];
+                    corner_mvy_l0      <= proc_cu_map_mvy_l0[((15*16) + 15)*16 +: 16];
+                    corner_mvx_l1      <= proc_cu_map_mvx_l1[((15*16) + 15)*16 +: 16];
+                    corner_mvy_l1      <= proc_cu_map_mvy_l1[((15*16) + 15)*16 +: 16];
+                    corner_edge_hor    <= proc_cu_map_edge_hor[(15*16) + 15];
                 end
 
                 for (c_k = 0; c_k < 16; c_k = c_k + 1) begin
-                    left_map_pred_mode[c_k]              <= cu_map_pred_mode[(c_k*16) + 15];
-                    left_map_cbf_luma[c_k]               <= cu_map_cbf_luma[(c_k*16) + 15];
-                    left_map_cbf_chroma[c_k]             <= cu_map_cbf_chroma[(c_k*16) + 15];
-                    left_map_ref_l0[c_k*3 +: 3]          <= cu_map_ref_l0[((c_k*16) + 15)*3 +: 3];
-                    left_map_ref_l1[c_k*3 +: 3]          <= cu_map_ref_l1[((c_k*16) + 15)*3 +: 3];
-                    left_map_bi_pred[c_k]                <= cu_map_bi_pred[(c_k*16) + 15];
-                    left_map_mvx_l0[c_k*16 +: 16]        <= cu_map_mvx_l0[((c_k*16) + 15)*16 +: 16];
-                    left_map_mvy_l0[c_k*16 +: 16]        <= cu_map_mvy_l0[((c_k*16) + 15)*16 +: 16];
-                    left_map_mvx_l1[c_k*16 +: 16]        <= cu_map_mvx_l1[((c_k*16) + 15)*16 +: 16];
-                    left_map_mvy_l1[c_k*16 +: 16]        <= cu_map_mvy_l1[((c_k*16) + 15)*16 +: 16];
-                    left_map_qp[c_k*6 +: 6]              <= cu_map_qp[((c_k*16) + 15)*6 +: 6];
-                    left_map_edge_hor[c_k]               <= cu_map_edge_hor[(c_k*16) + 15];
+                    left_map_pred_mode[c_k]              <= proc_cu_map_pred_mode[(c_k*16) + 15];
+                    left_map_cbf_luma[c_k]               <= proc_cu_map_cbf_luma[(c_k*16) + 15];
+                    left_map_cbf_chroma[c_k]             <= proc_cu_map_cbf_chroma[(c_k*16) + 15];
+                    left_map_ref_l0[c_k*3 +: 3]          <= proc_cu_map_ref_l0[((c_k*16) + 15)*3 +: 3];
+                    left_map_ref_l1[c_k*3 +: 3]          <= proc_cu_map_ref_l1[((c_k*16) + 15)*3 +: 3];
+                    left_map_bi_pred[c_k]                <= proc_cu_map_bi_pred[(c_k*16) + 15];
+                    left_map_mvx_l0[c_k*16 +: 16]        <= proc_cu_map_mvx_l0[((c_k*16) + 15)*16 +: 16];
+                    left_map_mvy_l0[c_k*16 +: 16]        <= proc_cu_map_mvy_l0[((c_k*16) + 15)*16 +: 16];
+                    left_map_mvx_l1[c_k*16 +: 16]        <= proc_cu_map_mvx_l1[((c_k*16) + 15)*16 +: 16];
+                    left_map_mvy_l1[c_k*16 +: 16]        <= proc_cu_map_mvy_l1[((c_k*16) + 15)*16 +: 16];
+                    left_map_qp[c_k*6 +: 6]              <= proc_cu_map_qp[((c_k*16) + 15)*6 +: 6];
+                    left_map_edge_hor[c_k]               <= proc_cu_map_edge_hor[(c_k*16) + 15];
 
                     if (cur_ctu_x[0]) begin
-                        top_map_pred_mode[16 + c_k]              <= cu_map_pred_mode[(15*16) + c_k];
-                        top_map_cbf_luma[16 + c_k]               <= cu_map_cbf_luma[(15*16) + c_k];
-                        top_map_cbf_chroma[16 + c_k]             <= cu_map_cbf_chroma[(15*16) + c_k];
-                        top_map_ref_l0[(16 + c_k)*3 +: 3]        <= cu_map_ref_l0[((15*16) + c_k)*3 +: 3];
-                        top_map_ref_l1[(16 + c_k)*3 +: 3]        <= cu_map_ref_l1[((15*16) + c_k)*3 +: 3];
-                        top_map_bi_pred[16 + c_k]                <= cu_map_bi_pred[(15*16) + c_k];
-                        top_map_mvx_l0[(16 + c_k)*16 +: 16]      <= cu_map_mvx_l0[((15*16) + c_k)*16 +: 16];
-                        top_map_mvy_l0[(16 + c_k)*16 +: 16]      <= cu_map_mvy_l0[((15*16) + c_k)*16 +: 16];
-                        top_map_mvx_l1[(16 + c_k)*16 +: 16]      <= cu_map_mvx_l1[((15*16) + c_k)*16 +: 16];
-                        top_map_mvy_l1[(16 + c_k)*16 +: 16]      <= cu_map_mvy_l1[((15*16) + c_k)*16 +: 16];
-                        top_map_qp[(16 + c_k)*6 +: 6]            <= cu_map_qp[((15*16) + c_k)*6 +: 6];
+                        top_map_pred_mode[16 + c_k]              <= proc_cu_map_pred_mode[(15*16) + c_k];
+                        top_map_cbf_luma[16 + c_k]               <= proc_cu_map_cbf_luma[(15*16) + c_k];
+                        top_map_cbf_chroma[16 + c_k]             <= proc_cu_map_cbf_chroma[(15*16) + c_k];
+                        top_map_ref_l0[(16 + c_k)*3 +: 3]        <= proc_cu_map_ref_l0[((15*16) + c_k)*3 +: 3];
+                        top_map_ref_l1[(16 + c_k)*3 +: 3]        <= proc_cu_map_ref_l1[((15*16) + c_k)*3 +: 3];
+                        top_map_bi_pred[16 + c_k]                <= proc_cu_map_bi_pred[(15*16) + c_k];
+                        top_map_mvx_l0[(16 + c_k)*16 +: 16]      <= proc_cu_map_mvx_l0[((15*16) + c_k)*16 +: 16];
+                        top_map_mvy_l0[(16 + c_k)*16 +: 16]      <= proc_cu_map_mvy_l0[((15*16) + c_k)*16 +: 16];
+                        top_map_mvx_l1[(16 + c_k)*16 +: 16]      <= proc_cu_map_mvx_l1[((15*16) + c_k)*16 +: 16];
+                        top_map_mvy_l1[(16 + c_k)*16 +: 16]      <= proc_cu_map_mvy_l1[((15*16) + c_k)*16 +: 16];
+                        top_map_qp[(16 + c_k)*6 +: 6]            <= proc_cu_map_qp[((15*16) + c_k)*6 +: 6];
                     end else begin
-                        top_map_pred_mode[c_k]                   <= cu_map_pred_mode[(15*16) + c_k];
-                        top_map_cbf_luma[c_k]                    <= cu_map_cbf_luma[(15*16) + c_k];
-                        top_map_cbf_chroma[c_k]                  <= cu_map_cbf_chroma[(15*16) + c_k];
-                        top_map_ref_l0[c_k*3 +: 3]               <= cu_map_ref_l0[((15*16) + c_k)*3 +: 3];
-                        top_map_ref_l1[c_k*3 +: 3]               <= cu_map_ref_l1[((15*16) + c_k)*3 +: 3];
-                        top_map_bi_pred[c_k]                     <= cu_map_bi_pred[(15*16) + c_k];
-                        top_map_mvx_l0[c_k*16 +: 16]             <= cu_map_mvx_l0[((15*16) + c_k)*16 +: 16];
-                        top_map_mvy_l0[c_k*16 +: 16]             <= cu_map_mvy_l0[((15*16) + c_k)*16 +: 16];
-                        top_map_mvx_l1[c_k*16 +: 16]             <= cu_map_mvx_l1[((15*16) + c_k)*16 +: 16];
-                        top_map_mvy_l1[c_k*16 +: 16]             <= cu_map_mvy_l1[((15*16) + c_k)*16 +: 16];
-                        top_map_qp[c_k*6 +: 6]                   <= cu_map_qp[((15*16) + c_k)*6 +: 6];
+                        top_map_pred_mode[c_k]                   <= proc_cu_map_pred_mode[(15*16) + c_k];
+                        top_map_cbf_luma[c_k]                    <= proc_cu_map_cbf_luma[(15*16) + c_k];
+                        top_map_cbf_chroma[c_k]                  <= proc_cu_map_cbf_chroma[(15*16) + c_k];
+                        top_map_ref_l0[c_k*3 +: 3]               <= proc_cu_map_ref_l0[((15*16) + c_k)*3 +: 3];
+                        top_map_ref_l1[c_k*3 +: 3]               <= proc_cu_map_ref_l1[((15*16) + c_k)*3 +: 3];
+                        top_map_bi_pred[c_k]                     <= proc_cu_map_bi_pred[(15*16) + c_k];
+                        top_map_mvx_l0[c_k*16 +: 16]             <= proc_cu_map_mvx_l0[((15*16) + c_k)*16 +: 16];
+                        top_map_mvy_l0[c_k*16 +: 16]             <= proc_cu_map_mvy_l0[((15*16) + c_k)*16 +: 16];
+                        top_map_mvx_l1[c_k*16 +: 16]             <= proc_cu_map_mvx_l1[((15*16) + c_k)*16 +: 16];
+                        top_map_mvy_l1[c_k*16 +: 16]             <= proc_cu_map_mvy_l1[((15*16) + c_k)*16 +: 16];
+                        top_map_qp[c_k*6 +: 6]                   <= proc_cu_map_qp[((15*16) + c_k)*6 +: 6];
                     end
                 end
             end
@@ -376,29 +420,56 @@ module decoder_inloop_filters (
                     for (map_j = 0; map_j < 16; map_j = map_j + 1) begin
                         if ((((map_i[3:0] ^ map_cy) & map_blk_mask) == 4'b0000) &&
                             (((map_j[3:0] ^ map_cx) & map_blk_mask) == 4'b0000)) begin
-                            if (map_update_cbf_only) begin
-                                if (map_update_comp == 2'd0) begin
-                                    cu_map_cbf_luma[(map_i*16)+map_j] <= map_update_cbf;
+                            if (!fill_bank) begin
+                                if (map_update_cbf_only) begin
+                                    if (map_update_comp == 2'd0) begin
+                                        cu_map_cbf_luma_0[(map_i*16)+map_j] <= map_update_cbf;
+                                    end else begin
+                                        cu_map_cbf_chroma_0[(map_i*16)+map_j] <= cu_map_cbf_chroma_0[(map_i*16)+map_j] | map_update_cbf;
+                                    end
                                 end else begin
-                                    cu_map_cbf_chroma[(map_i*16)+map_j] <= cu_map_cbf_chroma[(map_i*16)+map_j] | map_update_cbf;
+                                    cu_map_pred_mode_0[(map_i*16)+map_j] <= map_update_pred_mode;
+                                    cu_map_qp_0[((map_i*16)+map_j)*6 +: 6] <= map_update_qp;
+                                    cu_map_cbf_luma_0[(map_i*16)+map_j]   <= map_update_cbf;
+                                    cu_map_cbf_chroma_0[(map_i*16)+map_j] <= 1'b0;
+                                    cu_map_mvx_l0_0[((map_i*16)+map_j)*16 +: 16] <= map_update_mvx;
+                                    cu_map_mvy_l0_0[((map_i*16)+map_j)*16 +: 16] <= map_update_mvy;
+                                    cu_map_ref_l0_0[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l0;
+                                    cu_map_ref_l1_0[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l1;
+                                    cu_map_bi_pred_0[(map_i*16)+map_j] <= map_update_bi_pred;
+                                    cu_map_mvx_l1_0[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
+                                    cu_map_mvy_l1_0[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
+
+                                    if (map_j[3:0] == map_cx || (map_blk_mask == 4'b0000 && map_j[3:0] == 4'd8))
+                                        cu_map_edge_ver_0[(map_i*16)+map_j] <= 1'b1;
+                                    if (map_i[3:0] == map_cy || (map_blk_mask == 4'b0000 && map_i[3:0] == 4'd8))
+                                        cu_map_edge_hor_0[(map_i*16)+map_j] <= 1'b1;
                                 end
                             end else begin
-                                cu_map_pred_mode[(map_i*16)+map_j] <= map_update_pred_mode;
-                                cu_map_qp[((map_i*16)+map_j)*6 +: 6] <= map_update_qp;
-                                cu_map_cbf_luma[(map_i*16)+map_j]   <= map_update_cbf;
-                                cu_map_cbf_chroma[(map_i*16)+map_j] <= 1'b0;
-                                cu_map_mvx_l0[((map_i*16)+map_j)*16 +: 16] <= map_update_mvx;
-                                cu_map_mvy_l0[((map_i*16)+map_j)*16 +: 16] <= map_update_mvy;
-                                cu_map_ref_l0[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l0;
-                                cu_map_ref_l1[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l1;
-                                cu_map_bi_pred[(map_i*16)+map_j] <= map_update_bi_pred;
-                                cu_map_mvx_l1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
-                                cu_map_mvy_l1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
+                                if (map_update_cbf_only) begin
+                                    if (map_update_comp == 2'd0) begin
+                                        cu_map_cbf_luma_1[(map_i*16)+map_j] <= map_update_cbf;
+                                    end else begin
+                                        cu_map_cbf_chroma_1[(map_i*16)+map_j] <= cu_map_cbf_chroma_1[(map_i*16)+map_j] | map_update_cbf;
+                                    end
+                                end else begin
+                                    cu_map_pred_mode_1[(map_i*16)+map_j] <= map_update_pred_mode;
+                                    cu_map_qp_1[((map_i*16)+map_j)*6 +: 6] <= map_update_qp;
+                                    cu_map_cbf_luma_1[(map_i*16)+map_j]   <= map_update_cbf;
+                                    cu_map_cbf_chroma_1[(map_i*16)+map_j] <= 1'b0;
+                                    cu_map_mvx_l0_1[((map_i*16)+map_j)*16 +: 16] <= map_update_mvx;
+                                    cu_map_mvy_l0_1[((map_i*16)+map_j)*16 +: 16] <= map_update_mvy;
+                                    cu_map_ref_l0_1[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l0;
+                                    cu_map_ref_l1_1[((map_i*16)+map_j)*3 +: 3] <= map_update_ref_l1;
+                                    cu_map_bi_pred_1[(map_i*16)+map_j] <= map_update_bi_pred;
+                                    cu_map_mvx_l1_1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
+                                    cu_map_mvy_l1_1[((map_i*16)+map_j)*16 +: 16] <= 16'd0;
 
-                                if (map_j[3:0] == map_cx || (map_blk_mask == 4'b0000 && map_j[3:0] == 4'd8))
-                                    cu_map_edge_ver[(map_i*16)+map_j] <= 1'b1;
-                                if (map_i[3:0] == map_cy || (map_blk_mask == 4'b0000 && map_i[3:0] == 4'd8))
-                                    cu_map_edge_hor[(map_i*16)+map_j] <= 1'b1;
+                                    if (map_j[3:0] == map_cx || (map_blk_mask == 4'b0000 && map_j[3:0] == 4'd8))
+                                        cu_map_edge_ver_1[(map_i*16)+map_j] <= 1'b1;
+                                    if (map_i[3:0] == map_cy || (map_blk_mask == 4'b0000 && map_i[3:0] == 4'd8))
+                                        cu_map_edge_hor_1[(map_i*16)+map_j] <= 1'b1;
+                                end
                             end
                         end
                     end
@@ -411,32 +482,43 @@ module decoder_inloop_filters (
     reg [5:0] in_x_d, in_y_d;
     reg [1:0] in_comp_d;
     reg       in_valid_fill_d;
+    reg       in_fill_bank_d;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             in_x_d          <= 6'd0;
             in_y_d          <= 6'd0;
             in_comp_d       <= 2'd0;
             in_valid_fill_d <= 1'b0;
+            in_fill_bank_d  <= 1'b0;
         end else begin
             in_x_d          <= in_x;
             in_y_d          <= in_y;
             in_comp_d       <= in_comp;
-            in_valid_fill_d <= in_valid && (filter_state == S_FILL);
+            in_valid_fill_d <= fill_accept;
+            in_fill_bank_d  <= fill_bank;
         end
     end
 
     //=========================================================================
-    // Fill Logic (Original Pixels for SAO stats)
+    // Fill Logic (Original Pixels for SAO stats, 2-bank Ping-Pong)
     //=========================================================================
     always @(posedge clk) begin
-        // Store original pixels for SAO stats (allow 1-cycle post-S_FILL tail for last pixel 6143)
-        if (orig_in_valid && (filter_state == S_FILL || in_valid_fill_d)) begin
-            case (in_comp_d)
-                2'd0: orig_y_ram[{in_y_d[5:0], in_x_d[5:0]}] <= orig_in_y;
-                2'd1: orig_u_ram[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_u;
-                2'd2: orig_v_ram[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_v;
-                default: ;
-            endcase
+        if (orig_in_valid && in_valid_fill_d) begin
+            if (!in_fill_bank_d) begin
+                case (in_comp_d)
+                    2'd0: orig_y_ram_0[{in_y_d[5:0], in_x_d[5:0]}] <= orig_in_y;
+                    2'd1: orig_u_ram_0[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_u;
+                    2'd2: orig_v_ram_0[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_v;
+                    default: ;
+                endcase
+            end else begin
+                case (in_comp_d)
+                    2'd0: orig_y_ram_1[{in_y_d[5:0], in_x_d[5:0]}] <= orig_in_y;
+                    2'd1: orig_u_ram_1[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_u;
+                    2'd2: orig_v_ram_1[{in_y_d[4:0], in_x_d[4:0]}] <= orig_in_v;
+                    default: ;
+                endcase
+            end
         end
     end
 
@@ -467,24 +549,24 @@ module decoder_inloop_filters (
         .clk(clk), .rst_n(rst_n),
         .ctu_valid      (filter_state == S_DB && !db_ctu_done),
         .ctu_ready      (),
-        .ctu_addr       ({3'd0, ctu_addr}),
+        .ctu_addr       ({3'd0, bank_ctu_addr[proc_bank]}),
         .ctu_x          ({4'd0, cur_ctu_x}),
         .ctu_y          ({4'd0, cur_ctu_y}),
         .frame_width_px (frame_width_px),
         .frame_height_px(frame_height_px),
-        .cu_map_pred_mode (cu_map_pred_mode),
-        .cu_map_cbf_luma  (cu_map_cbf_luma),
-        .cu_map_cbf_chroma(cu_map_cbf_chroma),
-        .cu_map_ref_l0    (cu_map_ref_l0),
-        .cu_map_ref_l1    (cu_map_ref_l1),
-        .cu_map_bi_pred   (cu_map_bi_pred),
-        .cu_map_mvx_l0    (cu_map_mvx_l0),
-        .cu_map_mvy_l0    (cu_map_mvy_l0),
-        .cu_map_mvx_l1    (cu_map_mvx_l1),
-        .cu_map_mvy_l1    (cu_map_mvy_l1),
-        .cu_map_qp        (cu_map_qp),
-        .cu_map_edge_ver  (cu_map_edge_ver),
-        .cu_map_edge_hor  (cu_map_edge_hor),
+        .cu_map_pred_mode (proc_cu_map_pred_mode),
+        .cu_map_cbf_luma  (proc_cu_map_cbf_luma),
+        .cu_map_cbf_chroma(proc_cu_map_cbf_chroma),
+        .cu_map_ref_l0    (proc_cu_map_ref_l0),
+        .cu_map_ref_l1    (proc_cu_map_ref_l1),
+        .cu_map_bi_pred   (proc_cu_map_bi_pred),
+        .cu_map_mvx_l0    (proc_cu_map_mvx_l0),
+        .cu_map_mvy_l0    (proc_cu_map_mvy_l0),
+        .cu_map_mvx_l1    (proc_cu_map_mvx_l1),
+        .cu_map_mvy_l1    (proc_cu_map_mvy_l1),
+        .cu_map_qp        (proc_cu_map_qp),
+        .cu_map_edge_ver  (proc_cu_map_edge_ver),
+        .cu_map_edge_hor  (proc_cu_map_edge_hor),
         .pix_rd_valid   (db_pix_rd_valid),
         .pix_rd_ready   (db_pix_rd_ready),
         .pix_rd_x       (db_pix_rd_x),
@@ -555,7 +637,7 @@ module decoder_inloop_filters (
         .ctu_y          (cur_ctu_y),
         .frame_width_px (frame_width_px),
         .frame_height_px(frame_height_px),
-        .ctu_qp         (ctu_qp),
+        .ctu_qp         (bank_ctu_qp[proc_bank]),
         .rec_rd_valid   (stats_rec_rd_valid),
         .rec_rd_x       (stats_rec_rd_x),
         .rec_rd_y       (stats_rec_rd_y),
@@ -736,15 +818,25 @@ module decoder_inloop_filters (
     wire [9:0]  syn_cb_rd_addr   = (filter_state == S_DUMP) ? dump_rd_addr[9:0]  : {rd_y[4:0], rd_x[4:0]};
     wire [9:0]  syn_cr_rd_addr   = (filter_state == S_DUMP) ? dump_rd_addr[9:0]  : {rd_y[4:0], rd_x[4:0]};
 
-    reg [9:0] luma_rd_q;
-    reg [9:0] cb_rd_q;
-    reg [9:0] cr_rd_q;
+    reg [9:0] luma_rd_0_q, luma_rd_1_q;
+    reg [9:0] cb_rd_0_q,   cb_rd_1_q;
+    reg [9:0] cr_rd_0_q,   cr_rd_1_q;
+    reg       proc_bank_rd_q;
+    wire [9:0] luma_rd_q = proc_bank_rd_q ? luma_rd_1_q : luma_rd_0_q;
+    wire [9:0] cb_rd_q   = proc_bank_rd_q ? cb_rd_1_q   : cb_rd_0_q;
+    wire [9:0] cr_rd_q   = proc_bank_rd_q ? cr_rd_1_q   : cr_rd_0_q;
     reg [1:0] rd_comp_q;
     reg [9:0] db_nbr_rd_q;
     reg       db_rd_neighbor_q;
 
     // SAO stats original pixel synchronous read registers
-    reg [9:0] orig_y_rd_q, orig_u_rd_q, orig_v_rd_q;
+    reg [9:0] orig_y_rd_0_q, orig_y_rd_1_q;
+    reg [9:0] orig_u_rd_0_q, orig_u_rd_1_q;
+    reg [9:0] orig_v_rd_0_q, orig_v_rd_1_q;
+    reg       proc_bank_orig_q;
+    wire [9:0] orig_y_rd_q = proc_bank_orig_q ? orig_y_rd_1_q : orig_y_rd_0_q;
+    wire [9:0] orig_u_rd_q = proc_bank_orig_q ? orig_u_rd_1_q : orig_u_rd_0_q;
+    wire [9:0] orig_v_rd_q = proc_bank_orig_q ? orig_v_rd_1_q : orig_v_rd_0_q;
     reg [1:0] stats_org_rd_comp_q;
 
     // SAO cross-CTU neighbor synchronous read registers (Safeguard 2)
@@ -855,16 +947,24 @@ module decoder_inloop_filters (
         end
 
         if (!dump_stall) begin
-            luma_rd_q           <= luma_ram[syn_luma_rd_addr];
-            cb_rd_q             <= cb_ram[syn_cb_rd_addr];
-            cr_rd_q             <= cr_ram[syn_cr_rd_addr];
+            luma_rd_0_q         <= luma_ram_0[syn_luma_rd_addr];
+            luma_rd_1_q         <= luma_ram_1[syn_luma_rd_addr];
+            cb_rd_0_q           <= cb_ram_0[syn_cb_rd_addr];
+            cb_rd_1_q           <= cb_ram_1[syn_cb_rd_addr];
+            cr_rd_0_q           <= cr_ram_0[syn_cr_rd_addr];
+            cr_rd_1_q           <= cr_ram_1[syn_cr_rd_addr];
+            proc_bank_rd_q      <= proc_bank;
             rd_comp_q           <= rd_comp;
         end
 
         // SAO stats original pixel read
-        orig_y_rd_q         <= orig_y_ram[{stats_org_rd_y[5:0], stats_org_rd_x[5:0]}];
-        orig_u_rd_q         <= orig_u_ram[{stats_org_rd_y[4:0], stats_org_rd_x[4:0]}];
-        orig_v_rd_q         <= orig_v_ram[{stats_org_rd_y[4:0], stats_org_rd_x[4:0]}];
+        orig_y_rd_0_q       <= orig_y_ram_0[{stats_org_rd_y[5:0], stats_org_rd_x[5:0]}];
+        orig_y_rd_1_q       <= orig_y_ram_1[{stats_org_rd_y[5:0], stats_org_rd_x[5:0]}];
+        orig_u_rd_0_q       <= orig_u_ram_0[{stats_org_rd_y[4:0], stats_org_rd_x[4:0]}];
+        orig_u_rd_1_q       <= orig_u_ram_1[{stats_org_rd_y[4:0], stats_org_rd_x[4:0]}];
+        orig_v_rd_0_q       <= orig_v_ram_0[{stats_org_rd_y[4:0], stats_org_rd_x[4:0]}];
+        orig_v_rd_1_q       <= orig_v_ram_1[{stats_org_rd_y[4:0], stats_org_rd_x[4:0]}];
+        proc_bank_orig_q    <= proc_bank;
         stats_org_rd_comp_q <= stats_org_rd_comp;
     end
 
@@ -947,41 +1047,115 @@ module decoder_inloop_filters (
                                    (({12'd0, dump_ctu_y_q} << 5) + {7'd0, dump_count_q[9:5]});
 
     //=========================================================================
-    // Unified SRAM Write Port (Fill, Deblock, and SAO)
+    // Unified SRAM Write Ports (2-Bank Ping-Pong: Fill Bank + Proc Bank)
     //=========================================================================
+    // Pre-deblock boundary staging write during Fill
     always @(posedge clk) begin
-        if (in_valid && filter_state == S_FILL) begin
+        if (fill_accept) begin
             case (in_comp)
                 2'd0: begin
-                    luma_ram[{in_y[5:0], in_x[5:0]}] <= in_pixel;
-
-                    if (cur_ctu_x == 0 && in_x[5:0] >= 6'd60)
-                        col_buf_luma[in_y[5:0]][in_x[1:0]] <= in_pixel;
-                    if (cur_ctu_y == 0 && in_y[5:0] >= 6'd60)
-                        line_buf_luma[in_y[1:0]][({7'd0, cur_ctu_x} << 6) + {1'b0, in_x[5:0]}] <= in_pixel;
-                    if (cur_ctu_x == 0 && cur_ctu_y == 0 && in_y[5:0] >= 6'd60 && in_x[5:0] >= 6'd60)
-                        corner_buf_luma[in_y[1:0]][in_x[1:0]] <= in_pixel;
+                    if (in_x[5:0] >= 6'd60) stage_col_luma[in_y[5:0]][in_x[1:0]] <= in_pixel;
+                    if (in_y[5:0] >= 6'd60) stage_line_luma[in_y[1:0]][in_x[5:0]] <= in_pixel;
                 end
                 2'd1: begin
-                    cb_ram[{in_y[4:0], in_x[4:0]}] <= in_pixel;
-                    if (cur_ctu_x == 0 && in_x[4:0] >= 5'd28)
-                        col_buf_cb[in_y[4:0]][in_x[1:0]] <= in_pixel;
-                    if (cur_ctu_y == 0 && in_y[4:0] >= 5'd30)
-                        line_buf_cb[in_y[0]][({6'd0, cur_ctu_x} << 5) + {1'b0, in_x[4:0]}] <= in_pixel;
-                    if (cur_ctu_x == 0 && cur_ctu_y == 0 && in_y[4:0] >= 5'd30 && in_x[4:0] >= 5'd28)
-                        corner_buf_cb[in_y[0]][in_x[1:0]] <= in_pixel;
+                    if (in_x[4:0] >= 5'd28) stage_col_cb[in_y[4:0]][in_x[1:0]] <= in_pixel;
+                    if (in_y[4:0] >= 5'd30) stage_line_cb[in_y[0]][in_x[4:0]] <= in_pixel;
                 end
                 2'd2: begin
-                    cr_ram[{in_y[4:0], in_x[4:0]}] <= in_pixel;
-                    if (cur_ctu_x == 0 && in_x[4:0] >= 5'd28)
-                        col_buf_cr[in_y[4:0]][in_x[1:0]] <= in_pixel;
-                    if (cur_ctu_y == 0 && in_y[4:0] >= 5'd30)
-                        line_buf_cr[in_y[0]][({6'd0, cur_ctu_x} << 5) + {1'b0, in_x[4:0]}] <= in_pixel;
-                    if (cur_ctu_x == 0 && cur_ctu_y == 0 && in_y[4:0] >= 5'd30 && in_x[4:0] >= 5'd28)
-                        corner_buf_cr[in_y[0]][in_x[1:0]] <= in_pixel;
+                    if (in_x[4:0] >= 5'd28) stage_col_cr[in_y[4:0]][in_x[1:0]] <= in_pixel;
+                    if (in_y[4:0] >= 5'd30) stage_line_cr[in_y[0]][in_x[4:0]] <= in_pixel;
                 end
                 default: ;
             endcase
+        end
+    end
+
+    // Bank 0 pixel BRAMs
+    always @(posedge clk) begin
+        if (fill_accept && !fill_bank) begin
+            case (in_comp)
+                2'd0: luma_ram_0[{in_y[5:0], in_x[5:0]}] <= in_pixel;
+                2'd1: cb_ram_0  [{in_y[4:0], in_x[4:0]}] <= in_pixel;
+                2'd2: cr_ram_0  [{in_y[4:0], in_x[4:0]}] <= in_pixel;
+                default: ;
+            endcase
+        end else if ((filter_state != S_FILL) && !proc_bank && db_pix_wr_valid && db_pix_wr_ready && !db_pix_wr_neighbor) begin
+            case (db_pix_wr_comp)
+                2'd0: luma_ram_0[{db_pix_wr_y[5:0], db_pix_wr_x[5:0]}] <= db_pix_wr_data;
+                2'd1: cb_ram_0  [{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
+                2'd2: cr_ram_0  [{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
+                default: ;
+            endcase
+        end else if ((filter_state != S_FILL) && !proc_bank && sao_pix_wr_valid) begin
+            case (sao_pix_wr_comp)
+                2'd0: luma_ram_0[{sao_pix_wr_y[5:0], sao_pix_wr_x[5:0]}] <= sao_pix_wr_data;
+                2'd1: cb_ram_0  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
+                2'd2: cr_ram_0  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
+                default: ;
+            endcase
+        end
+    end
+
+    // Bank 1 pixel BRAMs
+    always @(posedge clk) begin
+        if (fill_accept && fill_bank) begin
+            case (in_comp)
+                2'd0: luma_ram_1[{in_y[5:0], in_x[5:0]}] <= in_pixel;
+                2'd1: cb_ram_1  [{in_y[4:0], in_x[4:0]}] <= in_pixel;
+                2'd2: cr_ram_1  [{in_y[4:0], in_x[4:0]}] <= in_pixel;
+                default: ;
+            endcase
+        end else if ((filter_state != S_FILL) && proc_bank && db_pix_wr_valid && db_pix_wr_ready && !db_pix_wr_neighbor) begin
+            case (db_pix_wr_comp)
+                2'd0: luma_ram_1[{db_pix_wr_y[5:0], db_pix_wr_x[5:0]}] <= db_pix_wr_data;
+                2'd1: cb_ram_1  [{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
+                2'd2: cr_ram_1  [{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
+                default: ;
+            endcase
+        end else if ((filter_state != S_FILL) && proc_bank && sao_pix_wr_valid) begin
+            case (sao_pix_wr_comp)
+                2'd0: luma_ram_1[{sao_pix_wr_y[5:0], sao_pix_wr_x[5:0]}] <= sao_pix_wr_data;
+                2'd1: cb_ram_1  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
+                2'd2: cr_ram_1  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
+                default: ;
+            endcase
+        end
+    end
+
+    // Cross-CTU neighbor col/line/corner buffers: atomic stage commit on S_FILL->S_DB + deblock writes
+    integer st_i, st_j;
+    always @(posedge clk) begin
+        if (filter_state == S_FILL && bank_full[proc_bank]) begin
+            if (cur_ctu_x == 0) begin
+                for (st_i = 0; st_i < 64; st_i = st_i + 1)
+                    for (st_j = 0; st_j < 4; st_j = st_j + 1)
+                        col_buf_luma[st_i][st_j] <= stage_col_luma[st_i][st_j];
+                for (st_i = 0; st_i < 32; st_i = st_i + 1)
+                    for (st_j = 0; st_j < 4; st_j = st_j + 1) begin
+                        col_buf_cb[st_i][st_j] <= stage_col_cb[st_i][st_j];
+                        col_buf_cr[st_i][st_j] <= stage_col_cr[st_i][st_j];
+                    end
+            end
+            if (cur_ctu_y == 0) begin
+                for (st_i = 0; st_i < 4; st_i = st_i + 1)
+                    for (st_j = 0; st_j < 64; st_j = st_j + 1)
+                        line_buf_luma[st_i][({7'd0, cur_ctu_x} << 6) + st_j] <= stage_line_luma[st_i][st_j];
+                for (st_i = 0; st_i < 2; st_i = st_i + 1)
+                    for (st_j = 0; st_j < 32; st_j = st_j + 1) begin
+                        line_buf_cb[st_i][({6'd0, cur_ctu_x} << 5) + st_j] <= stage_line_cb[st_i][st_j];
+                        line_buf_cr[st_i][({6'd0, cur_ctu_x} << 5) + st_j] <= stage_line_cr[st_i][st_j];
+                    end
+            end
+            if (cur_ctu_x == 0 && cur_ctu_y == 0) begin
+                for (st_i = 0; st_i < 4; st_i = st_i + 1)
+                    for (st_j = 0; st_j < 4; st_j = st_j + 1)
+                        corner_buf_luma[st_i][st_j] <= stage_col_luma[60 + st_i][st_j];
+                for (st_i = 0; st_i < 2; st_i = st_i + 1)
+                    for (st_j = 0; st_j < 4; st_j = st_j + 1) begin
+                        corner_buf_cb[st_i][st_j] <= stage_col_cb[30 + st_i][st_j];
+                        corner_buf_cr[st_i][st_j] <= stage_col_cr[30 + st_i][st_j];
+                    end
+            end
         end else if (db_pix_wr_valid && db_pix_wr_ready) begin
             if (db_pix_wr_neighbor) begin
                 if (db_pix_wr_corner) begin
@@ -1045,8 +1219,6 @@ module decoder_inloop_filters (
             end else begin
                 case (db_pix_wr_comp)
                     2'd0: begin
-                        luma_ram[{db_pix_wr_y[5:0], db_pix_wr_x[5:0]}] <= db_pix_wr_data;
-
                         if (cur_ctu_x == 0 && db_pix_wr_x[5:0] >= 6'd60)
                             col_buf_luma[db_pix_wr_y[5:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                         if (cur_ctu_y == 0 && db_pix_wr_y[5:0] >= 6'd60)
@@ -1055,7 +1227,6 @@ module decoder_inloop_filters (
                             corner_buf_luma[db_pix_wr_y[1:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                     end
                     2'd1: begin
-                        cb_ram[{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
                         if (cur_ctu_x == 0 && db_pix_wr_x[4:0] >= 5'd28)
                             col_buf_cb[db_pix_wr_y[4:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                         if (cur_ctu_y == 0 && db_pix_wr_y[4:0] >= 5'd30)
@@ -1064,7 +1235,6 @@ module decoder_inloop_filters (
                             corner_buf_cb[db_pix_wr_y[0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                     end
                     2'd2: begin
-                        cr_ram[{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
                         if (cur_ctu_x == 0 && db_pix_wr_x[4:0] >= 5'd28)
                             col_buf_cr[db_pix_wr_y[4:0]][db_pix_wr_x[1:0]] <= db_pix_wr_data;
                         if (cur_ctu_y == 0 && db_pix_wr_y[4:0] >= 5'd30)
@@ -1075,16 +1245,6 @@ module decoder_inloop_filters (
                     default: ;
                 endcase
             end
-        end else if (sao_pix_wr_valid) begin
-            case (sao_pix_wr_comp)
-                2'd0: begin
-                    luma_ram[{sao_pix_wr_y[5:0], sao_pix_wr_x[5:0]}] <= sao_pix_wr_data;
-
-                end
-                2'd1: cb_ram  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
-                2'd2: cr_ram  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
-                default: ;
-            endcase
         end
     end
 
@@ -1109,13 +1269,20 @@ module decoder_inloop_filters (
     //=========================================================================
     // Main FSM & 2-Slot Output Skid Buffer
     //=========================================================================
-    wire dump_last_drained = (!out_valid_r && !skid_valid_r) || (out_valid_r && out_ready && !skid_valid_r);
+    assign dump_last_drained = (!out_valid_r && !skid_valid_r) || (out_valid_r && out_ready && !skid_valid_r);
     wire pre_out_push      = pre_out_valid && pre_out_ready;
     wire out_pop           = out_valid_r && out_ready;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             filter_state           <= S_FILL;
+            fill_bank              <= 1'b0;
+            proc_bank              <= 1'b0;
+            bank_full              <= 2'b00;
+            bank_ctu_addr[0]       <= 0;
+            bank_ctu_addr[1]       <= 0;
+            bank_ctu_qp[0]         <= 6'd0;
+            bank_ctu_qp[1]         <= 6'd0;
             pixel_count            <= 13'd0;
             dump_wait_drain        <= 1'b0;
             out_valid_r            <= 1'b0;
@@ -1176,18 +1343,26 @@ module decoder_inloop_filters (
                 skid_abs_y_r <= pre_out_abs_y;
             end
 
+            // Independent Ping-Pong Fill Engine (runs concurrently with S_DB..S_DUMP)
+            if (fill_accept) begin
+                if (ctu_recon_done) begin
+                    pixel_count              <= 13'd0;
+                    bank_full[fill_bank]     <= 1'b1;
+                    bank_ctu_addr[fill_bank] <= ctu_addr;
+                    bank_ctu_qp[fill_bank]   <= ctu_qp;
+                    fill_bank                <= ~fill_bank;
+                end else begin
+                    pixel_count <= pixel_count + 13'd1;
+                end
+            end
+
             case (filter_state)
                 S_FILL: begin
-                    if (in_valid) begin
-                        if (ctu_recon_done) begin
-                            pixel_count  <= 13'd0;
-                            filter_state <= S_DB;
-                            // synthesis translate_off
-                            $display("Time=%0t: [INLOOP_FILTERS] CTU (%0d,%0d) Reconstructed. Starting Deblocking Filter...", $time, cur_ctu_x, cur_ctu_y);
-                            // synthesis translate_on
-                        end else begin
-                            pixel_count <= pixel_count + 13'd1;
-                        end
+                    if (bank_full[proc_bank]) begin
+                        filter_state <= S_DB;
+                        // synthesis translate_off
+                        $display("Time=%0t: [INLOOP_FILTERS] CTU (%0d,%0d) Reconstructed. Starting Deblocking Filter...", $time, cur_ctu_x, cur_ctu_y);
+                        // synthesis translate_on
                     end
                 end
                 S_DB: if (db_ctu_done) begin
@@ -1223,6 +1398,8 @@ module decoder_inloop_filters (
                     end else if (dump_last_drained) begin
                         dump_wait_drain              <= 1'b0;
                         filter_state                 <= S_FILL;
+                        bank_full[proc_bank]         <= 1'b0;
+                        proc_bank                    <= ~proc_bank;
                         top_sao_type[cur_ctu_x]      <= dump_eff_sao_type;
                         top_sao_band_pos[cur_ctu_x]  <= dump_eff_band_pos;
                         top_sao_bo_offset[cur_ctu_x] <= dump_eff_bo_off;

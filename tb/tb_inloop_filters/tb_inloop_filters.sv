@@ -450,6 +450,15 @@ module tb_inloop_filters;
         logic [5:0]  p2_chk_buf_nbr_cx;
         logic [9:0]  p2_chk_buf_dpb_val;
 
+        typedef struct {
+            logic [9:0] data;
+            logic       is_vert;
+            logic       corner;
+            logic [5:0] y;
+            logic [1:0] comp;
+        } p2_db_nbr_q_t;
+        p2_db_nbr_q_t p2_nbr_fifo[$];
+
         function automatic integer p2_clip10(input integer v);
             if (v < 0) p2_clip10 = 0;
             else if (v > 1023) p2_clip10 = 1023;
@@ -591,6 +600,7 @@ module tb_inloop_filters;
                 p2_prev_state      <= 3'd0;
                 p2_ctu_gld_ready   <= 1'b0;
                 p2_chk_buf_pending <= 1'b0;
+                p2_nbr_fifo.delete();
             end else begin
                 p2_prev_state <= u_dut_inloop.filter_state;
 
@@ -630,11 +640,17 @@ module tb_inloop_filters;
                     integer r_i, c_i;
                     for (r_i = 0; r_i < 64; r_i++)
                         for (c_i = 0; c_i < 64; c_i++)
-                            p2_postdb_y[r_i][c_i] = u_dut_inloop.luma_ram[{r_i[5:0], c_i[5:0]}];
+                            p2_postdb_y[r_i][c_i] = u_dut_inloop.proc_bank ?
+                                u_dut_inloop.luma_ram_1[{r_i[5:0], c_i[5:0]}] :
+                                u_dut_inloop.luma_ram_0[{r_i[5:0], c_i[5:0]}];
                     for (r_i = 0; r_i < 32; r_i++)
                         for (c_i = 0; c_i < 32; c_i++) begin
-                            p2_postdb_cb[r_i][c_i] = u_dut_inloop.cb_ram[{r_i[4:0], c_i[4:0]}];
-                            p2_postdb_cr[r_i][c_i] = u_dut_inloop.cr_ram[{r_i[4:0], c_i[4:0]}];
+                            p2_postdb_cb[r_i][c_i] = u_dut_inloop.proc_bank ?
+                                u_dut_inloop.cb_ram_1[{r_i[4:0], c_i[4:0]}] :
+                                u_dut_inloop.cb_ram_0[{r_i[4:0], c_i[4:0]}];
+                            p2_postdb_cr[r_i][c_i] = u_dut_inloop.proc_bank ?
+                                u_dut_inloop.cr_ram_1[{r_i[4:0], c_i[4:0]}] :
+                                u_dut_inloop.cr_ram_0[{r_i[4:0], c_i[4:0]}];
                         end
                     for (r_i = 0; r_i < 64; r_i++) begin
                         p2_nbr_left_y[r_i] = u_dut_inloop.col_buf_luma[r_i][3];
@@ -652,8 +668,31 @@ module tb_inloop_filters;
                     p2_ctu_gld_ready <= 1'b0;
                 end
 
-                // 3) Check db_pix_wr_neighbor DPB output (S_DB)
+                // 3a) Capture db_pix_wr_neighbor at push into skid buffer & schedule buffer purity check
+                if (u_dut_inloop.filter_state == 3'd1 && u_dut_inloop.db_pix_wr_valid && u_dut_inloop.db_pix_wr_ready && u_dut_inloop.db_pix_wr_neighbor) begin
+                    p2_db_nbr_q_t pkt;
+                    pkt.data    = u_dut_inloop.db_pix_wr_data;
+                    pkt.is_vert = u_dut_inloop.db_pix_wr_is_vert;
+                    pkt.corner  = u_dut_inloop.db_pix_wr_corner;
+                    pkt.y       = u_dut_inloop.db_pix_wr_y;
+                    pkt.comp    = u_dut_inloop.db_pix_wr_comp;
+                    p2_nbr_fifo.push_back(pkt);
+
+                    p2_chk_buf_pending <= 1'b1;
+                    p2_chk_buf_val     <= u_dut_inloop.db_pix_wr_data;
+                    p2_chk_buf_dpb_val <= u_dut_inloop.db_nbr_sao_pixel;
+                    p2_chk_buf_x       <= u_dut_inloop.db_pix_wr_x;
+                    p2_chk_buf_y       <= u_dut_inloop.db_pix_wr_y;
+                    p2_chk_buf_comp    <= u_dut_inloop.db_pix_wr_comp;
+                    p2_chk_buf_is_vert <= u_dut_inloop.db_pix_wr_is_vert;
+                    p2_chk_buf_corner  <= u_dut_inloop.db_pix_wr_corner;
+                    p2_chk_buf_nbr_cx  <= (u_dut_inloop.db_pix_wr_is_vert && !u_dut_inloop.db_pix_wr_corner) ?
+                                          (u_dut_inloop.cur_ctu_x - 6'd1) : u_dut_inloop.cur_ctu_x;
+                end
+
+                // 3b) Check db_pix_wr_neighbor DPB output (S_DB) aligned through skid buffer
                 if (u_dut_inloop.filter_state == 3'd1 && dut_out_valid && dut_out_ready) begin
+                    p2_db_nbr_q_t pkt;
                     logic        is_top_nbr, is_left_nbr;
                     integer      nbr_cx_i, nbr_cy_i, nbr_ctu_idx_i;
                     logic [1:0]  n_st;
@@ -661,29 +700,30 @@ module tb_inloop_filters;
                     logic [19:0] n_bo;
                     logic [9:0]  exp_nbr_dpb;
 
-                    is_top_nbr  = u_dut_inloop.db_pix_wr_corner ?
-                                  (u_dut_inloop.db_pix_wr_y >= (u_dut_inloop.db_pix_wr_comp == 2'd0 ? 6'd60 : 6'd30)) :
-                                  (!u_dut_inloop.db_pix_wr_is_vert);
-                    is_left_nbr = u_dut_inloop.db_pix_wr_corner ? 1'b1 : u_dut_inloop.db_pix_wr_is_vert;
+                    pkt         = p2_nbr_fifo.pop_front();
+                    is_top_nbr  = pkt.corner ?
+                                  (pkt.y >= (pkt.comp == 2'd0 ? 6'd60 : 6'd30)) :
+                                  (!pkt.is_vert);
+                    is_left_nbr = pkt.corner ? 1'b1 : pkt.is_vert;
                     nbr_cx_i = (is_left_nbr && p2_cur_cx > 0) ? (p2_cur_cx - 1) : p2_cur_cx;
                     nbr_cy_i = (is_top_nbr  && p2_cur_cy > 0) ? (p2_cur_cy - 1) : p2_cur_cy;
                     nbr_ctu_idx_i = nbr_cy_i * 2 + nbr_cx_i;
 
-                    if (u_dut_inloop.db_pix_wr_corner) p2_db_nbr_corner_cnt++;
-                    else if (u_dut_inloop.db_pix_wr_is_vert) p2_db_nbr_left_cnt++;
+                    if (pkt.corner) p2_db_nbr_corner_cnt++;
+                    else if (pkt.is_vert) p2_db_nbr_left_cnt++;
                     else p2_db_nbr_top_cnt++;
 
                     n_st = p2_ctu_sao_type[nbr_ctu_idx_i][dut_out_comp*2 +: 2];
                     n_bp = p2_ctu_band_pos[nbr_ctu_idx_i][dut_out_comp*5 +: 5];
                     n_bo = p2_ctu_bo_off[nbr_ctu_idx_i][dut_out_comp*20 +: 20];
-                    exp_nbr_dpb = (n_st == 2'd2) ? p2_apply_bo(u_dut_inloop.db_pix_wr_data, n_bp, n_bo) : u_dut_inloop.db_pix_wr_data;
-                    if (n_st == 2'd2 && exp_nbr_dpb != u_dut_inloop.db_pix_wr_data)
+                    exp_nbr_dpb = (n_st == 2'd2) ? p2_apply_bo(pkt.data, n_bp, n_bo) : pkt.data;
+                    if (n_st == 2'd2 && exp_nbr_dpb != pkt.data)
                         p2_db_nbr_bo_active_cnt++;
 
                     if (dut_out_pixel !== exp_nbr_dpb) begin
                         $display("FAIL [P2 NBR BO] CTU(%0d,%0d) -> nbr(%0d,%0d) comp=%0d abs=(%0d,%0d) post_db=%0d dut_dpb=%0d exp_dpb=%0d",
                                  p2_cur_cx, p2_cur_cy, nbr_cx_i, nbr_cy_i, dut_out_comp,
-                                 dut_out_abs_x, dut_out_abs_y, u_dut_inloop.db_pix_wr_data, dut_out_pixel, exp_nbr_dpb);
+                                 dut_out_abs_x, dut_out_abs_y, pkt.data, dut_out_pixel, exp_nbr_dpb);
                         p2_errors++;
                     end
 
@@ -698,18 +738,6 @@ module tb_inloop_filters;
                         p2_dpb_dut_cr[dut_out_abs_y][dut_out_abs_x] <= dut_out_pixel;
                         p2_dpb_gld_cr[dut_out_abs_y][dut_out_abs_x] <= exp_nbr_dpb;
                     end
-
-                    // Schedule buffer purity verification on next edge
-                    p2_chk_buf_pending <= 1'b1;
-                    p2_chk_buf_val     <= u_dut_inloop.db_pix_wr_data;
-                    p2_chk_buf_dpb_val <= dut_out_pixel;
-                    p2_chk_buf_x       <= u_dut_inloop.db_pix_wr_x;
-                    p2_chk_buf_y       <= u_dut_inloop.db_pix_wr_y;
-                    p2_chk_buf_comp    <= u_dut_inloop.db_pix_wr_comp;
-                    p2_chk_buf_is_vert <= u_dut_inloop.db_pix_wr_is_vert;
-                    p2_chk_buf_corner  <= u_dut_inloop.db_pix_wr_corner;
-                    p2_chk_buf_nbr_cx  <= (u_dut_inloop.db_pix_wr_is_vert && !u_dut_inloop.db_pix_wr_corner) ?
-                                          (u_dut_inloop.cur_ctu_x - 6'd1) : u_dut_inloop.cur_ctu_x;
                 end
 
                 // 4) Record SAO params & build golden CTU output when entering S_DUMP

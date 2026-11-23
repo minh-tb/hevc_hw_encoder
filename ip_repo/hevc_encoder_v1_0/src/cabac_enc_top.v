@@ -114,8 +114,10 @@ module cabac_enc_top #(
     input  wire [14:0] sao_band_pos,
     input  wire [59:0] sao_bo_offset,
 
-    // ── SAO CTU delay & drain (T3-13) ────────────────────────────────────
+    // ── SAO CTU delay & drain (T3-13) & 2-bank CTU Ping-Pong ────────────
     input  wire        ctu_sao_delay_en,
+    input  wire        ctu_fe_done,
+    output wire        ctu_bin_wr_ready,
     input  wire        ctu_bin_drain_en,
     output wire        ctu_bin_drain_done,
 
@@ -403,17 +405,26 @@ module cabac_enc_top #(
     );
 
     // =========================================================================
-    // CTU-Delayed Bin Buffer (8192 x 10 Block RAM, Safeguard 3)
+    // CTU-Delayed Bin Buffer (2-Bank Ping-Pong 8192 x 10 Block RAM)
     // =========================================================================
     wire eff_ctu_sao_delay_en = (ctu_sao_delay_en === 1'b1);
     wire eff_ctu_bin_drain_en = (ctu_bin_drain_en === 1'b1);
 
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] ctu_bin_ram [0:8191];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] ctu_bin_ram_0 [0:8191];
+    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [9:0] ctu_bin_ram_1 [0:8191];
 
-    reg  [12:0] bin_wr_ptr;
-    reg  [12:0] bin_rd_ptr;
-    reg  [9:0]  bin_ram_rdata_q;
-    reg         drain_prefetched_valid;
+    reg        bin_wr_bank;
+    reg        bin_rd_bank;
+    reg [1:0]  bin_bank_full;
+    reg [12:0] bin_wr_ptr;
+    reg [12:0] bin_rd_ptr;
+    reg [12:0] bin_bank_len [0:1];
+    reg [9:0]  bin_ram_rdata_0_q;
+    reg [9:0]  bin_ram_rdata_1_q;
+    reg        bin_rd_bank_q;
+    reg        drain_prefetched_valid;
+
+    wire [9:0] bin_ram_rdata_q = bin_rd_bank_q ? bin_ram_rdata_1_q : bin_ram_rdata_0_q;
 
     wire        cu_bin_valid = sc_bin_valid | sp_bin_valid | sf_bin_valid;
     wire        cu_bin_value = sc_bin_valid ? sc_bin_value :
@@ -423,43 +434,77 @@ module cabac_enc_top #(
     wire        cu_bin_is_ep = sc_bin_valid ? sc_is_ep :
                                sp_bin_valid ? sp_is_ep : sf_is_ep;
 
-    assign      cu_bin_rdy   = eff_ctu_sao_delay_en ? (bin_wr_ptr < 13'd8191) : be_bin_rdy;
+    assign      ctu_bin_wr_ready = !bin_bank_full[bin_wr_bank];
+    assign      cu_bin_rdy   = eff_ctu_sao_delay_en ? (!bin_bank_full[bin_wr_bank] && (bin_wr_ptr < 13'd8191)) : be_bin_rdy;
 
     wire        bin_ram_we   = eff_ctu_sao_delay_en && cu_bin_valid && cu_bin_rdy;
     wire [9:0]  bin_ram_wdata = {cu_bin_is_ep, cu_bin_value, cu_bin_ctx_id};
 
-    wire        drain_has_data = (bin_rd_ptr < bin_wr_ptr);
+    wire [12:0] rd_bank_len     = bin_bank_len[bin_rd_bank];
+    wire        drain_has_data  = bin_bank_full[bin_rd_bank] && (bin_rd_ptr < rd_bank_len);
     wire        drain_bin_valid = eff_ctu_sao_delay_en && eff_ctu_bin_drain_en && !ss_bin_valid
                                 && drain_has_data && drain_prefetched_valid;
     wire        drain_bin_fire  = drain_bin_valid && be_bin_rdy;
     assign      ctu_bin_drain_done = eff_ctu_sao_delay_en
-                                   ? (eff_ctu_bin_drain_en && !drain_has_data && !bin_ram_we)
+                                   ? (eff_ctu_bin_drain_en && bin_bank_full[bin_rd_bank] && !drain_has_data)
                                    : 1'b1;
 
     wire [12:0] bin_rd_addr_mux = drain_bin_fire ? (bin_rd_ptr + 13'd1) : bin_rd_ptr;
 
     always @(posedge clk) begin
-        if (bin_ram_we)
-            ctu_bin_ram[bin_wr_ptr] <= bin_ram_wdata;
-        bin_ram_rdata_q <= ctu_bin_ram[bin_rd_addr_mux];
+        if (bin_ram_we && !bin_wr_bank)
+            ctu_bin_ram_0[bin_wr_ptr] <= bin_ram_wdata;
+        if (bin_ram_we && bin_wr_bank)
+            ctu_bin_ram_1[bin_wr_ptr] <= bin_ram_wdata;
+        bin_ram_rdata_0_q <= ctu_bin_ram_0[bin_rd_addr_mux];
+        bin_ram_rdata_1_q <= ctu_bin_ram_1[bin_rd_addr_mux];
+        bin_rd_bank_q     <= bin_rd_bank;
     end
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+            bin_wr_bank            <= 1'b0;
+            bin_rd_bank            <= 1'b0;
+            bin_bank_full          <= 2'b00;
             bin_wr_ptr             <= 13'd0;
             bin_rd_ptr             <= 13'd0;
+            bin_bank_len[0]        <= 13'd0;
+            bin_bank_len[1]        <= 13'd0;
             drain_prefetched_valid <= 1'b0;
-        end else if (slice_init || trm_req) begin
+        end else if (slice_init) begin
+            bin_wr_bank            <= 1'b0;
+            bin_rd_bank            <= 1'b0;
+            bin_bank_full          <= 2'b00;
             bin_wr_ptr             <= 13'd0;
             bin_rd_ptr             <= 13'd0;
+            bin_bank_len[0]        <= 13'd0;
+            bin_bank_len[1]        <= 13'd0;
             drain_prefetched_valid <= 1'b0;
         end else begin
-            if (bin_ram_we)
+            // Write-bank control (syntax_cu/pred/coeff -> ctu_bin_ram[bin_wr_bank])
+            if (eff_ctu_sao_delay_en && ctu_fe_done) begin
+                bin_bank_len[bin_wr_bank]  <= bin_wr_ptr + (bin_ram_we ? 13'd1 : 13'd0);
+                bin_bank_full[bin_wr_bank] <= 1'b1;
+                bin_wr_bank                <= ~bin_wr_bank;
+                bin_wr_ptr                 <= 13'd0;
+            end else if (bin_ram_we) begin
                 bin_wr_ptr <= bin_wr_ptr + 13'd1;
-            if (drain_bin_fire)
-                bin_rd_ptr <= bin_rd_ptr + 13'd1;
-            // Track when bin_ram_rdata_q holds already-committed RAM data at bin_rd_addr_mux.
-            drain_prefetched_valid <= (bin_rd_addr_mux < bin_wr_ptr);
+            end
+
+            // Read-bank control (ctu_bin_ram[bin_rd_bank] -> bin_encoder)
+            if (trm_req) begin
+                if (eff_ctu_sao_delay_en) begin
+                    bin_bank_full[bin_rd_bank] <= 1'b0;
+                    bin_rd_bank                <= ~bin_rd_bank;
+                end
+                bin_rd_ptr             <= 13'd0;
+                drain_prefetched_valid <= 1'b0;
+            end else begin
+                if (drain_bin_fire)
+                    bin_rd_ptr <= bin_rd_ptr + 13'd1;
+                // Track when bin_ram_rdata_q holds already-committed RAM data at bin_rd_addr_mux.
+                drain_prefetched_valid <= bin_bank_full[bin_rd_bank] && (bin_rd_addr_mux < rd_bank_len);
+            end
         end
     end
 
@@ -498,14 +543,23 @@ module cabac_enc_top #(
     // =========================================================================
     // synthesis translate_off
     always @(posedge clk) begin
-        // Warn if multiple sources asserted simultaneously
-        if ({sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0001 &&
-            {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0010 &&
-            {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0100 &&
-            {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b1000 &&
-            {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0000)
-            $display("WARN [cabac_enc_top] multiple bin sources active: %b at t=%0t",
-                     {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid}, $time);
+        // Warn if multiple mutually-exclusive bin sources assert simultaneously
+        if (eff_ctu_sao_delay_en) begin
+            if (({sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b001) &&
+                ({sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b010) &&
+                ({sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b100) &&
+                ({sc_bin_valid, sp_bin_valid, sf_bin_valid} != 3'b000))
+                $display("WARN [cabac_enc_top] multiple FE bin sources active: %b at t=%0t",
+                         {sc_bin_valid, sp_bin_valid, sf_bin_valid}, $time);
+        end else begin
+            if ({sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0001 &&
+                {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0010 &&
+                {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0100 &&
+                {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b1000 &&
+                {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid} != 4'b0000)
+                $display("WARN [cabac_enc_top] multiple bin sources active: %b at t=%0t",
+                         {sc_bin_valid, sp_bin_valid, sf_bin_valid, ss_bin_valid}, $time);
+        end
         if (eff_ctu_sao_delay_en && cu_bin_valid && !cu_bin_rdy)
             $display("WARN [cabac_enc_top] CTU bin buffer full/backpressure: cu_bin_valid dropped at wr_ptr=%0d t=%0t",
                      bin_wr_ptr, $time);

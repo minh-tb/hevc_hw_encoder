@@ -443,7 +443,7 @@ module tb_b_frame_encoder;
     end
 
     // =========================================================================
-    // Pipeline Profiling & Cycle-Accurate Throughput Instrumentation
+    // Pipeline Profiling & Cycle-Accurate Throughput Instrumentation (Overlapped)
     // =========================================================================
     integer ctu_start_cycle [0:TOTAL_FRAMES-1][0:TOTAL_CTUS-1];
     integer ctu_total_cycles [0:TOTAL_FRAMES-1][0:TOTAL_CTUS-1];
@@ -455,16 +455,24 @@ module tb_b_frame_encoder;
     integer ctu_stall_inloop [0:TOTAL_FRAMES-1][0:TOTAL_CTUS-1];
 
     reg [31:0] global_cycle_count;
-    reg [9:0]  cur_mon_poc;
-    reg [`CTU_ADDR_WIDTH-1:0] cur_mon_ctu;
-    reg        mon_ctu_active;
+    reg [31:0] frame_start_cycle;
+    reg [31:0] prev_inloop_done_cycle;
+    reg [9:0]  fe_mon_poc;
+    reg [`CTU_ADDR_WIDTH-1:0] fe_mon_ctu;
+    reg        fe_mon_active;
+    reg [9:0]  inloop_mon_poc;
+    reg [`CTU_ADDR_WIDTH:0] inloop_mon_ctu;
+    reg [`CTU_ADDR_WIDTH:0] cabac_fe_mon_ctu;
+    reg [`CTU_ADDR_WIDTH:0] cabac_be_mon_ctu;
 
     wire md_stage_active    = (uut.u_mode_decision.state != 3'd0) || uut.eval_inter_start;
     wire tq_stage_active    = uut.p2s_active || uut.idct_active || uut.idct_p2s_active || uut.recon_out_valid || uut.intra_ref_active;
     wire db_stage_active    = (uut.u_inloop_filters.filter_state == 2'd1); // S_DB
-    wire cabac_stage_active = (uut.cabac_state != 3'd0);
+    wire cabac_fe_active    = (uut.cabac_state != 4'd0);
+    wire cabac_be_active    = (uut.cabac_be_state != 3'd0);
+    wire cabac_stage_active = cabac_fe_active || cabac_be_active;
     wire stall_cabac_active = uut.cu_valid && !uut.cabac_cu_ready;
-    wire stall_inloop_active= (uut.u_inloop_filters.filter_state == 2'd0) && !uut.inloop_ready;
+    wire stall_inloop_active= uut.orig_bank_full[uut.orig_rd_bank] && !uut.fe_ctu_active && !uut.inloop_ready;
 
     integer cur_f, cur_c;
     initial begin
@@ -485,47 +493,96 @@ module tb_b_frame_encoder;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            global_cycle_count <= 32'd0;
-            cur_mon_poc        <= 10'd0;
-            cur_mon_ctu        <= {`CTU_ADDR_WIDTH{1'b0}};
-            mon_ctu_active     <= 1'b0;
+            global_cycle_count     <= 32'd0;
+            frame_start_cycle      <= 32'd0;
+            prev_inloop_done_cycle <= 32'd0;
+            fe_mon_poc             <= 10'd0;
+            fe_mon_ctu             <= {`CTU_ADDR_WIDTH{1'b0}};
+            fe_mon_active          <= 1'b0;
+            inloop_mon_poc         <= 10'd0;
+            inloop_mon_ctu         <= {(`CTU_ADDR_WIDTH+1){1'b0}};
+            cabac_fe_mon_ctu       <= {(`CTU_ADDR_WIDTH+1){1'b0}};
+            cabac_be_mon_ctu       <= {(`CTU_ADDR_WIDTH+1){1'b0}};
         end else begin
             global_cycle_count <= global_cycle_count + 32'd1;
 
-            if (uut.ctu_partitioner_accepted) begin
-                cur_mon_poc <= uut.gop_frame_poc;
-                cur_mon_ctu <= uut.ctu_addr;
-                mon_ctu_active <= 1'b1;
-                ctu_start_cycle[uut.gop_frame_poc][uut.ctu_addr] <= global_cycle_count;
+            if (uut.ctu_frame_start) begin
+                inloop_mon_ctu   <= {(`CTU_ADDR_WIDTH+1){1'b0}};
+                cabac_fe_mon_ctu <= {(`CTU_ADDR_WIDTH+1){1'b0}};
+                cabac_be_mon_ctu <= {(`CTU_ADDR_WIDTH+1){1'b0}};
             end
 
-            if (mon_ctu_active) begin
-                ctu_total_cycles[cur_mon_poc][cur_mon_ctu] <= ctu_total_cycles[cur_mon_poc][cur_mon_ctu] + 1;
+            if (uut.ctu_partitioner_accepted) begin
+                fe_mon_poc    <= uut.gop_frame_poc;
+                fe_mon_ctu    <= uut.ctu_addr;
+                fe_mon_active <= 1'b1;
+                ctu_start_cycle[uut.gop_frame_poc][uut.ctu_addr] <= global_cycle_count;
+                if (uut.ctu_addr == {`CTU_ADDR_WIDTH{1'b0}}) begin
+                    inloop_mon_poc         <= uut.gop_frame_poc;
+                    frame_start_cycle      <= global_cycle_count;
+                    prev_inloop_done_cycle <= global_cycle_count;
+                end
+            end else if (uut.fe_ctu_recon_done_d1) begin
+                fe_mon_active <= 1'b0;
+            end
+
+            if (fe_mon_active) begin
                 if (md_stage_active)
-                    ctu_md_cycles[cur_mon_poc][cur_mon_ctu] <= ctu_md_cycles[cur_mon_poc][cur_mon_ctu] + 1;
+                    ctu_md_cycles[fe_mon_poc][fe_mon_ctu] <= ctu_md_cycles[fe_mon_poc][fe_mon_ctu] + 1;
                 if (tq_stage_active)
-                    ctu_tq_cycles[cur_mon_poc][cur_mon_ctu] <= ctu_tq_cycles[cur_mon_poc][cur_mon_ctu] + 1;
-                if (db_stage_active)
-                    ctu_db_cycles[cur_mon_poc][cur_mon_ctu] <= ctu_db_cycles[cur_mon_poc][cur_mon_ctu] + 1;
-                if (cabac_stage_active)
-                    ctu_cabac_cycles[cur_mon_poc][cur_mon_ctu] <= ctu_cabac_cycles[cur_mon_poc][cur_mon_ctu] + 1;
+                    ctu_tq_cycles[fe_mon_poc][fe_mon_ctu] <= ctu_tq_cycles[fe_mon_poc][fe_mon_ctu] + 1;
                 if (stall_cabac_active)
-                    ctu_stall_cabac[cur_mon_poc][cur_mon_ctu] <= ctu_stall_cabac[cur_mon_poc][cur_mon_ctu] + 1;
+                    ctu_stall_cabac[fe_mon_poc][fe_mon_ctu] <= ctu_stall_cabac[fe_mon_poc][fe_mon_ctu] + 1;
+            end
+
+            if (inloop_mon_ctu < TOTAL_CTUS) begin
+                if (db_stage_active)
+                    ctu_db_cycles[inloop_mon_poc][inloop_mon_ctu] <= ctu_db_cycles[inloop_mon_poc][inloop_mon_ctu] + 1;
                 if (stall_inloop_active)
-                    ctu_stall_inloop[cur_mon_poc][cur_mon_ctu] <= ctu_stall_inloop[cur_mon_poc][cur_mon_ctu] + 1;
+                    ctu_stall_inloop[inloop_mon_poc][inloop_mon_ctu] <= ctu_stall_inloop[inloop_mon_poc][inloop_mon_ctu] + 1;
+            end
+
+            if (cabac_fe_active && cabac_be_active) begin
+                if ((cabac_fe_mon_ctu == cabac_be_mon_ctu) && (cabac_fe_mon_ctu < TOTAL_CTUS)) begin
+                    ctu_cabac_cycles[inloop_mon_poc][cabac_fe_mon_ctu] <= ctu_cabac_cycles[inloop_mon_poc][cabac_fe_mon_ctu] + 1;
+                end else begin
+                    if (cabac_fe_mon_ctu < TOTAL_CTUS)
+                        ctu_cabac_cycles[inloop_mon_poc][cabac_fe_mon_ctu] <= ctu_cabac_cycles[inloop_mon_poc][cabac_fe_mon_ctu] + 1;
+                    if (cabac_be_mon_ctu < TOTAL_CTUS)
+                        ctu_cabac_cycles[inloop_mon_poc][cabac_be_mon_ctu] <= ctu_cabac_cycles[inloop_mon_poc][cabac_be_mon_ctu] + 1;
+                end
+            end else if (cabac_fe_active && (cabac_fe_mon_ctu < TOTAL_CTUS)) begin
+                ctu_cabac_cycles[inloop_mon_poc][cabac_fe_mon_ctu] <= ctu_cabac_cycles[inloop_mon_poc][cabac_fe_mon_ctu] + 1;
+            end else if (cabac_be_active && (cabac_be_mon_ctu < TOTAL_CTUS)) begin
+                ctu_cabac_cycles[inloop_mon_poc][cabac_be_mon_ctu] <= ctu_cabac_cycles[inloop_mon_poc][cabac_be_mon_ctu] + 1;
+            end
+
+            if (uut.cabac_fe_ctu_done) begin
+                cabac_fe_mon_ctu <= cabac_fe_mon_ctu + 1'b1;
+            end
+
+            if (uut.ctu_trm_pulse_w) begin
+                cabac_be_mon_ctu <= cabac_be_mon_ctu + 1'b1;
             end
 
             if (uut.inloop_ctu_done) begin
-                mon_ctu_active <= 1'b0;
+                ctu_total_cycles[inloop_mon_poc][inloop_mon_ctu] <= global_cycle_count - prev_inloop_done_cycle;
+                prev_inloop_done_cycle <= global_cycle_count;
                 $display("[PROFILER] Frame %0d CTU %0d: Total=%0d cycles | T_MD=%0d | T_TQ=%0d | T_DB=%0d | T_CABAC=%0d | Stall_CABAC=%0d | Stall_Inloop=%0d",
-                    cur_mon_poc, cur_mon_ctu,
-                    ctu_total_cycles[cur_mon_poc][cur_mon_ctu],
-                    ctu_md_cycles[cur_mon_poc][cur_mon_ctu],
-                    ctu_tq_cycles[cur_mon_poc][cur_mon_ctu],
-                    ctu_db_cycles[cur_mon_poc][cur_mon_ctu],
-                    ctu_cabac_cycles[cur_mon_poc][cur_mon_ctu],
-                    ctu_stall_cabac[cur_mon_poc][cur_mon_ctu],
-                    ctu_stall_inloop[cur_mon_poc][cur_mon_ctu]);
+                    inloop_mon_poc, inloop_mon_ctu,
+                    global_cycle_count - prev_inloop_done_cycle,
+                    ctu_md_cycles[inloop_mon_poc][inloop_mon_ctu],
+                    ctu_tq_cycles[inloop_mon_poc][inloop_mon_ctu],
+                    ctu_db_cycles[inloop_mon_poc][inloop_mon_ctu],
+                    ctu_cabac_cycles[inloop_mon_poc][inloop_mon_ctu],
+                    ctu_stall_cabac[inloop_mon_poc][inloop_mon_ctu],
+                    ctu_stall_inloop[inloop_mon_poc][inloop_mon_ctu]);
+                inloop_mon_ctu <= inloop_mon_ctu + 1'b1;
+            end
+
+            if (uut.sync_frame_done_pulse) begin
+                $display("[FRAME_WALLCLOCK] Frame %0d: WallClock=%0d cycles",
+                    inloop_mon_poc, global_cycle_count - frame_start_cycle);
             end
         end
     end
@@ -541,6 +598,8 @@ module tb_b_frame_encoder;
     localparam MAX_CTU_PROGRESS      = `CTU_WATCHDOG_LIMIT;
     localparam HEARTBEAT_INTERVAL    = `HEARTBEAT_INTERVAL;
 
+    wire any_ctu_active = fe_mon_active || (uut.u_inloop_filters.filter_state != 2'd0) || cabac_stage_active;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             stall_cabac_timer  <= 32'd0;
@@ -549,8 +608,8 @@ module tb_b_frame_encoder;
         end else begin
             // 1. Periodic Heartbeat Monitor
             if (global_cycle_count > 0 && (global_cycle_count % HEARTBEAT_INTERVAL == 0)) begin
-                $display("[HEARTBEAT] Time=%0t | Cycles=%0d | POC=%0d CTU=%0d | CTU_Cycles=%0d | CABAC_Stall=%0d Inloop_Stall=%0d",
-                    $time, global_cycle_count, cur_mon_poc, cur_mon_ctu, ctu_progress_timer, stall_cabac_timer, stall_inloop_timer);
+                $display("[HEARTBEAT] Time=%0t | Cycles=%0d | POC=%0d FE_CTU=%0d INLOOP_CTU=%0d | CTU_Cycles=%0d | CABAC_Stall=%0d Inloop_Stall=%0d",
+                    $time, global_cycle_count, inloop_mon_poc, fe_mon_ctu, inloop_mon_ctu, ctu_progress_timer, stall_cabac_timer, stall_inloop_timer);
             end
 
             // 2. CABAC Backpressure Stall Watchdog
@@ -559,8 +618,9 @@ module tb_b_frame_encoder;
                 if (stall_cabac_timer >= MAX_CONSECUTIVE_STALL) begin
                     $display("\n[ERROR] [STALL_WATCHDOG] CABAC backpressure stall exceeded %0d consecutive cycles at time %0t!",
                              MAX_CONSECUTIVE_STALL, $time);
-                    $display("        Current CTU: (%0d, %0d), POC: %0d", cur_mon_poc, cur_mon_ctu, uut.gop_frame_poc);
-                    $display("        CABAC state: %0d, RangeCoder range: %0d", uut.cabac_state, uut.u_cabac_enc_top.u_rc.range_r);
+                    $display("        Current FE_CTU: %0d, POC: %0d", fe_mon_ctu, uut.gop_frame_poc);
+                    $display("        CABAC FE state: %0d, CABAC BE state: %0d, RangeCoder range: %0d",
+                             uut.cabac_state, uut.cabac_be_state, uut.u_cabac_enc_top.u_rc.range_r);
                     $finish;
                 end
             end else begin
@@ -573,7 +633,7 @@ module tb_b_frame_encoder;
                 if (stall_inloop_timer >= MAX_CONSECUTIVE_STALL) begin
                     $display("\n[ERROR] [STALL_WATCHDOG] Inloop filter stall exceeded %0d consecutive cycles at time %0t!",
                              MAX_CONSECUTIVE_STALL, $time);
-                    $display("        Current CTU: (%0d, %0d), POC: %0d", cur_mon_poc, cur_mon_ctu, uut.gop_frame_poc);
+                    $display("        Current INLOOP_CTU: %0d, POC: %0d", inloop_mon_ctu, uut.gop_frame_poc);
                     $display("        Filter state: %0d, dump_count: %0d", uut.u_inloop_filters.filter_state, uut.u_inloop_filters.dump_count);
                     $finish;
                 end
@@ -582,13 +642,15 @@ module tb_b_frame_encoder;
             end
 
             // 4. CTU Execution Duration Watchdog
-            if (mon_ctu_active) begin
+            if (uut.ctu_frame_start || uut.inloop_ctu_done) begin
+                ctu_progress_timer <= 32'd0;
+            end else if (any_ctu_active) begin
                 ctu_progress_timer <= ctu_progress_timer + 32'd1;
                 if (ctu_progress_timer >= MAX_CTU_PROGRESS) begin
                     $display("\n[ERROR] [STALL_WATCHDOG] CTU progress watchdog tripped! CTU %0d has run for %0d cycles (> %0d limit) at time %0t!",
-                             cur_mon_ctu, ctu_progress_timer, MAX_CTU_PROGRESS, $time);
-                    $display("        Pipeline States: MD state=%0d, TQ active=%b, DB state=%0d, CABAC state=%0d",
-                             uut.u_mode_decision.state, tq_stage_active, uut.u_inloop_filters.filter_state, uut.cabac_state);
+                             inloop_mon_ctu, ctu_progress_timer, MAX_CTU_PROGRESS, $time);
+                    $display("        Pipeline States: MD state=%0d, TQ active=%b, DB state=%0d, CABAC FE=%0d BE=%0d",
+                             uut.u_mode_decision.state, tq_stage_active, uut.u_inloop_filters.filter_state, uut.cabac_state, uut.cabac_be_state);
                     $finish;
                 end
             end else begin

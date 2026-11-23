@@ -82,6 +82,8 @@ module tb_entropy_chain;
 
     // SAO Delay Buffering
     logic       ctu_sao_delay_en = 0;
+    logic       ctu_fe_done = 0;
+    logic       ctu_bin_wr_ready;
     logic       ctu_bin_drain_en = 0;
     logic       ctu_bin_drain_done;
 
