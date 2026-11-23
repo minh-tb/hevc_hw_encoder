@@ -146,11 +146,7 @@ module deblock_top (
 
     reg [3:0]    state;
     reg [2:0]    pass;            // current processing pass (0..5)
-`ifdef REMEDIATION
     reg [2:0]    edge_stage;      // 0..7 (Luma 8x8 raster edges), 0..3 (Chroma)
-`else
-    reg          edge_stage;      // 0: CTU boundary edge, 1: internal TU edge
-`endif
     reg          is_corner_stage; // 1: filtering delayed left neighbor CTU corner column
     reg [3:0]    edge_pos;        // 0..15 (Luma) or 0..7 (Chroma)
     reg [2:0]    sample_grp;      // which 4-sample group along the edge (0..3 luma, 0..1 chroma)
@@ -178,12 +174,8 @@ module deblock_top (
     assign cur_comp  = is_luma ? 2'd0 :
                        (pass == PASS_CB_VERT || pass == PASS_CB_HORIZ) ? 2'd1 : 2'd2;
 
-`ifdef REMEDIATION
     wire [2:0] max_edge_stage = is_luma ? 3'd7 : 3'd3;
     wire [3:0] cur_edge_block = {edge_stage, 1'b0}; // 0, 2, 4, 6, 8, 10, 12, 14
-`else
-    wire [3:0] tu_edge_target = is_luma ? 4'd8 : 4'd4;
-`endif
     wire [3:0] max_pos        = is_luma ? 4'd15 : 4'd7;
 
     wire has_left_neighbor    = (cur_ctu_x > 10'd0);
@@ -195,17 +187,10 @@ module deblock_top (
     // When !is_vert:
     //   If is_corner_stage: edge_col is max_pos (column 15/7 of left CTU), edge_row is fixed
     //   Else: edge_col is edge_pos (0..max_col_pos), edge_row is fixed
-`ifdef REMEDIATION
     wire [3:0] edge_col = is_vert ? cur_edge_block :
                           (is_corner_stage ? max_pos : edge_pos);
     wire [3:0] edge_row = is_vert ? edge_pos : cur_edge_block;
     wire is_ctu_boundary = (edge_stage == 3'd0);
-`else
-    wire [3:0] edge_col = is_vert ? ((edge_stage == 1'b0) ? 4'd0 : tu_edge_target) :
-                          (is_corner_stage ? max_pos : edge_pos);
-    wire [3:0] edge_row = is_vert ? edge_pos : ((edge_stage == 1'b0) ? 4'd0 : tu_edge_target);
-    wire is_ctu_boundary = (edge_stage == 1'b0);
-`endif
 
     // Transition helper for next pass
     wire [2:0] next_pass = pass + 3'd1;
@@ -373,14 +358,9 @@ module deblock_top (
     wire [`PIXEL_WIDTH-1:0] luma_p0f, luma_p1f, luma_p2f, luma_q0f, luma_q1f, luma_q2f;
     wire luma_mod_p, luma_mod_q;
 
-`ifdef REMEDIATION
     wire luma_skip_write = is_luma && !luma_mod_p && !luma_mod_q;
     assign luma_out_ready = (state == S_PIX_WRITE) && is_luma &&
                             (luma_skip_write || (pix_wr_ready && (write_cnt == 3'd5)));
-`else
-    wire luma_skip_write = 1'b0;
-    assign luma_out_ready = (state == S_PIX_WRITE) && is_luma && pix_wr_ready && (write_cnt == 3'd5);
-`endif
 
     db_filter_luma u_luma (
         .clk(clk), .rst_n(rst_n),
@@ -453,11 +433,7 @@ module deblock_top (
                         cur_frame_w  <= frame_width_px;
                         cur_frame_h  <= frame_height_px;
                         pass         <= PASS_LUMA_VERT;
-`ifdef REMEDIATION
                         edge_stage   <= (ctu_x > 10'd0) ? 3'd0 : 3'd1;
-`else
-                        edge_stage   <= (ctu_x > 10'd0) ? 1'b0 : 1'b1;
-`endif
                         is_corner_stage <= 1'b0;
                         edge_pos     <= 4'd0;
                         sample_grp   <= 3'd0;
@@ -467,7 +443,6 @@ module deblock_top (
                     end
                 end
                 S_BS_REQ: begin
-`ifdef REMEDIATION
                     bs_in_valid  <= 1'b0;
                     bs_out_ready <= 1'b1;
                     if (!is_boundary_edge || bs_comb == 2'd0 || (is_chroma && bs_comb != 2'd2)) begin
@@ -500,12 +475,6 @@ module deblock_top (
                         pix_rd_comp     <= cur_comp;
                         state           <= S_PIX_LOAD;
                     end
-`else
-                    bs_in_valid  <= 1'b1;
-                    bs_out_ready <= 1'b1;
-                    if (bs_in_valid && bs_in_ready)
-                        state <= S_BS_WAIT;
-`endif
                 end
                 S_BS_WAIT: begin
                     if (bs_out_valid) begin
@@ -527,7 +496,6 @@ module deblock_top (
                 end
                 S_PIX_LOAD: begin
                     bs_out_ready <= 1'b0;
-`ifdef REMEDIATION
                     // Pillar 4: Pipelined 1-sample/cycle SRAM reads (decoupled req_cnt & resp_cnt)
                     if (pix_rd_valid && pix_rd_ready) begin
                         if (req_cnt < (is_luma ? 3'd7 : 3'd3)) begin
@@ -560,32 +528,6 @@ module deblock_top (
                             end
                         end
                     end
-`else
-                    if (pix_rd_valid && pix_rd_ready) begin
-                        pix_rd_valid <= 1'b0;
-                    end
-
-                    if (pix_resp_valid && pix_resp_ready) begin
-                        if (resp_cnt < (is_luma ? 3'd4 : 3'd2)) px_p[resp_cnt[1:0]] <= pix_resp_data;
-                        else                                    px_q[resp_cnt[1:0] - (is_luma ? 2'd0 : 2'd2)] <= pix_resp_data;
-
-                        if (resp_cnt < (is_luma ? 3'd7 : 3'd3)) begin
-                            resp_cnt     <= resp_cnt + 3'd1;
-                            pix_rd_valid <= 1'b1;
-                            pix_rd_comp  <= cur_comp;
-                        end else begin
-                            resp_cnt     <= 3'd0;
-                            pix_rd_valid <= 1'b0;
-                            if (is_luma) begin
-                                luma_in_valid <= 1'b1;
-                                state         <= S_FILT_PUSH;
-                            end else begin
-                                chr_in_valid  <= 1'b1;
-                                state         <= S_FILT_WAIT;
-                            end
-                        end
-                    end
-`endif
                 end
                 S_FILT_PUSH: begin
                     if (is_luma) begin
@@ -617,7 +559,6 @@ module deblock_top (
                         chr_out_ready <= 1'b1;
                         if (chr_out_valid) begin
                             chr_out_ready <= 1'b0;
-`ifdef REMEDIATION
                             if (!chr_modified) begin
                                 // Pillar 4: Skip unmodified Chroma write-backs & reuse BS across sample_grp
                                 if (sample_grp < 3'd3) begin
@@ -634,15 +575,10 @@ module deblock_top (
                                 write_cnt <= 3'd0;
                                 state     <= S_PIX_WRITE;
                             end
-`else
-                            write_cnt     <= 3'd0;
-                            state         <= S_PIX_WRITE;
-`endif
                         end
                     end
                 end
                 S_PIX_WRITE: begin
-`ifdef REMEDIATION
                     if (luma_skip_write) begin
                         // Pillar 4: Skip unmodified Luma write-backs while draining filter output
                         write_cnt <= 3'd0;
@@ -679,25 +615,6 @@ module deblock_top (
                             write_cnt <= write_cnt + 3'd1;
                         end
                     end
-`else
-                    if (pix_wr_ready) begin
-                        if (write_cnt == (is_luma ? 3'd5 : 3'd1)) begin
-                            write_cnt <= 3'd0;
-                            if (is_luma) begin
-                                if (sample_grp < 3'd3) begin
-                                    sample_grp <= sample_grp + 3'd1;
-                                end else begin
-                                    sample_grp <= 3'd3;
-                                    state      <= S_NEXT_EDGE;
-                                end
-                            end else begin
-                                state <= S_NEXT_EDGE;
-                            end
-                        end else begin
-                            write_cnt <= write_cnt + 3'd1;
-                        end
-                    end
-`endif
                 end
                 S_NEXT_EDGE: begin
                     if (is_chroma && (sample_grp < 3'd3)) begin
@@ -714,7 +631,6 @@ module deblock_top (
                             state    <= S_BS_REQ;
                         end else begin
                             edge_pos <= 4'd0;
-`ifdef REMEDIATION
                             if (edge_stage < max_edge_stage) begin
                                 edge_stage      <= edge_stage + 3'd1;
                                 is_corner_stage <= (!is_vert && has_left_neighbor);
@@ -722,15 +638,6 @@ module deblock_top (
                             end else begin
                                 state <= S_NEXT_PASS;
                             end
-`else
-                            if (edge_stage == 1'b0) begin
-                                edge_stage      <= 1'b1;
-                                is_corner_stage <= (!is_vert && has_left_neighbor);
-                                state           <= S_BS_REQ;
-                            end else begin
-                                state <= S_NEXT_PASS;
-                            end
-`endif
                         end
                     end
                 end
@@ -739,13 +646,8 @@ module deblock_top (
                         state <= S_DONE;
                     end else begin
                         pass            <= pass + 3'd1;
-`ifdef REMEDIATION
                         edge_stage      <= next_has_ctu_boundary ? 3'd0 : 3'd1;
                         is_corner_stage <= (!next_is_vert && has_left_neighbor);
-`else
-                        edge_stage      <= next_has_ctu_boundary ? 1'b0 : 1'b1;
-                        is_corner_stage <= 1'b0;
-`endif
                         edge_pos        <= 4'd0;
                         sample_grp      <= 3'd0;
                         state           <= S_BS_REQ;
@@ -768,11 +670,7 @@ module deblock_top (
     wire [2:0] q_idx;
     wire [2:0] wr_q_idx;
 
-`ifdef REMEDIATION
     assign px_idx    = req_cnt;
-`else
-    assign px_idx    = resp_cnt;
-`endif
     assign loading_q = is_luma ? (px_idx >= 3'd4) : (px_idx >= 3'd2);
     assign q_idx     = is_luma ? (px_idx - 3'd4) : (px_idx - 3'd2);
     assign wr_q_idx  = is_luma ? (write_cnt - 3'd3) : (write_cnt - 3'd1);

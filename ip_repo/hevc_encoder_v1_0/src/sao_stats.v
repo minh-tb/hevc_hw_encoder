@@ -42,7 +42,6 @@ module sao_stats #(
     output reg [59:0]   bo_offset
 );
 
-`ifdef REMEDIATION
     localparam [3:0]
         S_IDLE        = 4'd0,
         S_COMP_INIT   = 4'd1,
@@ -862,33 +861,5 @@ module sao_stats #(
             endcase
         end
     end
-`else
-    wire has_geometry = (|frame_width_px === 1'b1);
-    wire [5:0] pic_width_in_ctu = has_geometry ? (frame_width_px[11:6] + (|frame_width_px[5:0] ? 6'd1 : 6'd0)) : 6'd2;
-    wire [5:0] pic_height_in_ctu = has_geometry ? (frame_height_px[11:6] + (|frame_height_px[5:0] ? 6'd1 : 6'd0)) : 6'd2;
-    wire is_last_col = (ctu_x + 6'd1 >= pic_width_in_ctu);
-    wire is_last_row = (ctu_y + 6'd1 >= pic_height_in_ctu);
-
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            done <= 0;
-            rec_rd_valid <= 0; org_rd_valid <= 0;
-            sao_type <= 0; eo_class <= 0; eo_offset <= 0; band_pos <= 0; bo_offset <= 0;
-        end else begin
-            rec_rd_valid <= 0;
-            org_rd_valid <= 0;
-            if (start && !done) begin
-                done <= 1;
-                sao_type <= 0;
-                eo_class <= 0;
-                eo_offset <= 0;
-                band_pos <= 0;
-                bo_offset <= 0;
-            end else begin
-                done <= 0;
-            end
-        end
-    end
-`endif
 
 endmodule

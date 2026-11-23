@@ -58,29 +58,54 @@ module param_set_writer #(
         end
 
         // VPS: NAL Type 32 (Raw RBSP) — Main10 profile, 10-bit
-        vps_rom[0:17] = '{ 8'h0C, 8'h01, 8'hFF, 8'hFF, 8'h02, 8'h20, 8'h00, 8'h00, 8'h00, 8'h90, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'hAC, 8'h09 };
+        vps_rom[0]  = 8'h0C; vps_rom[1]  = 8'h01; vps_rom[2]  = 8'hFF; vps_rom[3]  = 8'hFF; vps_rom[4]  = 8'h02; vps_rom[5]  = 8'h20;
+        vps_rom[6]  = 8'h00; vps_rom[7]  = 8'h00; vps_rom[8]  = 8'h00; vps_rom[9]  = 8'h90; vps_rom[10] = 8'h00; vps_rom[11] = 8'h00;
+        vps_rom[12] = 8'h00; vps_rom[13] = 8'h00; vps_rom[14] = 8'h00; vps_rom[15] = 8'h00; vps_rom[16] = 8'hAC; vps_rom[17] = 8'h09;
 
         // PPS: NAL Type 34 (Raw RBSP) — init_qp=26, no SDH, no TS
-        pps_rom[0:3] = '{ 8'hC0, 8'h71, 8'h81, 8'h12 };
+        pps_rom[0] = 8'hC0; pps_rom[1] = 8'h71; pps_rom[2] = 8'h81; pps_rom[3] = 8'h12;
 
         if (FRAME_WIDTH == 128 && FRAME_HEIGHT == 128) begin
             // SPS 128x128 (25 bytes) — strong_intra_smoothing_enable_flag = 1 (byte 23: 8'hE4)
-            sps_rom[0:24] = '{ 8'h01, 8'h02, 8'h20, 8'h00, 8'h00, 8'h00, 8'h90, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'hA0, 8'h10, 8'h20, 8'h20, 8'h4D, 8'h96, 8'hB9, 8'h24, 8'h6C, 8'h92, 8'hE4, 8'h80 };
+            sps_rom[0]  = 8'h01; sps_rom[1]  = 8'h02; sps_rom[2]  = 8'h20; sps_rom[3]  = 8'h00; sps_rom[4]  = 8'h00; sps_rom[5]  = 8'h00;
+            sps_rom[6]  = 8'h90; sps_rom[7]  = 8'h00; sps_rom[8]  = 8'h00; sps_rom[9]  = 8'h00; sps_rom[10] = 8'h00; sps_rom[11] = 8'h00;
+            sps_rom[12] = 8'h00; sps_rom[13] = 8'hA0; sps_rom[14] = 8'h10; sps_rom[15] = 8'h20; sps_rom[16] = 8'h20; sps_rom[17] = 8'h4D;
+            sps_rom[18] = 8'h96; sps_rom[19] = 8'hB9; sps_rom[20] = 8'h24; sps_rom[21] = 8'h6C; sps_rom[22] = 8'h92; sps_rom[23] = 8'hE4;
+            sps_rom[24] = 8'h80;
         end else if (FRAME_WIDTH == 256 && FRAME_HEIGHT == 256) begin
             // SPS 256x256 (25 bytes)
-            sps_rom[0:24] = '{ 8'h01, 8'h02, 8'h20, 8'h00, 8'h00, 8'h00, 8'h90, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'hA0, 8'h08, 8'h08, 8'h04, 8'h04, 8'hD9, 8'h6B, 8'h92, 8'h46, 8'hC9, 8'h2E, 8'h48 };
+            sps_rom[0]  = 8'h01; sps_rom[1]  = 8'h02; sps_rom[2]  = 8'h20; sps_rom[3]  = 8'h00; sps_rom[4]  = 8'h00; sps_rom[5]  = 8'h00;
+            sps_rom[6]  = 8'h90; sps_rom[7]  = 8'h00; sps_rom[8]  = 8'h00; sps_rom[9]  = 8'h00; sps_rom[10] = 8'h00; sps_rom[11] = 8'h00;
+            sps_rom[12] = 8'h00; sps_rom[13] = 8'hA0; sps_rom[14] = 8'h08; sps_rom[15] = 8'h08; sps_rom[16] = 8'h04; sps_rom[17] = 8'h04;
+            sps_rom[18] = 8'hD9; sps_rom[19] = 8'h6B; sps_rom[20] = 8'h92; sps_rom[21] = 8'h46; sps_rom[22] = 8'hC9; sps_rom[23] = 8'h2E;
+            sps_rom[24] = 8'h48;
         end else if (FRAME_WIDTH == 1920 && FRAME_HEIGHT == 1080) begin
             // SPS 1920x1080 Full HD (26 bytes) — strong_intra_smoothing_enable_flag = 1
-            sps_rom[0:25] = '{ 8'h01, 8'h02, 8'h20, 8'h00, 8'h00, 8'h00, 8'h90, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'hA0, 8'h03, 8'hC0, 8'h80, 8'h10, 8'hE4, 8'hD9, 8'h6B, 8'h92, 8'h46, 8'hC9, 8'h2E, 8'h48 };
+            sps_rom[0]  = 8'h01; sps_rom[1]  = 8'h02; sps_rom[2]  = 8'h20; sps_rom[3]  = 8'h00; sps_rom[4]  = 8'h00; sps_rom[5]  = 8'h00;
+            sps_rom[6]  = 8'h90; sps_rom[7]  = 8'h00; sps_rom[8]  = 8'h00; sps_rom[9]  = 8'h00; sps_rom[10] = 8'h00; sps_rom[11] = 8'h00;
+            sps_rom[12] = 8'h00; sps_rom[13] = 8'hA0; sps_rom[14] = 8'h03; sps_rom[15] = 8'hC0; sps_rom[16] = 8'h80; sps_rom[17] = 8'h10;
+            sps_rom[18] = 8'hE4; sps_rom[19] = 8'hD9; sps_rom[20] = 8'h6B; sps_rom[21] = 8'h92; sps_rom[22] = 8'h46; sps_rom[23] = 8'hC9;
+            sps_rom[24] = 8'h2E; sps_rom[25] = 8'h48;
         end else if (FRAME_WIDTH == 1920 && FRAME_HEIGHT == 1088) begin
             // SPS 1920x1088 CTU-Aligned Full HD (26 bytes) — strong_intra_smoothing_enable_flag = 1
-            sps_rom[0:25] = '{ 8'h01, 8'h02, 8'h20, 8'h00, 8'h00, 8'h00, 8'h90, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'hA0, 8'h03, 8'hC0, 8'h80, 8'h11, 8'h04, 8'hD9, 8'h6B, 8'h92, 8'h46, 8'hC9, 8'h2E, 8'h48 };
+            sps_rom[0]  = 8'h01; sps_rom[1]  = 8'h02; sps_rom[2]  = 8'h20; sps_rom[3]  = 8'h00; sps_rom[4]  = 8'h00; sps_rom[5]  = 8'h00;
+            sps_rom[6]  = 8'h90; sps_rom[7]  = 8'h00; sps_rom[8]  = 8'h00; sps_rom[9]  = 8'h00; sps_rom[10] = 8'h00; sps_rom[11] = 8'h00;
+            sps_rom[12] = 8'h00; sps_rom[13] = 8'hA0; sps_rom[14] = 8'h03; sps_rom[15] = 8'hC0; sps_rom[16] = 8'h80; sps_rom[17] = 8'h11;
+            sps_rom[18] = 8'h04; sps_rom[19] = 8'hD9; sps_rom[20] = 8'h6B; sps_rom[21] = 8'h92; sps_rom[22] = 8'h46; sps_rom[23] = 8'hC9;
+            sps_rom[24] = 8'h2E; sps_rom[25] = 8'h48;
         end else if (FRAME_WIDTH == 3840 && FRAME_HEIGHT == 2160) begin
             // SPS 3840x2160 4K UHD (27 bytes) — strong_intra_smoothing_enable_flag = 1
-            sps_rom[0:26] = '{ 8'h01, 8'h02, 8'h20, 8'h00, 8'h00, 8'h00, 8'h90, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'hA0, 8'h01, 8'hE0, 8'h20, 8'h02, 8'h1C, 8'h4D, 8'h96, 8'hB9, 8'h24, 8'h6C, 8'h92, 8'hE4, 8'h80 };
+            sps_rom[0]  = 8'h01; sps_rom[1]  = 8'h02; sps_rom[2]  = 8'h20; sps_rom[3]  = 8'h00; sps_rom[4]  = 8'h00; sps_rom[5]  = 8'h00;
+            sps_rom[6]  = 8'h90; sps_rom[7]  = 8'h00; sps_rom[8]  = 8'h00; sps_rom[9]  = 8'h00; sps_rom[10] = 8'h00; sps_rom[11] = 8'h00;
+            sps_rom[12] = 8'h00; sps_rom[13] = 8'hA0; sps_rom[14] = 8'h01; sps_rom[15] = 8'hE0; sps_rom[16] = 8'h20; sps_rom[17] = 8'h02;
+            sps_rom[18] = 8'h1C; sps_rom[19] = 8'h4D; sps_rom[20] = 8'h96; sps_rom[21] = 8'hB9; sps_rom[22] = 8'h24; sps_rom[23] = 8'h6C;
+            sps_rom[24] = 8'h92; sps_rom[25] = 8'hE4; sps_rom[26] = 8'h80;
         end else begin
             // SPS 64x64 (24 bytes)
-            sps_rom[0:23] = '{ 8'h01, 8'h02, 8'h20, 8'h00, 8'h00, 8'h00, 8'h90, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'h00, 8'hA0, 8'h20, 8'h81, 8'h04, 8'hD9, 8'h6B, 8'h92, 8'h46, 8'hC9, 8'h2E, 8'h48 };
+            sps_rom[0]  = 8'h01; sps_rom[1]  = 8'h02; sps_rom[2]  = 8'h20; sps_rom[3]  = 8'h00; sps_rom[4]  = 8'h00; sps_rom[5]  = 8'h00;
+            sps_rom[6]  = 8'h90; sps_rom[7]  = 8'h00; sps_rom[8]  = 8'h00; sps_rom[9]  = 8'h00; sps_rom[10] = 8'h00; sps_rom[11] = 8'h00;
+            sps_rom[12] = 8'h00; sps_rom[13] = 8'hA0; sps_rom[14] = 8'h20; sps_rom[15] = 8'h81; sps_rom[16] = 8'h04; sps_rom[17] = 8'hD9;
+            sps_rom[18] = 8'h6B; sps_rom[19] = 8'h92; sps_rom[20] = 8'h46; sps_rom[21] = 8'hC9; sps_rom[22] = 8'h2E; sps_rom[23] = 8'h48;
         end
     end
     
@@ -123,41 +148,47 @@ module param_set_writer #(
                 end
                 
                 S_VPS: begin
-                    rbsp_valid <= 1'b1;
-                    
-                    if (rbsp_ready) begin
+                    if (rbsp_valid && rbsp_ready) begin
                         if (ptr == VPS_LEN - 1) begin
-                            state <= S_IDLE;
-                            vps_done <= 1'b1;
+                            state      <= S_IDLE;
+                            vps_done   <= 1'b1;
+                            rbsp_valid <= 1'b0;
                         end else begin
-                            ptr <= ptr + 7'd1;
+                            ptr        <= ptr + 7'd1;
+                            rbsp_valid <= 1'b1;
                         end
+                    end else begin
+                        rbsp_valid <= 1'b1;
                     end
                 end
                 
                 S_SPS: begin
-                    rbsp_valid <= 1'b1;
-                    
-                    if (rbsp_ready) begin
+                    if (rbsp_valid && rbsp_ready) begin
                         if (ptr == SPS_LEN - 1) begin
-                            state <= S_IDLE;
-                            sps_done <= 1'b1;
+                            state      <= S_IDLE;
+                            sps_done   <= 1'b1;
+                            rbsp_valid <= 1'b0;
                         end else begin
-                            ptr <= ptr + 7'd1;
+                            ptr        <= ptr + 7'd1;
+                            rbsp_valid <= 1'b1;
                         end
+                    end else begin
+                        rbsp_valid <= 1'b1;
                     end
                 end
                 
                 S_PPS: begin
-                    rbsp_valid <= 1'b1;
-                    
-                    if (rbsp_ready) begin
+                    if (rbsp_valid && rbsp_ready) begin
                         if (ptr == PPS_LEN - 1) begin
-                            state <= S_IDLE;
-                            pps_done <= 1'b1;
+                            state      <= S_IDLE;
+                            pps_done   <= 1'b1;
+                            rbsp_valid <= 1'b0;
                         end else begin
-                            ptr <= ptr + 7'd1;
+                            ptr        <= ptr + 7'd1;
+                            rbsp_valid <= 1'b1;
                         end
+                    end else begin
+                        rbsp_valid <= 1'b1;
                     end
                 end
             endcase

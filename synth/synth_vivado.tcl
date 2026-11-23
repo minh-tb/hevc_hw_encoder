@@ -27,8 +27,8 @@ puts "================================================================="
 puts " Starting Vivado Synthesis for $top_module on $target_part"
 puts "================================================================="
 
-# Use single-thread on Windows to prevent TclStackFree multithreading allocator crash
-catch {set_param general.maxThreads 1}
+# Limit threads to 2 on Windows to balance synthesis speed and allocator stability
+catch {set_param general.maxThreads 2}
 
 # 1. Create in-memory project
 create_project -in_memory -part $target_part
@@ -110,7 +110,7 @@ read_xdc "synth/hevc_encoder_top.xdc"
 puts "================================================================="
 puts " Running synth_design on $top_module..."
 puts "================================================================="
-synth_design -top $top_module -part $target_part -mode out_of_context -include_dirs {rtl/common} -verilog_define {SYNTHESIS=1 REMEDIATION=1}
+synth_design -top $top_module -part $target_part -mode out_of_context -include_dirs {rtl/common} -verilog_define {SYNTHESIS=1}
 
 # 5. Export Synthesized Design Checkpoint (.dcp)
 puts "================================================================="

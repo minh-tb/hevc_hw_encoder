@@ -50,7 +50,7 @@ STRESS_TESTS = [
 ]
 
 VLOG_OPTS = (
-    "+define+REMEDIATION +libext+.v "
+    "+libext+.v "
     "-y rtl/top -y rtl/entropy -y rtl/common -y rtl/partition -y rtl/transform "
     "-y rtl/intra -y rtl/recon -y rtl/inter -y rtl/rate_control -y rtl/inloop_filters "
     "-y rtl/quant -y rtl/input_output +incdir+rtl/common +incdir+. rtl/common/parameter_pkg.vh"

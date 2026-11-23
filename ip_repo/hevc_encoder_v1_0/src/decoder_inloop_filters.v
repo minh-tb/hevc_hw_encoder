@@ -640,25 +640,13 @@ module decoder_inloop_filters (
     //=========================================================================
     reg [5:0] rd_x, rd_y;
     reg [1:0] rd_comp;
-    reg       db_rd_pending;  // tracks in-flight SRAM read for deblock
 
-`ifdef REMEDIATION
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n)
             db_pix_resp_valid_q <= 1'b0;
         else
             db_pix_resp_valid_q <= (filter_state == S_DB && db_pix_rd_valid && db_pix_rd_ready);
     end
-`else
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n)
-            db_rd_pending <= 1'b0;
-        else if (filter_state == S_DB && db_pix_rd_valid && !db_rd_pending)
-            db_rd_pending <= 1'b1;  // accept new read request
-        else
-            db_rd_pending <= 1'b0;  // clear after 1 cycle (data now valid)
-    end
-`endif
 
     wire [5:0] pic_width_in_ctu = (frame_width_px > 12'd0)
                                 ? (frame_width_px[11:6] + (|frame_width_px[5:0] ? 6'd1 : 6'd0))
@@ -697,13 +685,8 @@ module decoder_inloop_filters (
         case (filter_state)
             S_DB: begin
                 rd_x = db_pix_rd_x; rd_y = db_pix_rd_y; rd_comp = db_pix_rd_comp;
-`ifdef REMEDIATION
                 // Pillar 4: Pipelined 1-cycle SRAM read throughput (always ready in S_DB)
                 db_pix_rd_ready = 1'b1;
-`else
-                // Accept new request only when not already pending
-                db_pix_rd_ready = db_pix_rd_valid && !db_rd_pending;
-`endif
             end
             S_STATS: begin
                 rd_x = stats_rec_rd_x; rd_y = stats_rec_rd_y; rd_comp = stats_rec_rd_comp;
@@ -748,9 +731,6 @@ module decoder_inloop_filters (
 
     // Synchronous reads for main pixel, SAO neighbors, and original pixels
     always @(posedge clk) begin
-`ifndef REMEDIATION
-        db_pix_resp_valid_q <= db_rd_pending;
-`endif
         db_rd_neighbor_q    <= (filter_state == S_DB && db_pix_rd_neighbor);
         if (filter_state == S_DB && db_pix_rd_neighbor) begin
             if (db_rd_from_corner) begin

@@ -99,10 +99,10 @@ def main():
             except: pass
 
     # 1. Compile RTL + Testbench
-    print("\n[Step 1/5] Compiling RTL and TB into work with REMEDIATION + ENABLE_RC + CFG_SAO_ENABLE...")
+    print("\n[Step 1/5] Compiling RTL and TB into work with ENABLE_RC + CFG_SAO_ENABLE...")
     sources_str = " ".join(RTL_SOURCES)
     vlog_cmd = (
-        f'"{VLOG}" -work work -sv +define+REMEDIATION +define+ENABLE_RC +define+CFG_SAO_ENABLE +define+CFG_TOTAL_FRAMES=3 '
+        f'"{VLOG}" -work work -sv +define+ENABLE_RC +define+CFG_SAO_ENABLE +define+CFG_TOTAL_FRAMES=3 '
         f'+incdir+rtl/common +incdir+rtl/top +incdir+rtl/entropy +incdir+rtl/inloop_filters '
         f'{sources_str} {TB_PATH}'
     )

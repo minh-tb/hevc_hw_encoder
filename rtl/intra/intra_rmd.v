@@ -41,18 +41,11 @@ module intra_rmd (
     output reg  [5:0]   best_chroma_dir
 );
 
-`ifdef REMEDIATION
     localparam S_IDLE       = 3'd0;
     localparam S_LOAD_REF   = 3'd1;
     localparam S_EVAL       = 3'd2;
     localparam S_HADAMARD   = 3'd3;
     localparam S_DONE       = 3'd4;
-`else
-    localparam S_IDLE       = 3'd0;
-    localparam S_LOAD_REF   = 3'd1;
-    localparam S_EVAL       = 3'd2;
-    localparam S_DONE       = 3'd3;
-`endif
 
     reg [2:0] state, next_state;
 
@@ -91,7 +84,6 @@ module intra_rmd (
     reg        req_active;
     reg [5:0]  lat_pu_x, lat_pu_y;
 
-`ifdef REMEDIATION
     reg [1:0]  sub_x, sub_y;
     reg [2:0]  tile_x, tile_y;
     wire [3:0] tile_max_w = N[5:2] - 4'd1;
@@ -101,21 +93,14 @@ module intra_rmd (
                              (pu_size_log2 == 3'd4) ? 7'd16 : 7'd64;
     wire [5:0] cx = {1'b0, tile_x, sub_x};
     wire [5:0] cy = {1'b0, tile_y, sub_y};
-`else
-    reg [5:0]  cx, cy;
-`endif
 
     reg [5:0]  cx_q1, cy_q1, cx_q2, cy_q2;
     reg        eval_q1, eval_q2;
     reg        eval_c_q1, eval_c_q2;
 
     // Accumulators
-`ifdef REMEDIATION
     reg [31:0] satd_acc_p, satd_acc_d, satd_acc_h, satd_acc_v;
     reg [6:0]  tiles_acc;
-`else
-    reg [31:0] sad_planar, sad_dc, sad_hor, sad_ver;
-`endif
     reg [31:0] sad_c_planar, sad_c_dc, sad_c_hor, sad_c_ver, sad_c_34;
 
     // DC Prediction (Average of N top + N left reference samples)
@@ -219,7 +204,6 @@ module intra_rmd (
     wire [`PIXEL_WIDTH-1:0] pred_34_u = ref_buf_u[idx_34];
     wire [`PIXEL_WIDTH-1:0] pred_34_v = ref_buf_v[idx_34];
     
-`ifdef REMEDIATION
     wire [17:0] wL = (N[7:0] - 8'd1 - {2'd0, cx_q2}) * refL_y;
     wire [17:0] wR = ({2'd0, cx_q2} + 8'd1) * refT_N;
     wire [17:0] wT = (N[7:0] - 8'd1 - {2'd0, cy_q2}) * refT_x;
@@ -297,21 +281,6 @@ module intra_rmd (
         .diff_14(diff_ver_buf[{rd_bank, 4'd14}]), .diff_15(diff_ver_buf[{rd_bank, 4'd15}]),
         .done(had_done_v), .satd_out(satd_v)
     );
-`else
-    wire [15:0] wL = (N[7:0] - 8'd1 - {2'd0, cx_q2}) * refL_y;
-    wire [15:0] wR = ({2'd0, cx_q2} + 8'd1) * refT_N;
-    wire [15:0] wT = (N[7:0] - 8'd1 - {2'd0, cy_q2}) * refT_x;
-    wire [15:0] wB = ({2'd0, cy_q2} + 8'd1) * refL_N;
-    
-    wire [15:0] planar_sum = wL + wR + wT + wB + N;
-    wire [`PIXEL_WIDTH-1:0] pred_planar = planar_sum >> (pu_size_log2 + 1);
-
-    // Absolute Differences (used only in unpatched spatial-SAD mode)
-    wire [31:0] ad_planar = (orig_rd_data > pred_planar) ? (orig_rd_data - pred_planar) : (pred_planar - orig_rd_data);
-    wire [31:0] ad_dc     = (orig_rd_data > pred_dc)     ? (orig_rd_data - pred_dc)     : (pred_dc - orig_rd_data);
-    wire [31:0] ad_hor    = (orig_rd_data > pred_hor)    ? (orig_rd_data - pred_hor)    : (pred_hor - orig_rd_data);
-    wire [31:0] ad_ver    = (orig_rd_data > pred_ver)    ? (orig_rd_data - pred_ver)    : (pred_ver - orig_rd_data);
-`endif
 
     // Chroma Absolute Differences
     wire [31:0] ad_u_planar = (orig_u_rd_data > pred_planar_u) ? (orig_u_rd_data - pred_planar_u) : (pred_planar_u - orig_u_rd_data);
@@ -329,14 +298,7 @@ module intra_rmd (
     assign rmd_active = (state == S_EVAL);
 
     // Winning Luma Mode derivation for Table 8-2
-`ifdef REMEDIATION
     wire [5:0] win_luma_mode = best_mode;
-`else
-    wire [5:0] luma_mode_sad = (sad_planar <= sad_dc && sad_planar <= sad_hor && sad_planar <= sad_ver) ? `INTRA_PLANAR :
-                               (sad_dc <= sad_hor && sad_dc <= sad_ver) ? `INTRA_DC :
-                               (sad_hor <= sad_ver) ? 6'd10 : 6'd26;
-    wire [5:0] win_luma_mode = luma_mode_sad;
-`endif
 
     // ITU-T H.265 Clause 8.4.3 Table 8-2 candidate directions
     wire [5:0] dir_cand0 = (win_luma_mode == `INTRA_PLANAR) ? 6'd34 : `INTRA_PLANAR;
@@ -395,26 +357,19 @@ module intra_rmd (
             best_chroma_dir <= 6'd0;
             lat_pu_x <= 6'd0; lat_pu_y <= 6'd0;
             orig_rd_addr <= 12'd0;
-`ifdef REMEDIATION
             sub_x <= 2'd0; sub_y <= 2'd0;
             tile_x <= 3'd0; tile_y <= 3'd0;
             satd_acc_p <= 32'd0; satd_acc_d <= 32'd0; satd_acc_h <= 32'd0; satd_acc_v <= 32'd0;
             tiles_acc <= 7'd0;
             wr_bank <= 1'b0; rd_bank <= 1'b0;
             had_start <= 1'b0;
-`else
-            cx <= 6'd0; cy <= 6'd0;
-            sad_planar <= 32'd0; sad_dc <= 32'd0; sad_hor <= 32'd0; sad_ver <= 32'd0;
-`endif
         end else begin
             state <= next_state;
             
             case (state)
                 S_IDLE: begin
                     rmd_done <= 1'b0;
-`ifdef REMEDIATION
                     had_start <= 1'b0;
-`endif
                     if (start) begin
                         if (pu_size_log2 > 3'd5) begin
                             // Fast return for 64x64
@@ -434,16 +389,11 @@ module intra_rmd (
                             lat_pu_y <= pu_y;
                             best_chroma_pred_mode <= 3'd4;
                             best_chroma_dir <= 6'd0;
-`ifdef REMEDIATION
                             sub_x <= 2'd0; sub_y <= 2'd0;
                             tile_x <= 3'd0; tile_y <= 3'd0;
                             satd_acc_p <= 32'd0; satd_acc_d <= 32'd0; satd_acc_h <= 32'd0; satd_acc_v <= 32'd0;
                             tiles_acc <= 7'd0;
                             wr_bank <= 1'b0; rd_bank <= 1'b0;
-`else
-                            cx <= 6'd0; cy <= 6'd0;
-                            sad_planar <= 32'd0; sad_dc <= 32'd0; sad_hor <= 32'd0; sad_ver <= 32'd0;
-`endif
                         end
                     end
                 end
@@ -459,9 +409,7 @@ module intra_rmd (
                 end
                 
                 S_EVAL: begin
-`ifdef REMEDIATION
                     had_start <= 1'b0;
-`endif
                     // Stage 0: Issue BRAM read request
                     if (req_active) begin
                         orig_rd_addr <= { (lat_pu_y + cy), (lat_pu_x + cx) };
@@ -471,7 +419,6 @@ module intra_rmd (
                         eval_q1 <= 1'b1;
                         eval_c_q1 <= ({2'b00, cy} < N_C && {2'b00, cx} < N_C);
 
-`ifdef REMEDIATION
                         if (sub_x == 2'd3) begin
                             sub_x <= 2'd0;
                             if (sub_y == 2'd3) begin
@@ -493,19 +440,6 @@ module intra_rmd (
                         end else begin
                             sub_x <= sub_x + 2'd1;
                         end
-`else
-                        if (cx == N[5:0] - 6'd1) begin
-                            cx <= 6'd0;
-                            if (cy == N[5:0] - 6'd1) begin
-                                cy <= 6'd0;
-                                req_active <= 1'b0;
-                            end else begin
-                                cy <= cy + 6'd1;
-                            end
-                        end else begin
-                            cx <= cx + 6'd1;
-                        end
-`endif
                     end else begin
                         eval_q1 <= 1'b0;
                         eval_c_q1 <= 1'b0;
@@ -519,7 +453,6 @@ module intra_rmd (
 
                     // Stage 2: Consume aligned orig_rd_data / orig_u/v_rd_data
                     if (eval_q2) begin
-`ifdef REMEDIATION
                         diff_planar_buf[{wr_bank, cy_q2[1:0], cx_q2[1:0]}] <= diff_p;
                         diff_dc_buf    [{wr_bank, cy_q2[1:0], cx_q2[1:0]}] <= diff_d;
                         diff_hor_buf   [{wr_bank, cy_q2[1:0], cx_q2[1:0]}] <= diff_h;
@@ -529,12 +462,6 @@ module intra_rmd (
                             rd_bank   <= wr_bank;
                             wr_bank   <= ~wr_bank;
                         end
-`else
-                        sad_planar <= sad_planar + ad_planar;
-                        sad_dc     <= sad_dc     + ad_dc;
-                        sad_hor    <= sad_hor    + ad_hor;
-                        sad_ver    <= sad_ver    + ad_ver;
-`endif
                     end
                     if (eval_c_q2) begin
                         sad_c_planar <= sad_c_planar + ad_u_planar + ad_v_planar;
@@ -544,7 +471,6 @@ module intra_rmd (
                         sad_c_34     <= sad_c_34     + ad_u_34     + ad_v_34;
                     end
 
-`ifdef REMEDIATION
                     // Accumulate completed 4x4 tile SATD outputs while streaming subsequent tiles
                     if (had_done_p) begin
                         satd_acc_p <= satd_acc_p + {16'd0, satd_p};
@@ -553,10 +479,8 @@ module intra_rmd (
                         satd_acc_v <= satd_acc_v + {16'd0, satd_v};
                         tiles_acc  <= tiles_acc + 7'd1;
                     end
-`endif
                 end
                 
-`ifdef REMEDIATION
                 S_HADAMARD: begin
                     had_start <= 1'b0;
                     if (had_done_p) begin
@@ -581,31 +505,9 @@ module intra_rmd (
                         end
                     end
                 end
-`endif
 
                 S_DONE: begin
                     rmd_done <= 1'b1;
-`ifndef REMEDIATION
-                    // synthesis translate_off
-                    $display("Time=%0t: [INTRA_RMD] SAD: planar=%0d dc=%0d hor=%0d ver=%0d", $time, sad_planar, sad_dc, sad_hor, sad_ver);
-                    $display("DEBUG [INTRA_RMD]: orig_rd_addr=%0d, orig_rd_data=%h, pred_planar=%h, refL_y=%h, refT_x=%h, refT_N=%h, refL_N=%h", 
-                                orig_rd_addr, orig_rd_data, pred_planar, refL_y, refT_x, refT_N, refL_N);
-                    // synthesis translate_on
-                    // Comparator tree
-                    if (sad_planar <= sad_dc && sad_planar <= sad_hor && sad_planar <= sad_ver) begin
-                        best_mode <= `INTRA_PLANAR;
-                        best_cost <= sad_planar;
-                    end else if (sad_dc <= sad_hor && sad_dc <= sad_ver) begin
-                        best_mode <= `INTRA_DC;
-                        best_cost <= sad_dc;
-                    end else if (sad_hor <= sad_ver) begin
-                        best_mode <= 6'd10;
-                        best_cost <= sad_hor;
-                    end else begin
-                        best_mode <= 6'd26;
-                        best_cost <= sad_ver;
-                    end
-`endif
                     // ITU-T H.265 Clause 8.4.3 Table 8-2 Chroma Intra Mode Selection
                     if (cost_cand4 <= cost_cand0 && cost_cand4 <= cost_cand1 && cost_cand4 <= cost_cand2 && cost_cand4 <= cost_cand3) begin
                         best_chroma_pred_mode <= 3'd4;
@@ -633,12 +535,8 @@ module intra_rmd (
         case (state)
             S_IDLE:     if (start && pu_size_log2 <= 3'd5) next_state = S_LOAD_REF;
             S_LOAD_REF: if (ref_valid && ref_last) next_state = S_EVAL;
-`ifdef REMEDIATION
             S_EVAL:     if (!req_active && !eval_q1 && !eval_q2) next_state = S_HADAMARD;
             S_HADAMARD: if (!had_done_p && (tiles_acc == total_tiles)) next_state = S_DONE;
-`else
-            S_EVAL:     if (!req_active && !eval_q1 && !eval_q2) next_state = S_DONE;
-`endif
             S_DONE:     next_state = S_IDLE;
         endcase
     end

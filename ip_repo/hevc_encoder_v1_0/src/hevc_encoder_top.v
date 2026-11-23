@@ -242,13 +242,8 @@ module hevc_encoder_top #(
     wire [9:0]  intra_pred_x;
     wire [9:0]  intra_pred_y;
 
-`ifdef REMEDIATION
     wire [19:0] amvp_mv_x_flat;
     wire [19:0] amvp_mv_y_flat;
-`else
-    wire [19:0] amvp_mv_x_flat = 20'd0;
-    wire [19:0] amvp_mv_y_flat = 20'd0;
-`endif
     wire signed [9:0] mvp_x_qp = amvp_mv_x_flat[9:0];
     wire signed [9:0] mvp_y_qp = amvp_mv_y_flat[9:0];
 
@@ -637,10 +632,8 @@ module hevc_encoder_top #(
     reg signed [11:0]  latched_cu_mv_y;
     reg [5:0]   latched_cu_ctu_x;
     reg [5:0]   latched_cu_ctu_y;
-`ifdef REMEDIATION
     reg signed [9:0] latched_mvp_x_qp;
     reg signed [9:0] latched_mvp_y_qp;
-`endif
     
     // Forward declaration of cu_split_ctx (derived below from ctu_depth_map)
     wire [1:0]  cu_split_ctx;
@@ -661,10 +654,8 @@ module hevc_encoder_top #(
             latched_cu_mv_y             <= 12'd0;
             latched_cu_ctu_x            <= 6'd0;
             latched_cu_ctu_y            <= 6'd0;
-`ifdef REMEDIATION
             latched_mvp_x_qp            <= 10'd0;
             latched_mvp_y_qp            <= 10'd0;
-`endif
         end else if (trigger_cu) begin
             latched_cu_is_split         <= node_split_start;
             latched_cu_depth            <= cu_depth[1:0];
@@ -680,10 +671,8 @@ module hevc_encoder_top #(
             latched_cu_mv_y             <= md_eff_inter_mv_y;
             latched_cu_ctu_x            <= ctu_x;
             latched_cu_ctu_y            <= ctu_y;
-`ifdef REMEDIATION
             latched_mvp_x_qp            <= mvp_x_qp;
             latched_mvp_y_qp            <= mvp_y_qp;
-`endif
         end
     end
 
@@ -761,7 +750,6 @@ module hevc_encoder_top #(
     
     wire [31:0] md_best_rd_cost;
     
-`ifdef REMEDIATION
     // -------------------------------------------------------------------------
     // Spatial Neighbor Tracking for AMVP / Merge (D-01)
     // -------------------------------------------------------------------------
@@ -963,12 +951,6 @@ module hevc_encoder_top #(
             end
         end
     end
-`else
-    // Provide single zero-MV merge candidate (candidate 0) for P-slice merge/skip
-    wire [4:0]  merge_valid_bus = 5'b00001;  // 1 valid candidate
-    wire [49:0] merge_mv_x_flat = 50'd0;
-    wire [49:0] merge_mv_y_flat = 50'd0;
-`endif
 
     // Forward declarations for TU sequencer registers used in map update
     reg [5:0]   reg_tu_x;
@@ -1399,9 +1381,9 @@ module hevc_encoder_top #(
     //-------------------------------------------------------------------------
     // TU Sequencer & Neighbor Buffer for Intra Prediction
     //-------------------------------------------------------------------------
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] recon_y_ram [0:`CTU_LUMA_SAMPLES-1]; // CTU Luma recon buffer
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] recon_u_ram [0:`CTU_CB_SAMPLES-1];   // CTU Chroma U recon buffer
-    (* ramstyle = "M10K, no_rw_check", ram_style = "block" *) reg [`PIXEL_WIDTH-1:0] recon_v_ram [0:`CTU_CR_SAMPLES-1];   // CTU Chroma V recon buffer
+    (* ram_style = "distributed" *) reg [`PIXEL_WIDTH-1:0] recon_y_ram [0:`CTU_LUMA_SAMPLES-1]; // CTU Luma recon buffer
+    (* ram_style = "distributed" *) reg [`PIXEL_WIDTH-1:0] recon_u_ram [0:`CTU_CB_SAMPLES-1];   // CTU Chroma U recon buffer
+    (* ram_style = "distributed" *) reg [`PIXEL_WIDTH-1:0] recon_v_ram [0:`CTU_CR_SAMPLES-1];   // CTU Chroma V recon buffer
 
     // synthesis translate_off
     integer sim_recon_i;
@@ -2077,17 +2059,16 @@ module hevc_encoder_top #(
     wire signed [9:0] mvp_y = mvp_y_qp >>> 2;
     
 
-    // MC uses quarter-pel units (best_inter_mv_x/y from mode_decision * 4)
-    // FIX: md_best_inter_mv is already quarter-pel. Sign-extend 12-bit to 14-bit without shifting.
-    wire signed [13:0] mc_mv_x_qp = {{2{md_best_inter_mv_x[11]}}, md_best_inter_mv_x};
-    wire signed [13:0] mc_mv_y_qp = {{2{md_best_inter_mv_y[11]}}, md_best_inter_mv_y};
+    // MC uses quarter-pel units (12-bit signed, matching inter_pred_top MV_QP_W=12)
+    wire signed [11:0] mc_mv_x_qp = md_best_inter_mv_x;
+    wire signed [11:0] mc_mv_y_qp = md_best_inter_mv_y;
 
     
     // AXI read channels for Inter Pred (to Arbiter)
     wire         ip_arvalid;
     wire         ip_arready;
     wire [32:0]  ip_araddr;
-    wire [8:0]   ip_arlen;
+    wire [7:0]   ip_arlen;
     wire [2:0]   ip_arsize;
     wire [1:0]   ip_arburst;
     wire         ip_rvalid;
@@ -2485,7 +2466,7 @@ module hevc_encoder_top #(
         .ref_valid        (intra_ref_active_q),
         .ref_ready        (),
         .ref_sample       (intra_ref_sample),
-        .ref_idx          ({1'b0, intra_ref_idx_q}),
+        .ref_idx          (intra_ref_idx_q),
         .ref_last         (intra_ref_last_q),
         
         .out_valid        (intra_out_valid),
@@ -2511,10 +2492,8 @@ module hevc_encoder_top #(
         .rst_n            (rst_n),
         .fwd_inv_n        (!idct_start),
         .tu_size_log2     (idct_start ? dct_out_tu_size_log2 : reg_tu_size_log2),
-`ifdef REMEDIATION
         .is_dst7          (idct_start ? ((dct_out_tu_size_log2 == 3'd2) && latched_cu_is_intra && (reg_tu_comp == 2'd0))
                                       : ((reg_tu_size_log2 == 3'd2)     && latched_cu_is_intra && (reg_tu_comp == 2'd0))),
-`endif
         .in_valid         (dct_in_valid | idct_start),
         .in_ready         (),  // streaming pipeline, never stalls
         .in_data          (use_idct_bus ? idct_in_data_flat : dct_in_data_flat),
@@ -2546,7 +2525,6 @@ module hevc_encoder_top #(
       
       // Derive scan_mode from intra mode per HEVC spec (diagonal=0, horiz=1, vert=2)
       // HEVC Clause 6.5.3: Only 4x4 and 8x8 Intra TUs can use horizontal/vertical scan. 16x16 and 32x32 are always Diagonal (0).
-`ifdef REMEDIATION
     // MDCS applies to Intra TUs: 4x4 and 8x8 for Luma, and 4x4 for Chroma (4:2:0 format) per Clause 7.4.9.11
     wire tu_mdcs_eligible = latched_cu_is_intra && 
                             ((reg_tu_comp == 2'd0 && dct_out_tu_size_log2 <= 3'd3) ||
@@ -2556,9 +2534,6 @@ module hevc_encoder_top #(
 
     wire [1:0] scan_mode = (tu_mdcs_eligible && mdcs_pred_mode_intra >= 6'd6  && mdcs_pred_mode_intra <= 6'd14) ? 2'd2 :
                            (tu_mdcs_eligible && mdcs_pred_mode_intra >= 6'd22 && mdcs_pred_mode_intra <= 6'd30) ? 2'd1 : 2'd0; 
-`else
-    wire [1:0] scan_mode = 2'd0;
-`endif 
       
       address_generator u_addr_gen (
           .tu_size_log2 (dct_out_tu_size_log2),
@@ -3168,10 +3143,10 @@ module hevc_encoder_top #(
     coeff_buffer u_coeff_buffer (
         .clk   (clk),
         .we    (quant_out_valid),
-        .waddr ({2'd0, quant_out_scan_idx}),
+        .waddr (quant_out_scan_idx),
         .wdata (quant_out_level),
         .re    (coeff_buf_re),
-        .raddr (coeff_buf_raddr),
+        .raddr (coeff_buf_raddr[9:0]),
         .rdata (coeff_buf_rdata)
     );
 
@@ -3517,7 +3492,6 @@ module hevc_encoder_top #(
         end
     end
 
-`ifdef REMEDIATION
     // Neighbor intra mode tracking for CABAC intra MPM derivation
     // Standard HEVC Clause 8.4.2 / HM getIntraDirPredictor
     reg [5:0] ctu_intra_mode_map [0:7][0:7];
@@ -3580,32 +3554,6 @@ module hevc_encoder_top #(
             end
         end
     end
-`else
-    reg [5:0] cu_intra_mode_line_buf [0:63];
-    reg [5:0] cu_intra_mode_left_r;
-    wire      intra_left_avail  = (ctu_x > 0);
-    // In HEVC standard Clause 8.4.2 / HM getIntraDirPredictor:
-    // planarAtCtuBoundary=true explicitly treats above PU as unavailable when crossing CTU row boundaries.
-    // Therefore, for 64x64 CUs at the top of a CTU, above neighbor is ALWAYS unavailable (mode defaults to DC=1).
-    wire [5:0] cu_left_intra_mode  = intra_left_avail ? cu_intra_mode_left_r : 6'd1;
-    wire [5:0] cu_above_intra_mode = 6'd1;
-
-    integer intra_mode_init_i;
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            cu_intra_mode_left_r <= 6'd1;
-            for (intra_mode_init_i = 0; intra_mode_init_i < 64; intra_mode_init_i = intra_mode_init_i + 1)
-                cu_intra_mode_line_buf[intra_mode_init_i] <= 6'd1;
-        end else if (gop_frame_start) begin
-            cu_intra_mode_left_r <= 6'd1;
-            for (intra_mode_init_i = 0; intra_mode_init_i < 64; intra_mode_init_i = intra_mode_init_i + 1)
-                cu_intra_mode_line_buf[intra_mode_init_i] <= 6'd1;
-        end else if ((cabac_pred_done || (cabac_cu_done && current_cu_skip)) && !latched_cu_is_split) begin
-            cu_intra_mode_left_r <= latched_cu_intra_mode;
-            cu_intra_mode_line_buf[ctu_x] <= latched_cu_intra_mode;
-        end
-    end
-`endif
 
     // synthesis translate_off
     always @(posedge clk) begin
@@ -3662,21 +3610,12 @@ module hevc_encoder_top #(
         .inter_dir        (ctu_slice_type == SLICE_B ? 2'd2 : 2'd0), // 0=L0, 1=L1, 2=Bi
         .ref_idx_l0       (3'd0),
         .mvp_flag_l0      (1'b0),
-`ifdef REMEDIATION
         .mvd_l0_x         (latched_cu_mv_x - {{2{latched_mvp_x_qp[9]}}, latched_mvp_x_qp}),
         .mvd_l0_y         (latched_cu_mv_y - {{2{latched_mvp_y_qp[9]}}, latched_mvp_y_qp}),
         .ref_idx_l1       (3'd0),
         .mvp_flag_l1      (1'b0),
         .mvd_l1_x         (latched_cu_mv_x - {{2{latched_mvp_x_qp[9]}}, latched_mvp_x_qp}),
         .mvd_l1_y         (latched_cu_mv_y - {{2{latched_mvp_y_qp[9]}}, latched_mvp_y_qp}),
-`else
-        .mvd_l0_x         (latched_cu_mv_x - {{2{mvp_x_qp[9]}}, mvp_x_qp}),
-        .mvd_l0_y         (latched_cu_mv_y - {{2{mvp_y_qp[9]}}, mvp_y_qp}),
-        .ref_idx_l1       (3'd0),
-        .mvp_flag_l1      (1'b0),
-        .mvd_l1_x         (latched_cu_mv_x - {{2{mvp_x_qp[9]}}, mvp_x_qp}),
-        .mvd_l1_y         (latched_cu_mv_y - {{2{mvp_y_qp[9]}}, mvp_y_qp}),
-`endif
 
         // Coeff syntax
         .coeff_req           (wire_coeff_req),
@@ -3686,9 +3625,7 @@ module hevc_encoder_top #(
         .coeff_tu_size_log2  (reg_tu_size_log2),
         .coeff_tu_cbf        (tu_has_nonzero),
         .coeff_last_sig_pos  (tu_last_sig_idx),
-`ifdef REMEDIATION
         .coeff_scan_mode     (scan_mode),
-`endif
         .tu_cg_mask_en       (1'b1),
         .tu_cg_nonzero_mask  (cabac_tu_cg_nonzero_mask),
         .coeff_rd_en         (coeff_buf_re),

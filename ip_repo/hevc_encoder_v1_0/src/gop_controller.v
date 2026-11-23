@@ -83,12 +83,12 @@ module gop_controller #(
     reg [9:0] slot_map_poc [0:7];
     reg       slot_map_valid [0:7];
 
-    // Internal 2D arrays for Reference Picture Lists
-    reg [2:0] int_ref_l0 [0:`MAX_REF_ACTIVE-1];
-    reg [2:0] int_ref_l1 [0:`MAX_REF_ACTIVE-1];
+    // Active reference slot 0 registers (upper unused slots tied to 0)
+    reg [2:0] int_ref_l0_0;
+    reg [2:0] int_ref_l1_0;
 
-    assign ref_l0 = {int_ref_l0[4], int_ref_l0[3], int_ref_l0[2], int_ref_l0[1], int_ref_l0[0]};
-    assign ref_l1 = {int_ref_l1[4], int_ref_l1[3], int_ref_l1[2], int_ref_l1[1], int_ref_l1[0]};
+    assign ref_l0 = {12'd0, int_ref_l0_0};
+    assign ref_l1 = {12'd0, int_ref_l1_0};
 
     // Active sequential IP / Low-Delay IPBB control; hierarchical-B ROM removed
     // (can be reconstructed from git history if B-frame reordering is added later).
@@ -160,6 +160,16 @@ module gop_controller #(
             alloc_valid      <= 1'b0;
             free_valid       <= 1'b0;
             is_intra         <= 1'b0;
+            frame_slice_type <= SLICE_I;
+            frame_poc        <= 10'd0;
+            temporal_id      <= 3'd0;
+            nal_type         <= NAL_IDR_W_RADL;
+            alloc_poc        <= 10'd0;
+            free_slot        <= 3'd0;
+            ref_l0_count     <= 3'd0;
+            ref_l1_count     <= 3'd0;
+            int_ref_l0_0     <= 3'd0;
+            int_ref_l1_0     <= 3'd0;
             
             base_poc         <= 10'd0;
             gop_idx          <= 5'd0;
@@ -217,8 +227,8 @@ module gop_controller #(
                             
                             ref_l0_count     <= 3'd1;
                             ref_l1_count     <= 3'd1;
-                            int_ref_l0[0]    <= find_slot(base_poc - 10'd1);
-                            int_ref_l1[0]    <= find_slot(base_poc - 10'd1); // Aligned with HM RefPicList1 (RPS delta=-1)
+                            int_ref_l0_0     <= find_slot(base_poc - 10'd1);
+                            int_ref_l1_0     <= find_slot(base_poc - 10'd1); // Aligned with HM RefPicList1 (RPS delta=-1)
                         end else begin
                             // P-Frame for IP pattern
                             frame_slice_type <= SLICE_P;
@@ -229,8 +239,8 @@ module gop_controller #(
                             
                             ref_l0_count     <= 3'd1;
                             ref_l1_count     <= 3'd0;
-                            int_ref_l0[0]    <= find_slot(base_poc - 10'd1);
-                            int_ref_l1[0]    <= 3'd0;
+                            int_ref_l0_0     <= find_slot(base_poc - 10'd1);
+                            int_ref_l1_0     <= 3'd0;
                         end
                     end
 

@@ -9,6 +9,8 @@
 #   4. Synthesis instantiation template is generated cleanly.
 #=============================================================================
 
+catch {set_param general.maxThreads 2}
+
 if { [info exists env(VIVADO_PART)] } {
     set target_part $env(VIVADO_PART)
 } else {

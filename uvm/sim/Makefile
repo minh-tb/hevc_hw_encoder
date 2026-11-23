@@ -61,7 +61,7 @@ AXI_ENV_DIR = $(AXI_TOP_DIR)/env
 AXI_TST_DIR = $(AXI_TOP_DIR)/tests
 SIM_DIR     = $(HEVC_UVM_DIR)/sim
 
-RTL_FLAGS = +define+REMEDIATION +incdir+$(RTL_DIR)/common +incdir+$(RTL_DIR)/top
+RTL_FLAGS = +incdir+$(RTL_DIR)/common +incdir+$(RTL_DIR)/top
 
 RTL_HDRS = \
 	$(RTL_DIR)/common/parameter_pkg.vh \

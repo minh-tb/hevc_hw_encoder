@@ -13,6 +13,11 @@
 
 `timescale 1ns / 1ps
 `include "parameter_pkg.vh"
+`ifndef NO_REMEDIATION
+`ifndef REMEDIATION
+`define REMEDIATION 1
+`endif
+`endif
 
 module tb_flaw_intra_rmd;
 

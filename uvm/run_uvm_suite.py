@@ -390,7 +390,6 @@ def run_xsim_tier1_cabac(
             str(XVLOG_BAT),
             "-sv",
             "-L", "uvm",
-            "-d", "REMEDIATION",
             "-i", rtl_common,
             range_coder_v.as_posix(),
             "../cabac_if.sv",
@@ -487,7 +486,6 @@ def compile_xsim_tier2_axi_top(
             str(XVLOG_BAT),
             "-sv",
             "-L", "uvm",
-            "-d", "REMEDIATION",
             "-i", rtl_common,
         ]
         + [p.as_posix() for p in rtl_files]

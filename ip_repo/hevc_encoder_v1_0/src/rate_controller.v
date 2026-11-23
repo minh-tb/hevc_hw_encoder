@@ -50,7 +50,6 @@ module rate_controller (
     reg signed [31:0] target_bits_frame;
     reg signed [31:0] target_bits_p;
     reg signed [31:0] target_bits_i;
-    reg signed [31:0] fullness_calc;
 
     reg [5:0] current_qp_r;
 
@@ -60,9 +59,6 @@ module rate_controller (
 
     // Parameters for Buffer feedback
     // K_buf scaling: Delta QP per 10% buffer deviation
-    wire [7:0] safe_fps = (fps > 0) ? fps : 8'd30;
-
-`ifdef REMEDIATION
     wire [47:0] kbps_x100_div3 = ({32'd0, target_bitrate_kbps} * 48'd2184600) >> 16;
 
     // Synthesizable shift-threshold comparison tree computes [0..100] without dividers
@@ -120,7 +116,6 @@ module rate_controller (
             end
         end
     endfunction
-`endif
 
     reg rc_active_d;
 
@@ -139,17 +134,10 @@ module rate_controller (
             if (!rc_enable || (!rc_active_d && rc_enable)) begin
                 current_qp_r <= base_qp;
             end
-`ifdef REMEDIATION
             // Calculate buffer targets using reciprocal shift-multiply arithmetic (no divider)
             vbv_buffer_max <= $signed({16'd0, target_bitrate_kbps}) * 32'sd1000;
             target_bits_p  <= $signed(kbps_x100_div3[31:0]);
             target_bits_i  <= $signed({16'd0, target_bitrate_kbps}) * 32'sd100; // 3x target_bits_p
-`else
-            // Calculate buffer targets using strictly signed arithmetic
-            vbv_buffer_max <= $signed({16'd0, target_bitrate_kbps}) * 32'sd1000;
-            target_bits_p  <= ($signed({16'd0, target_bitrate_kbps}) * 32'sd1000) / $signed({24'd0, safe_fps});
-            target_bits_i  <= (($signed({16'd0, target_bitrate_kbps}) * 32'sd1000) / $signed({24'd0, safe_fps})) * 32'sd3; // 3x weight for I-frames
-`endif
 
             if (frame_start) begin
                 if (rc_enable) begin
@@ -172,7 +160,6 @@ module rate_controller (
                 // Compute Delta QP
                 // If actual bits > target bits, increase QP (+1 or +2)
                 // If actual bits < target bits, decrease QP (-1 or -2)
-`ifdef REMEDIATION
                 // Closed-loop VBV feedback integrated with frame error
                 if (vbv_buffer_bits > (vbv_buffer_max >>> 2) ||
                     actual_frame_bits > (target_bits_frame + (target_bits_frame >> 2))) begin
@@ -187,30 +174,6 @@ module rate_controller (
                 end
 
                 vbv_fullness_pct <= calc_fullness_pct(vbv_buffer_bits, vbv_buffer_max);
-`else
-                if (actual_frame_bits > (target_bits_frame + (target_bits_frame >> 2))) begin
-                    // Exceeded by > 25%
-                    if (current_qp_r < 6'd50) current_qp_r <= current_qp_r + 6'd2;
-                end else if (actual_frame_bits > (target_bits_frame + (target_bits_frame >> 4))) begin
-                    // Exceeded by > 6%
-                    if (current_qp_r < 6'd51) current_qp_r <= current_qp_r + 6'd1;
-                end else if (actual_frame_bits < (target_bits_frame - (target_bits_frame >> 2))) begin
-                    // Under by > 25%
-                    if (current_qp_r > 6'd12) current_qp_r <= current_qp_r - 6'd2;
-                end else if (actual_frame_bits < (target_bits_frame - (target_bits_frame >> 4))) begin
-                    // Under by > 6%
-                    if (current_qp_r > 6'd11) current_qp_r <= current_qp_r - 6'd1;
-                end
-
-                // Percentage status with strictly signed arithmetic & saturation clamp [0%, 100%]
-                fullness_calc = 32'sd50 + ((vbv_buffer_bits * 32'sd50) / vbv_buffer_max);
-                if (fullness_calc < 32'sd0)
-                    vbv_fullness_pct <= 16'd0;
-                else if (fullness_calc > 32'sd100)
-                    vbv_fullness_pct <= 16'd100;
-                else
-                    vbv_fullness_pct <= fullness_calc[15:0];
-`endif
             end
         end
     end

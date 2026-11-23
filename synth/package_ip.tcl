@@ -7,6 +7,7 @@
 #=============================================================================
 
 # 1. Configuration & Part Selection
+catch {set_param general.maxThreads 2}
 if { [info exists env(VIVADO_PART)] } {
     set target_part $env(VIVADO_PART)
 } else {
@@ -113,7 +114,7 @@ add_files -norecurse "synth/hevc_encoder_top.xdc"
 # Set project top and include directories
 set_property top $top_module [current_fileset]
 set_property include_dirs [list "rtl/common"] [current_fileset]
-set_property verilog_define [list "SYNTHESIS=1" "REMEDIATION=1"] [current_fileset]
+set_property verilog_define [list "SYNTHESIS=1"] [current_fileset]
 update_compile_order -fileset sources_1
 
 # 6. Package Project into Target IP Directory

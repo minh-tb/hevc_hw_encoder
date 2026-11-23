@@ -72,7 +72,7 @@ def run_mutation_simulation():
         # Compile and run mutant simulation using ModelSim
         vlog_cmd = [
             r"C:\altera\13.0sp1\modelsim_ase\win32aloem\vlog.exe",
-            "-sv", "+define+REMEDIATION+CFG_TOTAL_FRAMES=3", "+libext+.v",
+            "-sv", "+define+CFG_TOTAL_FRAMES=3", "+libext+.v",
             "-y", "rtl/top", "-y", "rtl/entropy", "-y", "rtl/common", "-y", "rtl/partition",
             "-y", "rtl/transform", "-y", "rtl/intra", "-y", "rtl/recon", "-y", "rtl/inter",
             "-y", "rtl/rate_control", "-y", "rtl/inloop_filters", "-y", "rtl/quant", "-y", "rtl/input_output",

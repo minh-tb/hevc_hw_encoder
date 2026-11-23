@@ -22,13 +22,6 @@
 // Modify these to retarget pipeline operating conditions.
 //=============================================================================
 
-// Enable normative remediation fixes by default for production, synthesis, and IP integration
-`ifndef NO_REMEDIATION
-`ifndef REMEDIATION
-`define REMEDIATION 1
-`endif
-`endif
-
 //-----------------------------------------------------------------------------
 // 1. BIT DEPTH & SAMPLE WIDTH
 //-----------------------------------------------------------------------------
@@ -54,12 +47,8 @@
 // 3. SIMULATION & VERIFICATION STALL WATCHDOG LIMITS
 //-----------------------------------------------------------------------------
 `define STALL_WATCHDOG_LIMIT     32'd25000  // Consecutive stall cycles before watchdog trip
-`ifdef REMEDIATION
 `ifndef CTU_WATCHDOG_LIMIT
 `define CTU_WATCHDOG_LIMIT       32'd2000000 // Max cycles per CTU before timeout (accommodates inter motion search + 8-stage deblock)
-`endif
-`else
-`define CTU_WATCHDOG_LIMIT       32'd150000 // Max cycles per CTU before timeout
 `endif
 `define HEARTBEAT_INTERVAL       32'd25000  // Heartbeat output interval in cycles
 
@@ -205,11 +194,7 @@
 // 9. SAO
 //    Config: SAO=1, SAOLcuBoundary=0
 //-----------------------------------------------------------------------------
-`ifdef REMEDIATION
 `define SAO_ENABLE          0           // Default disabled to guarantee CABAC bitstream sync
-`else
-`define SAO_ENABLE          1
-`endif
 `define SAO_LCU_BOUNDARY    0           // Use deblocked pixels at boundary
 `define SAO_NUM_EO_TYPES    4           // Edge offset directions
 `define SAO_NUM_EO_CATS     5           // EO categories: -2,-1,0,+1,+2
