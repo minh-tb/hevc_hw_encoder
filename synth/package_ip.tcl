@@ -128,15 +128,24 @@ ipx::package_project -root_dir $ip_root_dir -vendor "uit.edu.vn" -library "video
 
 set core [ipx::current_core]
 
-# Ensure subpel_interpolation_core.v is imported and packaged
-file copy -force "rtl/inter/subpel_interpolation_core.v" "$ip_root_dir/src/subpel_interpolation_core.v"
-foreach fg_name {xilinx_anylanguagesynthesis xilinx_anylanguagebehavioralsimulation} {
-    set fg [ipx::get_file_groups $fg_name -of_objects $core]
-    if {$fg ne ""} {
-        set existing [ipx::get_files "src/subpel_interpolation_core.v" -of_objects $fg]
-        if {$existing eq ""} {
-            set subpel_f [ipx::add_file "src/subpel_interpolation_core.v" $fg]
-            set_property type systemVerilogSource $subpel_f
+# Ensure standalone/unreferenced RTL modules stay imported and packaged for Gate G6 parity
+set standalone_rtl_files [list \
+    "rtl/inter/subpel_interpolation_core.v" \
+    "rtl/inloop_filters/sao_top.v" \
+    "rtl/inloop_filters/sao_edge_offset.v" \
+    "rtl/inloop_filters/sao_band_offset.v" \
+]
+foreach rtl_src $standalone_rtl_files {
+    set base_name [file tail $rtl_src]
+    file copy -force $rtl_src "$ip_root_dir/src/$base_name"
+    foreach fg_name {xilinx_anylanguagesynthesis xilinx_anylanguagebehavioralsimulation} {
+        set fg [ipx::get_file_groups $fg_name -of_objects $core]
+        if {$fg ne ""} {
+            set existing [ipx::get_files "src/$base_name" -of_objects $fg]
+            if {$existing eq ""} {
+                set extra_f [ipx::add_file "src/$base_name" $fg]
+                set_property type systemVerilogSource $extra_f
+            }
         }
     }
 }

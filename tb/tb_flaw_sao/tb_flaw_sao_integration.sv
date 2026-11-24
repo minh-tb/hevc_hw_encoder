@@ -95,6 +95,12 @@ module tb_flaw_sao_integration;
         .org_rd_y(stats_org_rd_y),
         .org_rd_comp(stats_org_rd_comp),
         .org_resp_data(stats_org_resp_data),
+`ifdef REMEDIATION
+        .rec_cb_resp_data(10'd0),
+        .rec_cr_resp_data(10'd0),
+        .org_u_resp_data(10'd0),
+        .org_v_resp_data(10'd0),
+`endif
         .sao_type(stats_sao_type),
         .eo_class(stats_eo_class),
         .eo_offset(stats_eo_offset),

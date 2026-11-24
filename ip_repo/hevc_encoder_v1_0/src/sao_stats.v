@@ -6,7 +6,8 @@
 `include "parameter_pkg.vh"
 
 module sao_stats #(
-    parameter SINGLE_PASS_CAUSAL_SYNC = 0
+    parameter SINGLE_PASS_CAUSAL_SYNC = 0,
+    parameter PARALLEL_YCBCR_MODE     = 0
 )(
     input  wire         clk,
     input  wire         rst_n,
@@ -33,6 +34,12 @@ module sao_stats #(
     output reg  [5:0]   org_rd_y,
     output reg  [1:0]   org_rd_comp,
     input  wire [9:0]   org_resp_data,
+
+    // Parallel Chroma SRAM Response Feeds (used when PARALLEL_YCBCR_MODE != 0)
+    input  wire [9:0]   rec_cb_resp_data,
+    input  wire [9:0]   rec_cr_resp_data,
+    input  wire [9:0]   org_u_resp_data,
+    input  wire [9:0]   org_v_resp_data,
 
     // Outputs
     output reg [5:0]    sao_type,
@@ -230,12 +237,20 @@ module sao_stats #(
     reg [5:0] rd_y_d1,   rd_y_d2;
     reg [1:0] flush_cnt;
 
-    wire signed [10:0] pix_diff = $signed({1'b0, org_resp_data}) - $signed({1'b0, rec_resp_data});
-    wire [4:0]         pix_band = rec_resp_data[9:5];
+    wire signed [10:0] pix_diff    = $signed({1'b0, org_resp_data}) - $signed({1'b0, rec_resp_data});
+    wire [4:0]         pix_band    = rec_resp_data[9:5];
+    wire signed [10:0] pix_diff_cb = $signed({1'b0, org_u_resp_data}) - $signed({1'b0, rec_cb_resp_data});
+    wire [4:0]         pix_band_cb = rec_cb_resp_data[9:5];
+    wire signed [10:0] pix_diff_cr = $signed({1'b0, org_v_resp_data}) - $signed({1'b0, rec_cr_resp_data});
+    wire [4:0]         pix_band_cr = rec_cr_resp_data[9:5];
 
-    // Shared 32-band BO statistics
+    // Shared 32-band BO statistics (Luma + parallel Chroma)
     reg [12:0]        bo_cnt  [0:31];
     reg signed [23:0] bo_diff [0:31];
+    reg [12:0]        bo_cnt_cb  [0:31];
+    reg signed [23:0] bo_diff_cb [0:31];
+    reg [12:0]        bo_cnt_cr  [0:31];
+    reg signed [23:0] bo_diff_cr [0:31];
 
     // Internal 64-entry line buffers & 3x3 sliding window for last-CTU EO
     reg [9:0]         row_m1_rec  [0:63];
@@ -251,9 +266,35 @@ module sao_stats #(
     reg signed [10:0] eo_win_diff_q;
     reg [2:0]         eo_win_cat_q0, eo_win_cat_q1, eo_win_cat_q2, eo_win_cat_q3;
 
+    // Parallel Chroma line buffers & 3x3 EO windows (when PARALLEL_YCBCR_MODE != 0)
+    reg [9:0]         row_m1_rec_cb  [0:31];
+    reg [9:0]         row_m2_rec_cb  [0:31];
+    reg signed [10:0] row_m1_diff_cb [0:31];
+    reg [9:0]         row_m1_rec_cr  [0:31];
+    reg [9:0]         row_m2_rec_cr  [0:31];
+    reg signed [10:0] row_m1_diff_cr [0:31];
+
+    reg [9:0]         w_t_m2_cb, w_t_m1_cb;
+    reg [9:0]         w_m_m2_cb, w_m_m1_cb;
+    reg [9:0]         w_b_m2_cb, w_b_m1_cb;
+    reg signed [10:0] w_c_diff_cb;
+    reg [9:0]         w_t_m2_cr, w_t_m1_cr;
+    reg [9:0]         w_m_m2_cr, w_m_m1_cr;
+    reg [9:0]         w_b_m2_cr, w_b_m1_cr;
+    reg signed [10:0] w_c_diff_cr;
+
+    reg               eo_win_valid_c_q;
+    reg signed [10:0] eo_win_diff_cb_q, eo_win_diff_cr_q;
+    reg [2:0]         eo_win_cat_cb_q0, eo_win_cat_cb_q1, eo_win_cat_cb_q2, eo_win_cat_cb_q3;
+    reg [2:0]         eo_win_cat_cr_q0, eo_win_cat_cr_q1, eo_win_cat_cr_q2, eo_win_cat_cr_q3;
+
     // EO accumulators: [class 0..3][slot 0..3] for categories {0, 1, 3, 4}
     reg [12:0]        eo_cnt  [0:3][0:3];
     reg signed [23:0] eo_diff [0:3][0:3];
+    reg [12:0]        eo_cnt_cb  [0:3][0:3];
+    reg signed [23:0] eo_diff_cb [0:3][0:3];
+    reg [12:0]        eo_cnt_cr  [0:3][0:3];
+    reg signed [23:0] eo_diff_cr [0:3][0:3];
 
     // Divider & estIterOffset shared optimizer registers
     reg        opt_is_eo;
@@ -269,6 +310,8 @@ module sao_stats #(
     reg [2:0]  div_step;
 
     reg [3:0]         iter_m;
+    reg               iter_issue_en;
+    reg               iter_pipe_valid;
     reg [3:0]         iter_best_mag;
     reg signed [43:0] iter_best_cost;
     reg [3:0]         pipe_m;
@@ -281,6 +324,9 @@ module sao_stats #(
     reg signed [43:0] bo_band_cost [0:31];
 
     reg [4:0]         bo_bp;
+    reg [4:0]         sweep_bp_q;
+    reg               sweep_issue_en;
+    reg               sweep_pipe_valid;
     reg signed [43:0] sweep_pair0;
     reg signed [43:0] sweep_pair1;
     reg [4:0]         best_bo_bp;
@@ -303,8 +349,30 @@ module sao_stats #(
     wire [9:0]         cur_b_in      = rec_resp_data;
     wire signed [10:0] cur_m_diff_in = row_m1_diff[rd_x_d2];
 
-    wire [12:0]        load_cnt_w  = opt_is_eo ? eo_cnt[opt_idx[3:2]][opt_idx[1:0]] : bo_cnt[opt_idx];
-    wire signed [23:0] load_diff_w = opt_is_eo ? eo_diff[opt_idx[3:2]][opt_idx[1:0]] : bo_diff[opt_idx];
+    wire [9:0]         cur_t_in_cb      = row_m2_rec_cb[rd_x_d2[4:0]];
+    wire [9:0]         cur_m_in_cb      = row_m1_rec_cb[rd_x_d2[4:0]];
+    wire [9:0]         cur_b_in_cb      = rec_cb_resp_data;
+    wire signed [10:0] cur_m_diff_in_cb = row_m1_diff_cb[rd_x_d2[4:0]];
+
+    wire [9:0]         cur_t_in_cr      = row_m2_rec_cr[rd_x_d2[4:0]];
+    wire [9:0]         cur_m_in_cr      = row_m1_rec_cr[rd_x_d2[4:0]];
+    wire [9:0]         cur_b_in_cr      = rec_cr_resp_data;
+    wire signed [10:0] cur_m_diff_in_cr = row_m1_diff_cr[rd_x_d2[4:0]];
+
+    wire               chroma_in_bounds = ({1'b0, rd_x_d2} < active_w_c) && ({1'b0, rd_y_d2} < active_h_c);
+
+    wire [1:0]         load_plane_sel = (PARALLEL_YCBCR_MODE != 0) ? comp : 2'd0;
+    wire [12:0]        load_cnt_y   = opt_is_eo ? eo_cnt[opt_idx[3:2]][opt_idx[1:0]]     : bo_cnt[opt_idx];
+    wire signed [23:0] load_diff_y  = opt_is_eo ? eo_diff[opt_idx[3:2]][opt_idx[1:0]]    : bo_diff[opt_idx];
+    wire [12:0]        load_cnt_cb  = opt_is_eo ? eo_cnt_cb[opt_idx[3:2]][opt_idx[1:0]]  : bo_cnt_cb[opt_idx];
+    wire signed [23:0] load_diff_cb = opt_is_eo ? eo_diff_cb[opt_idx[3:2]][opt_idx[1:0]] : bo_diff_cb[opt_idx];
+    wire [12:0]        load_cnt_cr  = opt_is_eo ? eo_cnt_cr[opt_idx[3:2]][opt_idx[1:0]]  : bo_cnt_cr[opt_idx];
+    wire signed [23:0] load_diff_cr = opt_is_eo ? eo_diff_cr[opt_idx[3:2]][opt_idx[1:0]] : bo_diff_cr[opt_idx];
+
+    wire [12:0]        load_cnt_w  = (load_plane_sel == 2'd0) ? load_cnt_y  :
+                                     (load_plane_sel == 2'd1) ? load_cnt_cb : load_cnt_cr;
+    wire signed [23:0] load_diff_w = (load_plane_sel == 2'd0) ? load_diff_y  :
+                                     (load_plane_sel == 2'd1) ? load_diff_cb : load_diff_cr;
     wire               load_neg_w  = load_diff_w[23];
     wire [23:0]        load_abs_w  = load_neg_w ? -load_diff_w : load_diff_w;
     wire               eo_sign_ok  = (opt_idx[1:0] < 2'd2) ? (!load_neg_w && (load_abs_w != 24'd0))
@@ -351,6 +419,11 @@ module sao_stats #(
     wire [4:0] bp1 = bo_bp + 5'd1;
     wire [4:0] bp2 = bo_bp + 5'd2;
     wire [4:0] bp3 = bo_bp + 5'd3;
+
+    wire [4:0] bp0_q = sweep_bp_q;
+    wire [4:0] bp1_q = sweep_bp_q + 5'd1;
+    wire [4:0] bp2_q = sweep_bp_q + 5'd2;
+    wire [4:0] bp3_q = sweep_bp_q + 5'd3;
 
     wire signed [43:0] cur_bo_tot_cost = sweep_pair0 + sweep_pair1 + $signed({16'd0, lambda_cur_q8, 2'd0}) + $signed({19'd0, lambda_cur_q8}); // +5*lambda
 
@@ -405,10 +478,23 @@ module sao_stats #(
             eo_win_cat_q1  <= 3'd2;
             eo_win_cat_q2  <= 3'd2;
             eo_win_cat_q3  <= 3'd2;
+            eo_win_valid_c_q <= 1'b0;
+            eo_win_diff_cb_q <= 11'sd0;
+            eo_win_diff_cr_q <= 11'sd0;
+            eo_win_cat_cb_q0 <= 3'd2; eo_win_cat_cb_q1 <= 3'd2; eo_win_cat_cb_q2 <= 3'd2; eo_win_cat_cb_q3 <= 3'd2;
+            eo_win_cat_cr_q0 <= 3'd2; eo_win_cat_cr_q1 <= 3'd2; eo_win_cat_cr_q2 <= 3'd2; eo_win_cat_cr_q3 <= 3'd2;
             w_t_m2 <= 10'd0; w_t_m1 <= 10'd0;
             w_m_m2 <= 10'd0; w_m_m1 <= 10'd0;
             w_b_m2 <= 10'd0; w_b_m1 <= 10'd0;
             w_c_diff <= 11'sd0;
+            w_t_m2_cb <= 10'd0; w_t_m1_cb <= 10'd0;
+            w_m_m2_cb <= 10'd0; w_m_m1_cb <= 10'd0;
+            w_b_m2_cb <= 10'd0; w_b_m1_cb <= 10'd0;
+            w_c_diff_cb <= 11'sd0;
+            w_t_m2_cr <= 10'd0; w_t_m1_cr <= 10'd0;
+            w_m_m2_cr <= 10'd0; w_m_m1_cr <= 10'd0;
+            w_b_m2_cr <= 10'd0; w_b_m1_cr <= 10'd0;
+            w_c_diff_cr <= 11'sd0;
             opt_is_eo      <= 1'b0;
             opt_idx        <= 5'd0;
             opt_cnt        <= 13'd0;
@@ -419,6 +505,8 @@ module sao_stats #(
             div_q          <= 4'd0;
             div_step       <= 3'd0;
             iter_m         <= 4'd0;
+            iter_issue_en  <= 1'b0;
+            iter_pipe_valid <= 1'b0;
             iter_best_mag  <= 4'd0;
             iter_best_cost <= 44'sd0;
             pipe_m         <= 4'd0;
@@ -426,6 +514,9 @@ module sao_stats #(
             pipe_term2     <= 28'd0;
             pipe_rate_cost <= 30'd0;
             bo_bp          <= 5'd0;
+            sweep_bp_q     <= 5'd0;
+            sweep_issue_en <= 1'b0;
+            sweep_pipe_valid <= 1'b0;
             sweep_pair0    <= 44'sd0;
             sweep_pair1    <= 44'sd0;
             best_bo_bp     <= 5'd0;
@@ -442,8 +533,18 @@ module sao_stats #(
             for (idx = 0; idx < 32; idx = idx + 1) begin
                 bo_cnt[idx]       <= 13'd0;
                 bo_diff[idx]      <= 24'sd0;
+                bo_cnt_cb[idx]    <= 13'd0;
+                bo_diff_cb[idx]   <= 24'sd0;
+                bo_cnt_cr[idx]    <= 13'd0;
+                bo_diff_cr[idx]   <= 24'sd0;
                 bo_band_off[idx]  <= 5'sd0;
                 bo_band_cost[idx] <= 44'sd0;
+                row_m1_rec_cb[idx]  <= 10'd0;
+                row_m2_rec_cb[idx]  <= 10'd0;
+                row_m1_diff_cb[idx] <= 11'sd0;
+                row_m1_rec_cr[idx]  <= 10'd0;
+                row_m2_rec_cr[idx]  <= 10'd0;
+                row_m1_diff_cr[idx] <= 11'sd0;
             end
             for (idx = 0; idx < 64; idx = idx + 1) begin
                 row_m1_rec[idx]  <= 10'd0;
@@ -456,6 +557,10 @@ module sao_stats #(
                 for (idx = 0; idx < 4; idx = idx + 1) begin
                     eo_cnt[eo_k][idx]      <= 13'd0;
                     eo_diff[eo_k][idx]     <= 24'sd0;
+                    eo_cnt_cb[eo_k][idx]   <= 13'd0;
+                    eo_diff_cb[eo_k][idx]  <= 24'sd0;
+                    eo_cnt_cr[eo_k][idx]   <= 13'd0;
+                    eo_diff_cr[eo_k][idx]  <= 24'sd0;
                     eo_cls_off[eo_k][idx]  <= 5'sd0;
                     cb_eo_off[eo_k][idx]   <= 5'sd0;
                 end
@@ -465,7 +570,8 @@ module sao_stats #(
             rd_req_d2 <= rd_req_d1;
             rd_x_d2   <= rd_x_d1;
             rd_y_d2   <= rd_y_d1;
-            eo_win_valid_q <= 1'b0;
+            eo_win_valid_q   <= 1'b0;
+            eo_win_valid_c_q <= 1'b0;
 
             if (rd_req_d2) begin
                 bo_cnt[pix_band]  <= bo_cnt[pix_band] + 13'd1;
@@ -493,6 +599,53 @@ module sao_stats #(
                         eo_win_cat_q1  <= calc_eo_cat(w_m_m1, w_t_m1, w_b_m1);   // 90 deg: T, B
                         eo_win_cat_q2  <= calc_eo_cat(w_m_m1, w_t_m2, cur_b_in); // 135 deg: TL, BR
                         eo_win_cat_q3  <= calc_eo_cat(w_m_m1, cur_t_in, w_b_m2); // 45 deg: TR, BL
+                    end
+                end
+
+                // Parallel Chroma (Cb + Cr) BO/EO statistics during single Luma scan
+                if ((PARALLEL_YCBCR_MODE != 0) && (comp == 2'd0) && chroma_in_bounds) begin
+                    bo_cnt_cb[pix_band_cb]  <= bo_cnt_cb[pix_band_cb] + 13'd1;
+                    bo_diff_cb[pix_band_cb] <= bo_diff_cb[pix_band_cb] + $signed({{13{pix_diff_cb[10]}}, pix_diff_cb});
+                    bo_cnt_cr[pix_band_cr]  <= bo_cnt_cr[pix_band_cr] + 13'd1;
+                    bo_diff_cr[pix_band_cr] <= bo_diff_cr[pix_band_cr] + $signed({{13{pix_diff_cr[10]}}, pix_diff_cr});
+
+                    if (allow_eo) begin
+                        w_t_m2_cb   <= w_t_m1_cb;
+                        w_t_m1_cb   <= cur_t_in_cb;
+                        w_m_m2_cb   <= w_m_m1_cb;
+                        w_m_m1_cb   <= cur_m_in_cb;
+                        w_b_m2_cb   <= w_b_m1_cb;
+                        w_b_m1_cb   <= cur_b_in_cb;
+                        w_c_diff_cb <= cur_m_diff_in_cb;
+                        row_m2_rec_cb[rd_x_d2[4:0]]  <= cur_m_in_cb;
+                        row_m1_rec_cb[rd_x_d2[4:0]]  <= cur_b_in_cb;
+                        row_m1_diff_cb[rd_x_d2[4:0]] <= pix_diff_cb;
+
+                        w_t_m2_cr   <= w_t_m1_cr;
+                        w_t_m1_cr   <= cur_t_in_cr;
+                        w_m_m2_cr   <= w_m_m1_cr;
+                        w_m_m1_cr   <= cur_m_in_cr;
+                        w_b_m2_cr   <= w_b_m1_cr;
+                        w_b_m1_cr   <= cur_b_in_cr;
+                        w_c_diff_cr <= cur_m_diff_in_cr;
+                        row_m2_rec_cr[rd_x_d2[4:0]]  <= cur_m_in_cr;
+                        row_m1_rec_cr[rd_x_d2[4:0]]  <= cur_b_in_cr;
+                        row_m1_diff_cr[rd_x_d2[4:0]] <= pix_diff_cr;
+
+                        if ((rd_x_d2 >= 6'd2) && (rd_y_d2 >= 6'd2)) begin
+                            eo_win_valid_c_q <= 1'b1;
+                            eo_win_diff_cb_q <= w_c_diff_cb;
+                            eo_win_cat_cb_q0 <= calc_eo_cat(w_m_m1_cb, w_m_m2_cb, cur_m_in_cb);
+                            eo_win_cat_cb_q1 <= calc_eo_cat(w_m_m1_cb, w_t_m1_cb, w_b_m1_cb);
+                            eo_win_cat_cb_q2 <= calc_eo_cat(w_m_m1_cb, w_t_m2_cb, cur_b_in_cb);
+                            eo_win_cat_cb_q3 <= calc_eo_cat(w_m_m1_cb, cur_t_in_cb, w_b_m2_cb);
+
+                            eo_win_diff_cr_q <= w_c_diff_cr;
+                            eo_win_cat_cr_q0 <= calc_eo_cat(w_m_m1_cr, w_m_m2_cr, cur_m_in_cr);
+                            eo_win_cat_cr_q1 <= calc_eo_cat(w_m_m1_cr, w_t_m1_cr, w_b_m1_cr);
+                            eo_win_cat_cr_q2 <= calc_eo_cat(w_m_m1_cr, w_t_m2_cr, cur_b_in_cr);
+                            eo_win_cat_cr_q3 <= calc_eo_cat(w_m_m1_cr, cur_t_in_cr, w_b_m2_cr);
+                        end
                     end
                 end
             end
@@ -536,6 +689,82 @@ module sao_stats #(
                 end
             end
 
+            if (eo_win_valid_c_q) begin
+                if (eo_win_cat_cb_q0 != 3'd2) begin
+                    if (eo_win_cat_cb_q0 < 3'd2) begin
+                        eo_cnt_cb[0][eo_win_cat_cb_q0[1:0]]  <= eo_cnt_cb[0][eo_win_cat_cb_q0[1:0]] + 13'd1;
+                        eo_diff_cb[0][eo_win_cat_cb_q0[1:0]] <= eo_diff_cb[0][eo_win_cat_cb_q0[1:0]] + $signed({{13{eo_win_diff_cb_q[10]}}, eo_win_diff_cb_q});
+                    end else begin
+                        eo_cnt_cb[0][eo_hi_idx(eo_win_cat_cb_q0)]  <= eo_cnt_cb[0][eo_hi_idx(eo_win_cat_cb_q0)] + 13'd1;
+                        eo_diff_cb[0][eo_hi_idx(eo_win_cat_cb_q0)] <= eo_diff_cb[0][eo_hi_idx(eo_win_cat_cb_q0)] + $signed({{13{eo_win_diff_cb_q[10]}}, eo_win_diff_cb_q});
+                    end
+                end
+                if (eo_win_cat_cb_q1 != 3'd2) begin
+                    if (eo_win_cat_cb_q1 < 3'd2) begin
+                        eo_cnt_cb[1][eo_win_cat_cb_q1[1:0]]  <= eo_cnt_cb[1][eo_win_cat_cb_q1[1:0]] + 13'd1;
+                        eo_diff_cb[1][eo_win_cat_cb_q1[1:0]] <= eo_diff_cb[1][eo_win_cat_cb_q1[1:0]] + $signed({{13{eo_win_diff_cb_q[10]}}, eo_win_diff_cb_q});
+                    end else begin
+                        eo_cnt_cb[1][eo_hi_idx(eo_win_cat_cb_q1)]  <= eo_cnt_cb[1][eo_hi_idx(eo_win_cat_cb_q1)] + 13'd1;
+                        eo_diff_cb[1][eo_hi_idx(eo_win_cat_cb_q1)] <= eo_diff_cb[1][eo_hi_idx(eo_win_cat_cb_q1)] + $signed({{13{eo_win_diff_cb_q[10]}}, eo_win_diff_cb_q});
+                    end
+                end
+                if (eo_win_cat_cb_q2 != 3'd2) begin
+                    if (eo_win_cat_cb_q2 < 3'd2) begin
+                        eo_cnt_cb[2][eo_win_cat_cb_q2[1:0]]  <= eo_cnt_cb[2][eo_win_cat_cb_q2[1:0]] + 13'd1;
+                        eo_diff_cb[2][eo_win_cat_cb_q2[1:0]] <= eo_diff_cb[2][eo_win_cat_cb_q2[1:0]] + $signed({{13{eo_win_diff_cb_q[10]}}, eo_win_diff_cb_q});
+                    end else begin
+                        eo_cnt_cb[2][eo_hi_idx(eo_win_cat_cb_q2)]  <= eo_cnt_cb[2][eo_hi_idx(eo_win_cat_cb_q2)] + 13'd1;
+                        eo_diff_cb[2][eo_hi_idx(eo_win_cat_cb_q2)] <= eo_diff_cb[2][eo_hi_idx(eo_win_cat_cb_q2)] + $signed({{13{eo_win_diff_cb_q[10]}}, eo_win_diff_cb_q});
+                    end
+                end
+                if (eo_win_cat_cb_q3 != 3'd2) begin
+                    if (eo_win_cat_cb_q3 < 3'd2) begin
+                        eo_cnt_cb[3][eo_win_cat_cb_q3[1:0]]  <= eo_cnt_cb[3][eo_win_cat_cb_q3[1:0]] + 13'd1;
+                        eo_diff_cb[3][eo_win_cat_cb_q3[1:0]] <= eo_diff_cb[3][eo_win_cat_cb_q3[1:0]] + $signed({{13{eo_win_diff_cb_q[10]}}, eo_win_diff_cb_q});
+                    end else begin
+                        eo_cnt_cb[3][eo_hi_idx(eo_win_cat_cb_q3)]  <= eo_cnt_cb[3][eo_hi_idx(eo_win_cat_cb_q3)] + 13'd1;
+                        eo_diff_cb[3][eo_hi_idx(eo_win_cat_cb_q3)] <= eo_diff_cb[3][eo_hi_idx(eo_win_cat_cb_q3)] + $signed({{13{eo_win_diff_cb_q[10]}}, eo_win_diff_cb_q});
+                    end
+                end
+
+                if (eo_win_cat_cr_q0 != 3'd2) begin
+                    if (eo_win_cat_cr_q0 < 3'd2) begin
+                        eo_cnt_cr[0][eo_win_cat_cr_q0[1:0]]  <= eo_cnt_cr[0][eo_win_cat_cr_q0[1:0]] + 13'd1;
+                        eo_diff_cr[0][eo_win_cat_cr_q0[1:0]] <= eo_diff_cr[0][eo_win_cat_cr_q0[1:0]] + $signed({{13{eo_win_diff_cr_q[10]}}, eo_win_diff_cr_q});
+                    end else begin
+                        eo_cnt_cr[0][eo_hi_idx(eo_win_cat_cr_q0)]  <= eo_cnt_cr[0][eo_hi_idx(eo_win_cat_cr_q0)] + 13'd1;
+                        eo_diff_cr[0][eo_hi_idx(eo_win_cat_cr_q0)] <= eo_diff_cr[0][eo_hi_idx(eo_win_cat_cr_q0)] + $signed({{13{eo_win_diff_cr_q[10]}}, eo_win_diff_cr_q});
+                    end
+                end
+                if (eo_win_cat_cr_q1 != 3'd2) begin
+                    if (eo_win_cat_cr_q1 < 3'd2) begin
+                        eo_cnt_cr[1][eo_win_cat_cr_q1[1:0]]  <= eo_cnt_cr[1][eo_win_cat_cr_q1[1:0]] + 13'd1;
+                        eo_diff_cr[1][eo_win_cat_cr_q1[1:0]] <= eo_diff_cr[1][eo_win_cat_cr_q1[1:0]] + $signed({{13{eo_win_diff_cr_q[10]}}, eo_win_diff_cr_q});
+                    end else begin
+                        eo_cnt_cr[1][eo_hi_idx(eo_win_cat_cr_q1)]  <= eo_cnt_cr[1][eo_hi_idx(eo_win_cat_cr_q1)] + 13'd1;
+                        eo_diff_cr[1][eo_hi_idx(eo_win_cat_cr_q1)] <= eo_diff_cr[1][eo_hi_idx(eo_win_cat_cr_q1)] + $signed({{13{eo_win_diff_cr_q[10]}}, eo_win_diff_cr_q});
+                    end
+                end
+                if (eo_win_cat_cr_q2 != 3'd2) begin
+                    if (eo_win_cat_cr_q2 < 3'd2) begin
+                        eo_cnt_cr[2][eo_win_cat_cr_q2[1:0]]  <= eo_cnt_cr[2][eo_win_cat_cr_q2[1:0]] + 13'd1;
+                        eo_diff_cr[2][eo_win_cat_cr_q2[1:0]] <= eo_diff_cr[2][eo_win_cat_cr_q2[1:0]] + $signed({{13{eo_win_diff_cr_q[10]}}, eo_win_diff_cr_q});
+                    end else begin
+                        eo_cnt_cr[2][eo_hi_idx(eo_win_cat_cr_q2)]  <= eo_cnt_cr[2][eo_hi_idx(eo_win_cat_cr_q2)] + 13'd1;
+                        eo_diff_cr[2][eo_hi_idx(eo_win_cat_cr_q2)] <= eo_diff_cr[2][eo_hi_idx(eo_win_cat_cr_q2)] + $signed({{13{eo_win_diff_cr_q[10]}}, eo_win_diff_cr_q});
+                    end
+                end
+                if (eo_win_cat_cr_q3 != 3'd2) begin
+                    if (eo_win_cat_cr_q3 < 3'd2) begin
+                        eo_cnt_cr[3][eo_win_cat_cr_q3[1:0]]  <= eo_cnt_cr[3][eo_win_cat_cr_q3[1:0]] + 13'd1;
+                        eo_diff_cr[3][eo_win_cat_cr_q3[1:0]] <= eo_diff_cr[3][eo_win_cat_cr_q3[1:0]] + $signed({{13{eo_win_diff_cr_q[10]}}, eo_win_diff_cr_q});
+                    end else begin
+                        eo_cnt_cr[3][eo_hi_idx(eo_win_cat_cr_q3)]  <= eo_cnt_cr[3][eo_hi_idx(eo_win_cat_cr_q3)] + 13'd1;
+                        eo_diff_cr[3][eo_hi_idx(eo_win_cat_cr_q3)] <= eo_diff_cr[3][eo_hi_idx(eo_win_cat_cr_q3)] + $signed({{13{eo_win_diff_cr_q[10]}}, eo_win_diff_cr_q});
+                    end
+                end
+            end
+
             case (state)
                 S_IDLE: begin
                     done         <= 1'b0;
@@ -553,17 +782,30 @@ module sao_stats #(
                     scan_y    <= 6'd0;
                     rd_req_d1 <= 1'b0;
                     rd_req_d2 <= 1'b0;
-                    eo_win_valid_q <= 1'b0;
+                    eo_win_valid_q   <= 1'b0;
+                    eo_win_valid_c_q <= 1'b0;
                     flush_cnt <= 2'd0;
                     for (idx = 0; idx < 32; idx = idx + 1) begin
-                        bo_cnt[idx]  <= 13'd0;
-                        bo_diff[idx] <= 24'sd0;
+                        bo_cnt[idx]     <= 13'd0;
+                        bo_diff[idx]    <= 24'sd0;
+                        if (PARALLEL_YCBCR_MODE != 0) begin
+                            bo_cnt_cb[idx]  <= 13'd0;
+                            bo_diff_cb[idx] <= 24'sd0;
+                            bo_cnt_cr[idx]  <= 13'd0;
+                            bo_diff_cr[idx] <= 24'sd0;
+                        end
                     end
                     for (eo_k = 0; eo_k < 4; eo_k = eo_k + 1) begin
                         eo_cls_cost[eo_k] <= 44'sd0;
                         for (idx = 0; idx < 4; idx = idx + 1) begin
                             eo_cnt[eo_k][idx]  <= 13'd0;
                             eo_diff[eo_k][idx] <= 24'sd0;
+                            if (PARALLEL_YCBCR_MODE != 0) begin
+                                eo_cnt_cb[eo_k][idx]  <= 13'd0;
+                                eo_diff_cb[eo_k][idx] <= 24'sd0;
+                                eo_cnt_cr[eo_k][idx]  <= 13'd0;
+                                eo_diff_cr[eo_k][idx] <= 24'sd0;
+                            end
                         end
                     end
                     valid_w <= (comp == 2'd0) ? active_w_y : active_w_c;
@@ -643,8 +885,10 @@ module sao_stats #(
                 S_OPT_DIV: begin
                     if (div_step == 3'd4) begin
                         if ({1'b0, div_rem} >= {8'd0, div_den_x15}) begin
-                            iter_m <= 4'd15;
-                            state  <= S_OPT_ITER_A;
+                            iter_m          <= 4'd15;
+                            iter_issue_en   <= 1'b1;
+                            iter_pipe_valid <= 1'b0;
+                            state           <= S_OPT_ITER_A;
                         end else begin
                             div_step <= 3'd3;
                         end
@@ -656,8 +900,10 @@ module sao_stats #(
                             if (div_q_step == 4'd0) begin
                                 state <= S_OPT_NEXT;
                             end else begin
-                                iter_m <= div_q_step;
-                                state  <= S_OPT_ITER_A;
+                                iter_m          <= div_q_step;
+                                iter_issue_en   <= 1'b1;
+                                iter_pipe_valid <= 1'b0;
+                                state           <= S_OPT_ITER_A;
                             end
                         end else begin
                             div_step <= div_step - 3'd1;
@@ -666,22 +912,29 @@ module sao_stats #(
                 end
 
                 S_OPT_ITER_A: begin
-                    pipe_m         <= iter_m;
-                    pipe_term1     <= opt_cnt * sq_4b(iter_m);
-                    pipe_term2     <= {opt_diff_abs, 1'b0} * iter_m;
-                    pipe_rate_cost <= cur_iter_rate * lambda_cur_q8;
-                    state          <= S_OPT_ITER_B;
-                end
-
-                S_OPT_ITER_B: begin
-                    if (pipe_cand_cost < iter_best_cost) begin
-                        iter_best_cost <= pipe_cand_cost;
-                        iter_best_mag  <= pipe_m;
-                    end
-                    if (iter_m > 4'd1) begin
-                        iter_m <= iter_m - 4'd1;
-                        state  <= S_OPT_ITER_A;
+                    // 1-iteration/cycle pipelined offset search (issue Stage 1 + compare Stage 2)
+                    if (iter_issue_en) begin
+                        pipe_m          <= iter_m;
+                        pipe_term1      <= opt_cnt * sq_4b(iter_m);
+                        pipe_term2      <= {opt_diff_abs, 1'b0} * iter_m;
+                        pipe_rate_cost  <= cur_iter_rate * lambda_cur_q8;
+                        iter_pipe_valid <= 1'b1;
+                        if (iter_m > 4'd1)
+                            iter_m <= iter_m - 4'd1;
+                        else
+                            iter_issue_en <= 1'b0;
                     end else begin
+                        iter_pipe_valid <= 1'b0;
+                    end
+
+                    if (iter_pipe_valid) begin
+                        if (pipe_cand_cost < iter_best_cost) begin
+                            iter_best_cost <= pipe_cand_cost;
+                            iter_best_mag  <= pipe_m;
+                        end
+                    end
+
+                    if (!iter_issue_en && iter_pipe_valid) begin
                         state <= S_OPT_NEXT;
                     end
                 end
@@ -691,8 +944,10 @@ module sao_stats #(
                         bo_band_off[opt_idx]  <= iter_signed_off;
                         bo_band_cost[opt_idx] <= iter_best_cost;
                         if (opt_idx == 5'd31) begin
-                            bo_bp <= 5'd0;
-                            state <= S_BO_SWEEP_A;
+                            bo_bp            <= 5'd0;
+                            sweep_issue_en   <= 1'b1;
+                            sweep_pipe_valid <= 1'b0;
+                            state            <= S_BO_SWEEP_A;
                         end else begin
                             opt_idx <= opt_idx + 5'd1;
                             state   <= S_OPT_LOAD;
@@ -710,21 +965,32 @@ module sao_stats #(
                 end
 
                 S_BO_SWEEP_A: begin
-                    sweep_pair0 <= bo_band_cost[bp0] + bo_band_cost[bp1];
-                    sweep_pair1 <= bo_band_cost[bp2] + bo_band_cost[bp3];
-                    state       <= S_BO_SWEEP_B;
-                end
-
-                S_BO_SWEEP_B: begin
-                    if ((bo_bp == 5'd0) || (cur_bo_tot_cost < best_bo_cost)) begin
-                        best_bo_cost <= cur_bo_tot_cost;
-                        best_bo_bp   <= bo_bp;
-                        best_bo_off0 <= bo_band_off[bp0];
-                        best_bo_off1 <= bo_band_off[bp1];
-                        best_bo_off2 <= bo_band_off[bp2];
-                        best_bo_off3 <= bo_band_off[bp3];
+                    // 1-band/cycle pipelined 32-band BO window sweep
+                    if (sweep_issue_en) begin
+                        sweep_pair0      <= bo_band_cost[bp0] + bo_band_cost[bp1];
+                        sweep_pair1      <= bo_band_cost[bp2] + bo_band_cost[bp3];
+                        sweep_bp_q       <= bo_bp;
+                        sweep_pipe_valid <= 1'b1;
+                        if (bo_bp == 5'd31)
+                            sweep_issue_en <= 1'b0;
+                        else
+                            bo_bp <= bo_bp + 5'd1;
+                    end else begin
+                        sweep_pipe_valid <= 1'b0;
                     end
-                    if (bo_bp == 5'd31) begin
+
+                    if (sweep_pipe_valid) begin
+                        if ((sweep_bp_q == 5'd0) || (cur_bo_tot_cost < best_bo_cost)) begin
+                            best_bo_cost <= cur_bo_tot_cost;
+                            best_bo_bp   <= sweep_bp_q;
+                            best_bo_off0 <= bo_band_off[bp0_q];
+                            best_bo_off1 <= bo_band_off[bp1_q];
+                            best_bo_off2 <= bo_band_off[bp2_q];
+                            best_bo_off3 <= bo_band_off[bp3_q];
+                        end
+                    end
+
+                    if (!sweep_issue_en && sweep_pipe_valid) begin
                         if (allow_eo) begin
                             opt_is_eo <= 1'b1;
                             opt_idx   <= 5'd0;
@@ -732,9 +998,6 @@ module sao_stats #(
                         end else begin
                             state <= S_COMP_DECIDE;
                         end
-                    end else begin
-                        bo_bp <= bo_bp + 5'd1;
-                        state <= S_BO_SWEEP_A;
                     end
                 end
 
@@ -783,7 +1046,15 @@ module sao_stats #(
                             bo_offset[19:0] <= 20'd0;
                         end
                         comp  <= 2'd1;
-                        state <= S_COMP_INIT;
+                        if (PARALLEL_YCBCR_MODE != 0) begin
+                            for (eo_k = 0; eo_k < 4; eo_k = eo_k + 1)
+                                eo_cls_cost[eo_k] <= 44'sd0;
+                            opt_is_eo <= 1'b0;
+                            opt_idx   <= 5'd0;
+                            state     <= S_OPT_LOAD;
+                        end else begin
+                            state <= S_COMP_INIT;
+                        end
                     end else if (comp == 2'd1) begin
                         // Save Cb candidates for joint Cb+Cr RDO
                         cb_bo_bp   <= best_bo_bp;
@@ -798,7 +1069,15 @@ module sao_stats #(
                                 cb_eo_off[eo_k][idx] <= eo_cls_off[eo_k][idx];
                         end
                         comp  <= 2'd2;
-                        state <= S_COMP_INIT;
+                        if (PARALLEL_YCBCR_MODE != 0) begin
+                            for (eo_k = 0; eo_k < 4; eo_k = eo_k + 1)
+                                eo_cls_cost[eo_k] <= 44'sd0;
+                            opt_is_eo <= 1'b0;
+                            opt_idx   <= 5'd0;
+                            state     <= S_OPT_LOAD;
+                        end else begin
+                            state <= S_COMP_INIT;
+                        end
                     end else begin
                         // Joint Cb+Cr mode decision matching syntax_sao.v
                         if (allow_eo && (c_cost_eo0 < c_cost_off) && (c_cost_eo0 <= c_cost_bo) &&

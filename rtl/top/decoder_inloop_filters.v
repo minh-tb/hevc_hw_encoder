@@ -207,13 +207,13 @@ module decoder_inloop_filters (
     end
 
     //=========================================================================
-    // Counters
+    // Counters & Fused Streaming SAO+Dump Pipeline
     //=========================================================================
     reg [12:0] pixel_count;
-    reg [12:0] dump_rd_addr;
-    reg [12:0] dump_count_q;
-    wire [12:0] dump_count = dump_count_q;
-    reg        dump_valid_q;
+    reg [12:0] d_rd_step;
+    reg [1:0]  d_rd_comp;
+    reg        d_rd_active;
+    wire [12:0] dump_count = d_rd_step;
     reg        dump_wait_drain;
     wire       dump_last_drained;
     reg [`CTU_COORD_WIDTH-1:0] cur_ctu_x, cur_ctu_y;
@@ -614,7 +614,7 @@ module decoder_inloop_filters (
     );
 
     //=========================================================================
-    // SAO Stats Interface
+    // SAO Stats Interface (Single-Pass 3-Plane Parallel Y+Cb+Cr)
     //=========================================================================
     wire        stats_ctu_done;
     assign sao_stats_done = stats_ctu_done;
@@ -626,127 +626,44 @@ module decoder_inloop_filters (
     wire [5:0]  stats_org_rd_x, stats_org_rd_y;
     wire [1:0]  stats_org_rd_comp;
     reg  [9:0]  stats_org_resp_data;
+    wire [9:0]  luma_rd_q, cb_rd_q, cr_rd_q;
+    wire [9:0]  orig_y_rd_q, orig_u_rd_q, orig_v_rd_q;
 
     sao_stats #(
-        .SINGLE_PASS_CAUSAL_SYNC(0)
+        .SINGLE_PASS_CAUSAL_SYNC(0),
+        .PARALLEL_YCBCR_MODE(1)
     ) u_sao_stats (
         .clk(clk), .rst_n(rst_n),
-        .start          (filter_state == S_STATS && !stats_ctu_done),
-        .done           (stats_ctu_done),
-        .ctu_x          (cur_ctu_x),
-        .ctu_y          (cur_ctu_y),
-        .frame_width_px (frame_width_px),
-        .frame_height_px(frame_height_px),
-        .ctu_qp         (bank_ctu_qp[proc_bank]),
-        .rec_rd_valid   (stats_rec_rd_valid),
-        .rec_rd_x       (stats_rec_rd_x),
-        .rec_rd_y       (stats_rec_rd_y),
-        .rec_rd_comp    (stats_rec_rd_comp),
-        .rec_resp_data  (stats_rec_resp_data),
-        .org_rd_valid   (stats_org_rd_valid),
-        .org_rd_x       (stats_org_rd_x),
-        .org_rd_y       (stats_org_rd_y),
-        .org_rd_comp    (stats_org_rd_comp),
-        .org_resp_data  (stats_org_resp_data),
-        .sao_type       (out_sao_type),
-        .eo_class       (out_eo_class),
-        .eo_offset      (out_eo_offset),
-        .band_pos       (out_band_pos),
-        .bo_offset      (out_bo_offset)
+        .start            (filter_state == S_STATS && !stats_ctu_done),
+        .done             (stats_ctu_done),
+        .ctu_x            (cur_ctu_x),
+        .ctu_y            (cur_ctu_y),
+        .frame_width_px   (frame_width_px),
+        .frame_height_px  (frame_height_px),
+        .ctu_qp           (bank_ctu_qp[proc_bank]),
+        .rec_rd_valid     (stats_rec_rd_valid),
+        .rec_rd_x         (stats_rec_rd_x),
+        .rec_rd_y         (stats_rec_rd_y),
+        .rec_rd_comp      (stats_rec_rd_comp),
+        .rec_resp_data    (stats_rec_resp_data),
+        .org_rd_valid     (stats_org_rd_valid),
+        .org_rd_x         (stats_org_rd_x),
+        .org_rd_y         (stats_org_rd_y),
+        .org_rd_comp      (stats_org_rd_comp),
+        .org_resp_data    (stats_org_resp_data),
+        .rec_cb_resp_data (cb_rd_q),
+        .rec_cr_resp_data (cr_rd_q),
+        .org_u_resp_data  (orig_u_rd_q),
+        .org_v_resp_data  (orig_v_rd_q),
+        .sao_type         (out_sao_type),
+        .eo_class         (out_eo_class),
+        .eo_offset        (out_eo_offset),
+        .band_pos         (out_band_pos),
+        .bo_offset        (out_bo_offset)
     );
 
     //=========================================================================
-    // SAO Filter Interface
-    //=========================================================================
-    wire        sao_ctu_done;
-    wire        sao_pix_rd_valid;
-    wire [5:0]  sao_pix_rd_x, sao_pix_rd_y;
-    wire [1:0]  sao_pix_rd_comp;
-    reg  [9:0]  sao_pix_resp_data;
-    wire        sao_pix_wr_valid;
-    wire [5:0]  sao_pix_wr_x, sao_pix_wr_y;
-    wire [1:0]  sao_pix_wr_comp;
-    wire [9:0]  sao_pix_wr_data;
-    wire        sao_n0_rd_valid;
-    wire signed [7:0] sao_n0_rd_x, sao_n0_rd_y;
-    wire [1:0]  sao_n0_rd_comp;
-    reg  [9:0]  sao_n0_resp_data;
-    wire        sao_n1_rd_valid;
-    wire signed [7:0] sao_n1_rd_x, sao_n1_rd_y;
-    wire [1:0]  sao_n1_rd_comp;
-    reg  [9:0]  sao_n1_resp_data;
-
-    // 1-cycle delay registers for SAO response valid (SRAM has 1-cycle read latency)
-    reg         sao_pix_resp_valid_q;
-    reg         sao_n0_resp_valid_q;
-    reg         sao_n1_resp_valid_q;
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            sao_pix_resp_valid_q <= 1'b0;
-            sao_n0_resp_valid_q  <= 1'b0;
-            sao_n1_resp_valid_q  <= 1'b0;
-        end else begin
-            sao_pix_resp_valid_q <= sao_pix_rd_valid;
-            sao_n0_resp_valid_q  <= sao_n0_rd_valid;
-            sao_n1_resp_valid_q  <= sao_n1_rd_valid;
-        end
-    end
-
-    sao_top #(
-        .SINGLE_PORT_BRAM_MODE(1)
-    ) u_sao (
-        .clk(clk), .rst_n(rst_n),
-        .ctu_valid      (filter_state == S_SAO && !sao_ctu_done),
-        .ctu_ready      (),
-        .ctu_x          ({4'd0, cur_ctu_x}),
-        .ctu_y          ({4'd0, cur_ctu_y}),
-        .frame_width_px (frame_width_px),
-        .frame_height_px(frame_height_px),
-        .sao_type       (out_sao_type),
-        .eo_class       (out_eo_class),
-        .eo_offset      (out_eo_offset),
-        .band_pos       (out_band_pos),
-        .bo_offset      (out_bo_offset),
-        .pix_rd_valid   (sao_pix_rd_valid),
-        .pix_rd_ready   (1'b1),
-        .pix_rd_x       (sao_pix_rd_x),
-        .pix_rd_y       (sao_pix_rd_y),
-        .pix_rd_comp    (sao_pix_rd_comp),
-        .pix_resp_valid (sao_pix_resp_valid_q),
-        .pix_resp_ready (),
-        .pix_resp_data  (sao_pix_resp_data),
-        .n0_rd_valid    (sao_n0_rd_valid),
-        .n0_rd_ready    (1'b1),
-        .n0_rd_x        (sao_n0_rd_x),
-        .n0_rd_y        (sao_n0_rd_y),
-        .n0_rd_comp     (sao_n0_rd_comp),
-        .n0_resp_valid  (sao_n0_resp_valid_q),
-        .n0_resp_ready  (),
-        .n0_resp_data   (sao_n0_resp_data),
-        .n1_rd_valid    (sao_n1_rd_valid),
-        .n1_rd_ready    (1'b1),
-        .n1_rd_x        (sao_n1_rd_x),
-        .n1_rd_y        (sao_n1_rd_y),
-        .n1_rd_comp     (sao_n1_rd_comp),
-        .n1_resp_valid  (sao_n1_resp_valid_q),
-        .n1_resp_ready  (),
-        .n1_resp_data   (sao_n1_resp_data),
-        .pix_wr_valid   (sao_pix_wr_valid),
-        .pix_wr_ready   (1'b1),
-        .pix_wr_x       (sao_pix_wr_x),
-        .pix_wr_y       (sao_pix_wr_y),
-        .pix_wr_comp    (sao_pix_wr_comp),
-        .pix_wr_data    (sao_pix_wr_data),
-        .ctu_done       (sao_ctu_done)
-    );
-
-    //=========================================================================
-    // SRAM Read Multiplexer (Deblock / SAO Stats / SAO read from same SRAMs)
-    //=========================================================================
-    // Pixel Read Arbiter — handles 1-cycle SRAM read latency
-    // 
-    // Protocol: deblock asserts pix_rd_valid with address. On next cycle,
-    // SRAM data is available and pix_resp_valid fires for exactly 1 cycle.
+    // SRAM Read Multiplexer (Deblock / SAO Stats / Fused Streaming SAO+Dump)
     //=========================================================================
     reg [5:0] rd_x, rd_y;
     reg [1:0] rd_comp;
@@ -763,30 +680,6 @@ module decoder_inloop_filters (
                                 : 6'd2;
     wire       has_right_ctu    = ({1'b0, cur_ctu_x} + 7'd1 < {1'b0, pic_width_in_ctu});
 
-    wire signed [7:0] sao_n0_max_dim = (sao_n0_rd_comp == 2'd0) ? 8'sd63 : 8'sd31;
-    wire signed [7:0] sao_n1_max_dim = (sao_n1_rd_comp == 2'd0) ? 8'sd63 : 8'sd31;
-
-    wire sao_n0_top_right = (sao_n0_rd_y < 8'sd0) && (sao_n0_rd_x > sao_n0_max_dim);
-    wire sao_n1_top_right = (sao_n1_rd_y < 8'sd0) && (sao_n1_rd_x > sao_n1_max_dim);
-
-    wire sao_n0_oob = (filter_state == S_SAO) && sao_n0_rd_valid && (
-        ((sao_n0_rd_x < 8'sd0) && (cur_ctu_x == 0)) ||
-        ((sao_n0_rd_y < 8'sd0) && (cur_ctu_y == 0)) ||
-        ((sao_n0_rd_x > sao_n0_max_dim) && ((sao_n0_rd_y >= 8'sd0) || !has_right_ctu)) ||
-        (sao_n0_rd_y > sao_n0_max_dim)
-    );
-    wire sao_n1_oob = (filter_state == S_SAO) && sao_n1_rd_valid && (
-        ((sao_n1_rd_x < 8'sd0) && (cur_ctu_x == 0)) ||
-        ((sao_n1_rd_y < 8'sd0) && (cur_ctu_y == 0)) ||
-        ((sao_n1_rd_x > sao_n1_max_dim) && ((sao_n1_rd_y >= 8'sd0) || !has_right_ctu)) ||
-        (sao_n1_rd_y > sao_n1_max_dim)
-    );
-
-    wire sao_n0_is_nbr = (filter_state == S_SAO) && sao_n0_rd_valid && !sao_n0_oob &&
-                         (sao_n0_rd_x < 8'sd0 || sao_n0_rd_y < 8'sd0);
-    wire sao_n1_is_nbr = (filter_state == S_SAO) && sao_n1_rd_valid && !sao_n1_oob &&
-                         (sao_n1_rd_x < 8'sd0 || sao_n1_rd_y < 8'sd0);
-
     // db_pix_rd_ready pulses for 1 cycle when we accept the request
     always @(*) begin
         rd_x = 6'd0; rd_y = 6'd0; rd_comp = 2'd0;
@@ -801,11 +694,6 @@ module decoder_inloop_filters (
             S_STATS: begin
                 rd_x = stats_rec_rd_x; rd_y = stats_rec_rd_y; rd_comp = stats_rec_rd_comp;
             end
-            S_SAO: begin
-                rd_x    = (sao_n1_rd_valid && !sao_n1_oob) ? sao_n1_rd_x[5:0] : sao_pix_rd_x;
-                rd_y    = (sao_n1_rd_valid && !sao_n1_oob) ? sao_n1_rd_y[5:0] : sao_pix_rd_y;
-                rd_comp = (sao_n1_rd_valid && !sao_n1_oob) ? sao_n1_rd_comp   : sao_pix_rd_comp;
-            end
             default: ;
         endcase
     end
@@ -813,18 +701,18 @@ module decoder_inloop_filters (
     wire db_rd_from_corner = db_pix_rd_corner && (rd_comp == 2'd0 ? (rd_y >= 6'd60) : (rd_y >= 6'd30));
     wire db_rd_from_col    = db_pix_rd_corner ? (rd_comp == 2'd0 ? (rd_y < 6'd60) : (rd_y < 6'd30)) : db_pix_rd_is_vert;
 
-    // Unified synchronous read addresses for Block RAM inference (S_DB / S_STATS / S_SAO / S_DUMP)
-    wire [11:0] syn_luma_rd_addr = (filter_state == S_DUMP) ? dump_rd_addr[11:0] : {rd_y[5:0], rd_x[5:0]};
-    wire [9:0]  syn_cb_rd_addr   = (filter_state == S_DUMP) ? dump_rd_addr[9:0]  : {rd_y[4:0], rd_x[4:0]};
-    wire [9:0]  syn_cr_rd_addr   = (filter_state == S_DUMP) ? dump_rd_addr[9:0]  : {rd_y[4:0], rd_x[4:0]};
+    // Unified synchronous read addresses for Block RAM inference (S_DB / S_STATS / S_DUMP)
+    wire [11:0] syn_luma_rd_addr = (filter_state == S_DUMP) ? d_rd_step[11:0] : {rd_y[5:0], rd_x[5:0]};
+    wire [9:0]  syn_cb_rd_addr   = (filter_state == S_DUMP) ? d_rd_step[9:0]  : {rd_y[4:0], rd_x[4:0]};
+    wire [9:0]  syn_cr_rd_addr   = (filter_state == S_DUMP) ? d_rd_step[9:0]  : {rd_y[4:0], rd_x[4:0]};
 
     reg [9:0] luma_rd_0_q, luma_rd_1_q;
     reg [9:0] cb_rd_0_q,   cb_rd_1_q;
     reg [9:0] cr_rd_0_q,   cr_rd_1_q;
     reg       proc_bank_rd_q;
-    wire [9:0] luma_rd_q = proc_bank_rd_q ? luma_rd_1_q : luma_rd_0_q;
-    wire [9:0] cb_rd_q   = proc_bank_rd_q ? cb_rd_1_q   : cb_rd_0_q;
-    wire [9:0] cr_rd_q   = proc_bank_rd_q ? cr_rd_1_q   : cr_rd_0_q;
+    assign luma_rd_q = proc_bank_rd_q ? luma_rd_1_q : luma_rd_0_q;
+    assign cb_rd_q   = proc_bank_rd_q ? cb_rd_1_q   : cb_rd_0_q;
+    assign cr_rd_q   = proc_bank_rd_q ? cr_rd_1_q   : cr_rd_0_q;
     reg [1:0] rd_comp_q;
     reg [9:0] db_nbr_rd_q;
     reg       db_rd_neighbor_q;
@@ -834,24 +722,45 @@ module decoder_inloop_filters (
     reg [9:0] orig_u_rd_0_q, orig_u_rd_1_q;
     reg [9:0] orig_v_rd_0_q, orig_v_rd_1_q;
     reg       proc_bank_orig_q;
-    wire [9:0] orig_y_rd_q = proc_bank_orig_q ? orig_y_rd_1_q : orig_y_rd_0_q;
-    wire [9:0] orig_u_rd_q = proc_bank_orig_q ? orig_u_rd_1_q : orig_u_rd_0_q;
-    wire [9:0] orig_v_rd_q = proc_bank_orig_q ? orig_v_rd_1_q : orig_v_rd_0_q;
+    assign orig_y_rd_q = proc_bank_orig_q ? orig_y_rd_1_q : orig_y_rd_0_q;
+    assign orig_u_rd_q = proc_bank_orig_q ? orig_u_rd_1_q : orig_u_rd_0_q;
+    assign orig_v_rd_q = proc_bank_orig_q ? orig_v_rd_1_q : orig_v_rd_0_q;
     reg [1:0] stats_org_rd_comp_q;
 
-    // SAO cross-CTU neighbor synchronous read registers (Safeguard 2)
-    reg [9:0] sao_nbr_n0_q;
-    reg [9:0] sao_nbr_n1_q;
-    reg       sao_n0_is_nbr_q;
-    reg       sao_n1_is_nbr_q;
-    reg       sao_n0_oob_q;
-    reg       sao_n1_oob_q;
+    // Fused Streaming SAO+Dump Pipeline Registers (Stages 1..3)
+    reg        p1_valid;
+    reg [1:0]  p1_comp;
+    reg [12:0] p1_step;
 
-    wire dump_stall = (filter_state == S_DUMP) && dump_valid_q && !pre_out_ready;
+    reg [9:0] eo_rbuf0 [0:63];
+    reg [9:0] eo_rbuf1 [0:63];
+    reg [9:0] win_t0, win_t1;
+    reg [9:0] win_m0, win_m1;
+    reg [9:0] win_b0, win_b1;
 
-    // Synchronous reads for main pixel, SAO neighbors, and original pixels
+    reg        s2_valid;
+    reg        s2_last;
+    reg [1:0]  s2_comp;
+    reg [1:0]  s2_st;
+    reg [9:0]  s2_c_pix;
+    reg [9:0]  s2_n0;
+    reg [9:0]  s2_n1;
+    reg        s2_pic_bnd;
+    reg [11:0] s2_abs_x;
+    reg [11:0] s2_abs_y;
+
+    reg        s3_valid;
+    reg        s3_last;
+    reg [1:0]  s3_comp;
+    reg [9:0]  s3_pixel;
+    reg [11:0] s3_abs_x;
+    reg [11:0] s3_abs_y;
+
+    wire dump_stall = (filter_state == S_DUMP) && s3_valid && !pre_out_ready;
+
+    // Synchronous reads for main pixel, deblock neighbors, and original pixels
     always @(posedge clk) begin
-        db_rd_neighbor_q    <= (filter_state == S_DB && db_pix_rd_neighbor);
+        db_rd_neighbor_q <= (filter_state == S_DB && db_pix_rd_neighbor);
         if (filter_state == S_DB && db_pix_rd_neighbor) begin
             if (db_rd_from_corner) begin
                 case (rd_comp)
@@ -873,75 +782,6 @@ module decoder_inloop_filters (
                     2'd1: db_nbr_rd_q <= line_buf_cb[rd_y[0]][({6'd0, cur_ctu_x} << 5) + {1'b0, rd_x[4:0]}];
                     2'd2: db_nbr_rd_q <= line_buf_cr[rd_y[0]][({6'd0, cur_ctu_x} << 5) + {1'b0, rd_x[4:0]}];
                     default: db_nbr_rd_q <= 10'd0;
-                endcase
-            end
-        end
-
-        // SAO cross-CTU neighbor synchronous read from post-deblocked buffers
-        sao_n0_is_nbr_q <= sao_n0_is_nbr;
-        sao_n1_is_nbr_q <= sao_n1_is_nbr;
-        sao_n0_oob_q    <= sao_n0_oob;
-        sao_n1_oob_q    <= sao_n1_oob;
-        if (sao_n0_is_nbr) begin
-            if (sao_n0_rd_x < 8'sd0 && sao_n0_rd_y < 8'sd0) begin
-                case (sao_n0_rd_comp)
-                    2'd0: sao_nbr_n0_q <= corner_buf_luma[sao_n0_rd_y[1:0]][sao_n0_rd_x[1:0]];
-                    2'd1: sao_nbr_n0_q <= corner_buf_cb[sao_n0_rd_y[0]][sao_n0_rd_x[1:0]];
-                    2'd2: sao_nbr_n0_q <= corner_buf_cr[sao_n0_rd_y[0]][sao_n0_rd_x[1:0]];
-                    default: sao_nbr_n0_q <= 10'd0;
-                endcase
-            end else if (sao_n0_rd_x < 8'sd0) begin
-                case (sao_n0_rd_comp)
-                    2'd0: sao_nbr_n0_q <= col_buf_luma[sao_n0_rd_y[5:0]][sao_n0_rd_x[1:0]];
-                    2'd1: sao_nbr_n0_q <= col_buf_cb[sao_n0_rd_y[4:0]][sao_n0_rd_x[1:0]];
-                    2'd2: sao_nbr_n0_q <= col_buf_cr[sao_n0_rd_y[4:0]][sao_n0_rd_x[1:0]];
-                    default: sao_nbr_n0_q <= 10'd0;
-                endcase
-            end else if (sao_n0_top_right) begin
-                case (sao_n0_rd_comp)
-                    2'd0: sao_nbr_n0_q <= line_buf_luma[sao_n0_rd_y[1:0]][({7'd0, cur_ctu_x} << 6) + {5'd0, sao_n0_rd_x[6:0]}];
-                    2'd1: sao_nbr_n0_q <= line_buf_cb[sao_n0_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {6'd0, sao_n0_rd_x[5:0]}];
-                    2'd2: sao_nbr_n0_q <= line_buf_cr[sao_n0_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {6'd0, sao_n0_rd_x[5:0]}];
-                    default: sao_nbr_n0_q <= 10'd0;
-                endcase
-            end else begin
-                case (sao_n0_rd_comp)
-                    2'd0: sao_nbr_n0_q <= line_buf_luma[sao_n0_rd_y[1:0]][({7'd0, cur_ctu_x} << 6) + {1'b0, sao_n0_rd_x[5:0]}];
-                    2'd1: sao_nbr_n0_q <= line_buf_cb[sao_n0_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {1'b0, sao_n0_rd_x[4:0]}];
-                    2'd2: sao_nbr_n0_q <= line_buf_cr[sao_n0_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {1'b0, sao_n0_rd_x[4:0]}];
-                    default: sao_nbr_n0_q <= 10'd0;
-                endcase
-            end
-        end
-
-        if (sao_n1_is_nbr) begin
-            if (sao_n1_rd_x < 8'sd0 && sao_n1_rd_y < 8'sd0) begin
-                case (sao_n1_rd_comp)
-                    2'd0: sao_nbr_n1_q <= corner_buf_luma[sao_n1_rd_y[1:0]][sao_n1_rd_x[1:0]];
-                    2'd1: sao_nbr_n1_q <= corner_buf_cb[sao_n1_rd_y[0]][sao_n1_rd_x[1:0]];
-                    2'd2: sao_nbr_n1_q <= corner_buf_cr[sao_n1_rd_y[0]][sao_n1_rd_x[1:0]];
-                    default: sao_nbr_n1_q <= 10'd0;
-                endcase
-            end else if (sao_n1_rd_x < 8'sd0) begin
-                case (sao_n1_rd_comp)
-                    2'd0: sao_nbr_n1_q <= col_buf_luma[sao_n1_rd_y[5:0]][sao_n1_rd_x[1:0]];
-                    2'd1: sao_nbr_n1_q <= col_buf_cb[sao_n1_rd_y[4:0]][sao_n1_rd_x[1:0]];
-                    2'd2: sao_nbr_n1_q <= col_buf_cr[sao_n1_rd_y[4:0]][sao_n1_rd_x[1:0]];
-                    default: sao_nbr_n1_q <= 10'd0;
-                endcase
-            end else if (sao_n1_top_right) begin
-                case (sao_n1_rd_comp)
-                    2'd0: sao_nbr_n1_q <= line_buf_luma[sao_n1_rd_y[1:0]][({7'd0, cur_ctu_x} << 6) + {5'd0, sao_n1_rd_x[6:0]}];
-                    2'd1: sao_nbr_n1_q <= line_buf_cb[sao_n1_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {6'd0, sao_n1_rd_x[5:0]}];
-                    2'd2: sao_nbr_n1_q <= line_buf_cr[sao_n1_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {6'd0, sao_n1_rd_x[5:0]}];
-                    default: sao_nbr_n1_q <= 10'd0;
-                endcase
-            end else begin
-                case (sao_n1_rd_comp)
-                    2'd0: sao_nbr_n1_q <= line_buf_luma[sao_n1_rd_y[1:0]][({7'd0, cur_ctu_x} << 6) + {1'b0, sao_n1_rd_x[5:0]}];
-                    2'd1: sao_nbr_n1_q <= line_buf_cb[sao_n1_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {1'b0, sao_n1_rd_x[4:0]}];
-                    2'd2: sao_nbr_n1_q <= line_buf_cr[sao_n1_rd_y[0]][({6'd0, cur_ctu_x} << 5) + {1'b0, sao_n1_rd_x[4:0]}];
-                    default: sao_nbr_n1_q <= 10'd0;
                 endcase
             end
         end
@@ -971,23 +811,17 @@ module decoder_inloop_filters (
     always @(*) begin
         if (db_rd_neighbor_q) begin
             db_pix_resp_data    = db_nbr_rd_q;
-            sao_pix_resp_data   = luma_rd_q;
             stats_rec_resp_data = luma_rd_q;
         end else if (rd_comp_q == 2'd0) begin
             db_pix_resp_data    = luma_rd_q;
-            sao_pix_resp_data   = luma_rd_q;
             stats_rec_resp_data = luma_rd_q;
         end else if (rd_comp_q == 2'd1) begin
             db_pix_resp_data    = cb_rd_q;
-            sao_pix_resp_data   = cb_rd_q;
             stats_rec_resp_data = cb_rd_q;
         end else begin
             db_pix_resp_data    = cr_rd_q;
-            sao_pix_resp_data   = cr_rd_q;
             stats_rec_resp_data = cr_rd_q;
         end
-        sao_n0_resp_data = sao_n0_oob_q ? 10'd0 : (sao_n0_is_nbr_q ? sao_nbr_n0_q : db_pix_resp_data);
-        sao_n1_resp_data = sao_n1_oob_q ? 10'd0 : (sao_n1_is_nbr_q ? sao_nbr_n1_q : db_pix_resp_data);
 
         if (stats_org_rd_comp_q == 2'd0)
             stats_org_resp_data = orig_y_rd_q;
@@ -998,53 +832,268 @@ module decoder_inloop_filters (
     end
 
     //=========================================================================
-    // Synchronous CTU Dump Pipeline Logic (Block RAM read latency alignment)
+    // Fused Streaming SAO (NONE / BO / EO) + CTU Dump Pipeline (S_DUMP)
     //=========================================================================
+    wire [1:0] d_rd_st = sao_enable
+                       ? ((d_rd_comp == 2'd0) ? out_sao_type[1:0] :
+                          (d_rd_comp == 2'd1) ? out_sao_type[3:2] : out_sao_type[5:4])
+                       : 2'd0;
+    wire        d_rd_is_eo     = (d_rd_st == 2'd1);
+    wire [12:0] d_rd_last_step = (d_rd_comp == 2'd0) ? (d_rd_is_eo ? 13'd4160 : 13'd4095)
+                                                     : (d_rd_is_eo ? 13'd1056 : 13'd1023);
+
+    wire [1:0]  p1_st = sao_enable
+                      ? ((p1_comp == 2'd0) ? out_sao_type[1:0] :
+                         (p1_comp == 2'd1) ? out_sao_type[3:2] : out_sao_type[5:4])
+                      : 2'd0;
+    wire        p1_is_eo  = (p1_st == 2'd1);
+    wire [1:0]  p1_ec     = (p1_comp == 2'd0) ? out_eo_class[1:0] :
+                            (p1_comp == 2'd1) ? out_eo_class[3:2] : out_eo_class[5:4];
+    wire [9:0]  p1_pix    = (p1_comp == 2'd0) ? luma_rd_q :
+                            (p1_comp == 2'd1) ? cb_rd_q   : cr_rd_q;
+    wire [5:0]  p1_wx     = (p1_comp == 2'd0) ? p1_step[5:0] : {1'b0, p1_step[4:0]};
+    wire [9:0]  p1_pix_in = (p1_step < ((p1_comp == 2'd0) ? 13'd4096 : 13'd1024)) ? p1_pix : 10'd0;
+
+    wire [9:0]  p1_eo_win_t2 = eo_rbuf1[p1_wx];
+    wire [9:0]  p1_eo_win_m2 = eo_rbuf0[p1_wx];
+    wire [9:0]  p1_eo_win_b2 = p1_pix_in;
+
+    wire        em_valid  = p1_valid && (!p1_is_eo || (p1_step >= ((p1_comp == 2'd0) ? 13'd65 : 13'd33)));
+    wire [12:0] em_idx    = p1_is_eo ? (p1_step - ((p1_comp == 2'd0) ? 13'd65 : 13'd33)) : p1_step;
+    wire [5:0]  em_x      = (p1_comp == 2'd0) ? em_idx[5:0]  : {1'b0, em_idx[4:0]};
+    wire [5:0]  em_y      = (p1_comp == 2'd0) ? em_idx[11:6] : {1'b0, em_idx[9:5]};
+    wire [5:0]  em_max_dim= (p1_comp == 2'd0) ? 6'd63 : 6'd31;
+    wire        em_last   = em_valid && (p1_comp == 2'd2) && (em_idx[9:0] == 10'd1023);
+
+    wire [11:0] eff_pic_w = (frame_width_px  > 12'd0) ? frame_width_px  : 12'd128;
+    wire [11:0] eff_pic_h = (frame_height_px > 12'd0) ? frame_height_px : 12'd128;
+    wire [11:0] em_abs_x  = (p1_comp == 2'd0) ? (({6'd0, cur_ctu_x} << 6) + {6'd0, em_x})
+                                              : (({7'd0, cur_ctu_x} << 5) + {7'd0, em_x[4:0]});
+    wire [11:0] em_abs_y  = (p1_comp == 2'd0) ? (({6'd0, cur_ctu_y} << 6) + {6'd0, em_y})
+                                              : (({7'd0, cur_ctu_y} << 5) + {7'd0, em_y[4:0]});
+    wire [11:0] em_max_pic_x = (p1_comp == 2'd0) ? (eff_pic_w - 12'd1) : ((eff_pic_w >> 1) - 12'd1);
+    wire [11:0] em_max_pic_y = (p1_comp == 2'd0) ? (eff_pic_h - 12'd1) : ((eff_pic_h >> 1) - 12'd1);
+    wire        em_eo_pic_bnd =
+        (p1_ec == 2'd0 && (em_abs_x == 12'd0 || em_abs_x == em_max_pic_x)) ||
+        (p1_ec == 2'd1 && (em_abs_y == 12'd0 || em_abs_y == em_max_pic_y)) ||
+        ((p1_ec == 2'd2 || p1_ec == 2'd3) &&
+         (em_abs_x == 12'd0 || em_abs_y == 12'd0 || em_abs_x == em_max_pic_x || em_abs_y == em_max_pic_y));
+
+    wire [9:0] nbr_left_y_m1 = (p1_comp == 2'd0) ? col_buf_luma[em_y - 6'd1][3] :
+                               (p1_comp == 2'd1) ? col_buf_cb[em_y[4:0] - 5'd1][3] :
+                                                   col_buf_cr[em_y[4:0] - 5'd1][3];
+    wire [9:0] nbr_left_y_0  = (p1_comp == 2'd0) ? col_buf_luma[em_y][3] :
+                               (p1_comp == 2'd1) ? col_buf_cb[em_y[4:0]][3] :
+                                                   col_buf_cr[em_y[4:0]][3];
+    wire [9:0] nbr_left_y_p1 = (p1_comp == 2'd0) ? col_buf_luma[em_y + 6'd1][3] :
+                               (p1_comp == 2'd1) ? col_buf_cb[em_y[4:0] + 5'd1][3] :
+                                                   col_buf_cr[em_y[4:0] + 5'd1][3];
+    wire [9:0] nbr_top_x_m1  = (p1_comp == 2'd0) ? line_buf_luma[3][({7'd0, cur_ctu_x} << 6) + {1'b0, em_x} - 13'd1] :
+                               (p1_comp == 2'd1) ? line_buf_cb[1][({6'd0, cur_ctu_x} << 5) + {2'b00, em_x[4:0]} - 11'd1] :
+                                                   line_buf_cr[1][({6'd0, cur_ctu_x} << 5) + {2'b00, em_x[4:0]} - 11'd1];
+    wire [9:0] nbr_top_x_0   = (p1_comp == 2'd0) ? line_buf_luma[3][({7'd0, cur_ctu_x} << 6) + {1'b0, em_x}] :
+                               (p1_comp == 2'd1) ? line_buf_cb[1][({6'd0, cur_ctu_x} << 5) + {2'b00, em_x[4:0]}] :
+                                                   line_buf_cr[1][({6'd0, cur_ctu_x} << 5) + {2'b00, em_x[4:0]}];
+    wire [9:0] nbr_top_x_p1  = (p1_comp == 2'd0) ? line_buf_luma[3][({7'd0, cur_ctu_x} << 6) + {1'b0, em_x} + 13'd1] :
+                               (p1_comp == 2'd1) ? line_buf_cb[1][({6'd0, cur_ctu_x} << 5) + {2'b00, em_x[4:0]} + 11'd1] :
+                                                   line_buf_cr[1][({6'd0, cur_ctu_x} << 5) + {2'b00, em_x[4:0]} + 11'd1];
+    wire [9:0] nbr_tl_val    = (p1_comp == 2'd0) ? corner_buf_luma[3][3] :
+                               (p1_comp == 2'd1) ? corner_buf_cb[1][3] :
+                                                   corner_buf_cr[1][3];
+
+    reg [9:0] em_n0_comb, em_n1_comb;
+    always @(*) begin
+        em_n0_comb = 10'd0;
+        em_n1_comb = 10'd0;
+        case (p1_ec)
+            2'd0: begin // Horizontal: (x-1,y) and (x+1,y)
+                em_n0_comb = (em_x > 6'd0) ? win_m0 : ((cur_ctu_x > 0) ? nbr_left_y_0 : 10'd0);
+                em_n1_comb = (em_x < em_max_dim) ? p1_eo_win_m2 : 10'd0;
+            end
+            2'd1: begin // Vertical: (x,y-1) and (x,y+1)
+                em_n0_comb = (em_y > 6'd0) ? win_t1 : ((cur_ctu_y > 0) ? nbr_top_x_0 : 10'd0);
+                em_n1_comb = (em_y < em_max_dim) ? win_b1 : 10'd0;
+            end
+            2'd2: begin // 135 deg: (x-1,y-1) and (x+1,y+1)
+                if (em_x > 6'd0 && em_y > 6'd0)
+                    em_n0_comb = win_t0;
+                else if (em_x == 6'd0 && em_y == 6'd0)
+                    em_n0_comb = (cur_ctu_x > 0 && cur_ctu_y > 0) ? nbr_tl_val : 10'd0;
+                else if (em_x == 6'd0)
+                    em_n0_comb = (cur_ctu_x > 0) ? nbr_left_y_m1 : 10'd0;
+                else
+                    em_n0_comb = (cur_ctu_y > 0) ? nbr_top_x_m1 : 10'd0;
+                em_n1_comb = (em_x < em_max_dim && em_y < em_max_dim) ? p1_eo_win_b2 : 10'd0;
+            end
+            default: begin // 45 deg: (x+1,y-1) and (x-1,y+1)
+                if (em_y > 6'd0 && em_x < em_max_dim)
+                    em_n0_comb = p1_eo_win_t2;
+                else if ((em_y == 6'd0) && (cur_ctu_y > 0) && ((em_x < em_max_dim) || has_right_ctu))
+                    em_n0_comb = nbr_top_x_p1;
+                else
+                    em_n0_comb = 10'd0;
+
+                if (em_x > 6'd0 && em_y < em_max_dim)
+                    em_n1_comb = win_b0;
+                else if (em_x == 6'd0 && em_y < em_max_dim)
+                    em_n1_comb = (cur_ctu_x > 0) ? nbr_left_y_p1 : 10'd0;
+                else
+                    em_n1_comb = 10'd0;
+            end
+        endcase
+    end
+
+    // Stage 3 Combinational BO/EO Offset + Clip1 Logic
+    wire [4:0]  s2_bo_bp = (s2_comp == 2'd0) ? out_band_pos[4:0] :
+                           (s2_comp == 2'd1) ? out_band_pos[9:5] : out_band_pos[14:10];
+    wire [19:0] s2_bo_off_vec = (s2_comp == 2'd0) ? out_bo_offset[19:0] :
+                                (s2_comp == 2'd1) ? out_bo_offset[39:20] : out_bo_offset[59:40];
+    wire [24:0] s2_eo_off_vec = (s2_comp == 2'd0) ? out_eo_offset[24:0] :
+                                (s2_comp == 2'd1) ? out_eo_offset[49:25] : out_eo_offset[74:50];
+
+    wire [4:0]        s2_band_diff = s2_c_pix[9:5] - s2_bo_bp;
+    wire              s2_bo_match  = (s2_band_diff < 5'd4);
+    wire signed [1:0] s2_eo_s0     = (s2_c_pix > s2_n0) ? 2'sd1 : ((s2_c_pix < s2_n0) ? -2'sd1 : 2'sd0);
+    wire signed [1:0] s2_eo_s1     = (s2_c_pix > s2_n1) ? 2'sd1 : ((s2_c_pix < s2_n1) ? -2'sd1 : 2'sd0);
+    wire signed [2:0] s2_eo_idx    = $signed({s2_eo_s0[1], s2_eo_s0}) + $signed({s2_eo_s1[1], s2_eo_s1});
+    wire [2:0]        s2_eo_cat    = s2_eo_idx[2:0] + 3'd2;
+
+    reg signed [4:0]  s2_sel_off;
+    reg signed [11:0] s2_sao_sum;
+    reg [9:0]         s2_sao_pix;
+    always @(*) begin
+        s2_sel_off = 5'sd0;
+        if (s2_st == 2'd2) begin
+            if (s2_bo_match) begin
+                case (s2_band_diff[1:0])
+                    2'd0: s2_sel_off = s2_bo_off_vec[4:0];
+                    2'd1: s2_sel_off = s2_bo_off_vec[9:5];
+                    2'd2: s2_sel_off = s2_bo_off_vec[14:10];
+                    2'd3: s2_sel_off = s2_bo_off_vec[19:15];
+                endcase
+            end
+        end else if ((s2_st == 2'd1) && !s2_pic_bnd) begin
+            case (s2_eo_cat)
+                3'd0:    s2_sel_off = s2_eo_off_vec[4:0];
+                3'd1:    s2_sel_off = s2_eo_off_vec[9:5];
+                3'd3:    s2_sel_off = s2_eo_off_vec[19:15];
+                3'd4:    s2_sel_off = s2_eo_off_vec[24:20];
+                default: s2_sel_off = 5'sd0;
+            endcase
+        end
+        s2_sao_sum = $signed({2'b00, s2_c_pix}) + $signed({{7{s2_sel_off[4]}}, s2_sel_off});
+        if (s2_sao_sum < 12'sd0)
+            s2_sao_pix = 10'd0;
+        else if (s2_sao_sum > 12'sd1023)
+            s2_sao_pix = 10'd1023;
+        else
+            s2_sao_pix = s2_sao_sum[9:0];
+    end
+
+    integer eo_r_i;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            dump_rd_addr <= 13'd0;
-            dump_count_q <= 13'd0;
-            dump_valid_q <= 1'b0;
+            d_rd_step   <= 13'd0;
+            d_rd_comp   <= 2'd0;
+            d_rd_active <= 1'b0;
             dump_ctu_x_q <= 0;
             dump_ctu_y_q <= 0;
+            p1_valid    <= 1'b0;
+            p1_comp     <= 2'd0;
+            p1_step     <= 13'd0;
+            win_t0 <= 10'd0; win_t1 <= 10'd0;
+            win_m0 <= 10'd0; win_m1 <= 10'd0;
+            win_b0 <= 10'd0; win_b1 <= 10'd0;
+            for (eo_r_i = 0; eo_r_i < 64; eo_r_i = eo_r_i + 1) begin
+                eo_rbuf0[eo_r_i] <= 10'd0;
+                eo_rbuf1[eo_r_i] <= 10'd0;
+            end
+            s2_valid   <= 1'b0;
+            s2_last    <= 1'b0;
+            s2_comp    <= 2'd0;
+            s2_st      <= 2'd0;
+            s2_c_pix   <= 10'd0;
+            s2_n0      <= 10'd0;
+            s2_n1      <= 10'd0;
+            s2_pic_bnd <= 1'b1;
+            s2_abs_x   <= 12'd0;
+            s2_abs_y   <= 12'd0;
+            s3_valid   <= 1'b0;
+            s3_last    <= 1'b0;
+            s3_comp    <= 2'd0;
+            s3_pixel   <= 10'd0;
+            s3_abs_x   <= 12'd0;
+            s3_abs_y   <= 12'd0;
         end else begin
             if (filter_state == S_DUMP) begin
-                if (!dump_valid_q && !dump_wait_drain) begin
-                    dump_valid_q <= 1'b1;
-                    dump_count_q <= 13'd0;
-                    dump_rd_addr <= 13'd1;
-                    dump_ctu_x_q <= cur_ctu_x;
-                    dump_ctu_y_q <= cur_ctu_y;
-                end else if (dump_valid_q && pre_out_ready) begin
-                    if (dump_count_q == 13'd6143) begin
-                        dump_valid_q <= 1'b0;
-                        dump_rd_addr <= 13'd0;
-                    end else begin
-                        dump_count_q <= dump_count_q + 13'd1;
-                        if (dump_rd_addr < 13'd6143)
-                            dump_rd_addr <= dump_rd_addr + 13'd1;
+                if (!dump_stall && !dump_wait_drain) begin
+                    // Stage 0: Stream Y -> Cb -> Cr addresses (with 65/33-cyc prime for EO)
+                    if (d_rd_active) begin
+                        if (d_rd_step == d_rd_last_step) begin
+                            d_rd_step <= 13'd0;
+                            if (d_rd_comp == 2'd2)
+                                d_rd_active <= 1'b0;
+                            else
+                                d_rd_comp <= d_rd_comp + 2'd1;
+                        end else begin
+                            d_rd_step <= d_rd_step + 13'd1;
+                        end
                     end
+
+                    // Stage 1: Capture BRAM read return & update 2-row EO sliding window
+                    p1_valid <= d_rd_active;
+                    p1_comp  <= d_rd_comp;
+                    p1_step  <= d_rd_step;
+                    if (p1_valid && p1_is_eo) begin
+                        win_t0 <= win_t1; win_t1 <= eo_rbuf1[p1_wx];
+                        win_m0 <= win_m1; win_m1 <= eo_rbuf0[p1_wx];
+                        win_b0 <= win_b1; win_b1 <= p1_pix_in;
+                        eo_rbuf1[p1_wx] <= eo_rbuf0[p1_wx];
+                        eo_rbuf0[p1_wx] <= p1_pix_in;
+                    end
+
+                    // Stage 2: Capture center pixel & neighbors
+                    s2_valid   <= em_valid;
+                    s2_last    <= em_last;
+                    s2_comp    <= p1_comp;
+                    s2_st      <= p1_st;
+                    s2_c_pix   <= p1_is_eo ? win_m1 : p1_pix;
+                    s2_n0      <= p1_is_eo ? em_n0_comb : p1_pix;
+                    s2_n1      <= p1_is_eo ? em_n1_comb : p1_pix;
+                    s2_pic_bnd <= p1_is_eo ? em_eo_pic_bnd : 1'b1;
+                    s2_abs_x   <= em_abs_x;
+                    s2_abs_y   <= em_abs_y;
+
+                    // Stage 3: Registered SAO filtered pixel -> pre_out_valid
+                    s3_valid <= s2_valid;
+                    s3_last  <= s2_last;
+                    s3_comp  <= s2_comp;
+                    s3_pixel <= s2_sao_pix;
+                    s3_abs_x <= s2_abs_x;
+                    s3_abs_y <= s2_abs_y;
+                end else if (dump_wait_drain) begin
+                    s3_valid <= 1'b0;
                 end
             end else begin
-                dump_valid_q <= 1'b0;
-                dump_rd_addr <= 13'd0;
-                dump_count_q <= 13'd0;
+                // Pre-arm Stage 0 immediately upon S_DB/S_STATS -> S_DUMP entry
+                if ((filter_state == S_STATS && stats_ctu_done) ||
+                    (filter_state == S_DB && db_ctu_done && !sao_enable)) begin
+                    d_rd_active  <= 1'b1;
+                    d_rd_comp    <= 2'd0;
+                    d_rd_step    <= 13'd0;
+                    dump_ctu_x_q <= cur_ctu_x;
+                    dump_ctu_y_q <= cur_ctu_y;
+                end else begin
+                    d_rd_active  <= 1'b0;
+                    d_rd_comp    <= 2'd0;
+                    d_rd_step    <= 13'd0;
+                end
+                p1_valid <= 1'b0;
+                s2_valid <= 1'b0;
+                s3_valid <= 1'b0;
             end
         end
     end
-
-
-
-    wire [9:0] dump_pixel_val = (dump_count_q < 13'd4096) ? luma_rd_q :
-                                (dump_count_q < 13'd5120) ? cb_rd_q   : cr_rd_q;
-    wire [1:0] dump_pixel_comp = (dump_count_q < 13'd4096) ? 2'd0 :
-                                 (dump_count_q < 13'd5120) ? 2'd1 : 2'd2;
-    wire [11:0] dump_pixel_abs_x = (dump_count_q < 13'd4096) ?
-                                   (({12'd0, dump_ctu_x_q} << 6) + {6'd0, dump_count_q[5:0]}) :
-                                   (({12'd0, dump_ctu_x_q} << 5) + {7'd0, dump_count_q[4:0]});
-    wire [11:0] dump_pixel_abs_y = (dump_count_q < 13'd4096) ?
-                                   (({12'd0, dump_ctu_y_q} << 6) + {6'd0, dump_count_q[11:6]}) :
-                                   (({12'd0, dump_ctu_y_q} << 5) + {7'd0, dump_count_q[9:5]});
 
     //=========================================================================
     // Unified SRAM Write Ports (2-Bank Ping-Pong: Fill Bank + Proc Bank)
@@ -1086,13 +1135,6 @@ module decoder_inloop_filters (
                 2'd2: cr_ram_0  [{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
                 default: ;
             endcase
-        end else if ((filter_state != S_FILL) && !proc_bank && sao_pix_wr_valid) begin
-            case (sao_pix_wr_comp)
-                2'd0: luma_ram_0[{sao_pix_wr_y[5:0], sao_pix_wr_x[5:0]}] <= sao_pix_wr_data;
-                2'd1: cb_ram_0  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
-                2'd2: cr_ram_0  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
-                default: ;
-            endcase
         end
     end
 
@@ -1110,13 +1152,6 @@ module decoder_inloop_filters (
                 2'd0: luma_ram_1[{db_pix_wr_y[5:0], db_pix_wr_x[5:0]}] <= db_pix_wr_data;
                 2'd1: cb_ram_1  [{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
                 2'd2: cr_ram_1  [{db_pix_wr_y[4:0], db_pix_wr_x[4:0]}] <= db_pix_wr_data;
-                default: ;
-            endcase
-        end else if ((filter_state != S_FILL) && proc_bank && sao_pix_wr_valid) begin
-            case (sao_pix_wr_comp)
-                2'd0: luma_ram_1[{sao_pix_wr_y[5:0], sao_pix_wr_x[5:0]}] <= sao_pix_wr_data;
-                2'd1: cb_ram_1  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
-                2'd2: cr_ram_1  [{sao_pix_wr_y[4:0], sao_pix_wr_x[4:0]}] <= sao_pix_wr_data;
                 default: ;
             endcase
         end
@@ -1380,19 +1415,13 @@ module decoder_inloop_filters (
                 end
                 S_STATS: if (stats_ctu_done) begin
                     // synthesis translate_off
-                    $display("Time=%0t: [INLOOP_FILTERS] SAO Stats complete. Starting SAO Filter...", $time);
-                    // synthesis translate_on
-                    filter_state <= S_SAO;
-                end
-                S_SAO: if (sao_ctu_done) begin
-                    // synthesis translate_off
-                    $display("Time=%0t: [INLOOP_FILTERS] SAO complete. Dumping 6144 pixels to DPB...", $time);
+                    $display("Time=%0t: [INLOOP_FILTERS] SAO Stats complete. Starting fused SAO+Dump (6144 pixels)...", $time);
                     // synthesis translate_on
                     filter_state <= S_DUMP;
                 end
                 S_DUMP: begin
                     if (!dump_wait_drain) begin
-                        if (pre_out_ready && dump_valid_q && (dump_count_q == 13'd6143)) begin
+                        if (pre_out_ready && s3_valid && s3_last) begin
                             dump_wait_drain <= 1'b1;
                         end
                     end else if (dump_last_drained) begin
@@ -1511,12 +1540,12 @@ module decoder_inloop_filters (
             pre_out_pixel = db_nbr_sao_pixel;
             pre_out_abs_x = db_nbr_abs_x;
             pre_out_abs_y = db_nbr_abs_y;
-        end else if (dump_valid_q) begin
+        end else if (s3_valid) begin
             pre_out_valid = 1'b1;
-            pre_out_comp  = dump_pixel_comp;
-            pre_out_pixel = dump_pixel_val;
-            pre_out_abs_x = dump_pixel_abs_x;
-            pre_out_abs_y = dump_pixel_abs_y;
+            pre_out_comp  = s3_comp;
+            pre_out_pixel = s3_pixel;
+            pre_out_abs_x = s3_abs_x;
+            pre_out_abs_y = s3_abs_y;
         end else if (filter_state == S_DUMP) begin
             pre_out_abs_x = ({12'd0, cur_ctu_x} << 6);
             pre_out_abs_y = ({12'd0, cur_ctu_y} << 6);

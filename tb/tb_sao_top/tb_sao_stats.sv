@@ -44,8 +44,20 @@ module tb_sao_stats;
     logic [14:0] band_pos;
     logic [59:0] bo_offset;
 
+    logic [9:0]  par_rec_resp_y, par_rec_resp_cb, par_rec_resp_cr;
+    logic [9:0]  par_org_resp_y, par_org_resp_u,  par_org_resp_v;
+    logic        par_rec_rd_valid, par_org_rd_valid;
+    logic [5:0]  par_rec_rd_x, par_rec_rd_y, par_org_rd_x, par_org_rd_y;
+    logic [1:0]  par_rec_rd_comp, par_org_rd_comp;
+    logic        par_done;
+    logic [5:0]  par_sao_type, par_eo_class;
+    logic [74:0] par_eo_offset;
+    logic [14:0] par_band_pos;
+    logic [59:0] par_bo_offset;
+
     sao_stats #(
-        .SINGLE_PASS_CAUSAL_SYNC(0)
+        .SINGLE_PASS_CAUSAL_SYNC(0),
+        .PARALLEL_YCBCR_MODE(0)
     ) dut (
         .clk(clk),
         .rst_n(rst_n),
@@ -66,11 +78,49 @@ module tb_sao_stats;
         .org_rd_y(org_rd_y),
         .org_rd_comp(org_rd_comp),
         .org_resp_data(org_resp_data),
+        .rec_cb_resp_data(10'd0),
+        .rec_cr_resp_data(10'd0),
+        .org_u_resp_data(10'd0),
+        .org_v_resp_data(10'd0),
         .sao_type(sao_type),
         .eo_class(eo_class),
         .eo_offset(eo_offset),
         .band_pos(band_pos),
         .bo_offset(bo_offset)
+    );
+
+    sao_stats #(
+        .SINGLE_PASS_CAUSAL_SYNC(0),
+        .PARALLEL_YCBCR_MODE(1)
+    ) dut_par (
+        .clk(clk),
+        .rst_n(rst_n),
+        .start(start),
+        .done(par_done),
+        .ctu_x(ctu_x),
+        .ctu_y(ctu_y),
+        .frame_width_px(frame_width_px),
+        .frame_height_px(frame_height_px),
+        .ctu_qp(ctu_qp),
+        .rec_rd_valid(par_rec_rd_valid),
+        .rec_rd_x(par_rec_rd_x),
+        .rec_rd_y(par_rec_rd_y),
+        .rec_rd_comp(par_rec_rd_comp),
+        .rec_resp_data(par_rec_resp_y),
+        .org_rd_valid(par_org_rd_valid),
+        .org_rd_x(par_org_rd_x),
+        .org_rd_y(par_org_rd_y),
+        .org_rd_comp(par_org_rd_comp),
+        .org_resp_data(par_org_resp_y),
+        .rec_cb_resp_data(par_rec_resp_cb),
+        .rec_cr_resp_data(par_rec_resp_cr),
+        .org_u_resp_data(par_org_resp_u),
+        .org_v_resp_data(par_org_resp_v),
+        .sao_type(par_sao_type),
+        .eo_class(par_eo_class),
+        .eo_offset(par_eo_offset),
+        .band_pos(par_band_pos),
+        .bo_offset(par_bo_offset)
     );
 
     initial begin
@@ -94,6 +144,16 @@ module tb_sao_stats;
             else if (org_rd_comp == 2'd1) org_resp_data <= mem_org_cb[org_rd_y[4:0]][org_rd_x[4:0]];
             else                          org_resp_data <= mem_org_cr[org_rd_y[4:0]][org_rd_x[4:0]];
         end
+        if (par_rec_rd_valid) begin
+            par_rec_resp_y  <= mem_rec_y [par_rec_rd_y][par_rec_rd_x];
+            par_rec_resp_cb <= mem_rec_cb[par_rec_rd_y[4:0]][par_rec_rd_x[4:0]];
+            par_rec_resp_cr <= mem_rec_cr[par_rec_rd_y[4:0]][par_rec_rd_x[4:0]];
+        end
+        if (par_org_rd_valid) begin
+            par_org_resp_y <= mem_org_y [par_org_rd_y][par_org_rd_x];
+            par_org_resp_u <= mem_org_cb[par_org_rd_y[4:0]][par_org_rd_x[4:0]];
+            par_org_resp_v <= mem_org_cr[par_org_rd_y[4:0]][par_org_rd_x[4:0]];
+        end
     end
 
     int total_errors = 0;
@@ -111,18 +171,36 @@ module tb_sao_stats;
 
     task automatic run_dut(input string label);
         int cyc = 0;
+        int cyc_seq = 0;
+        int cyc_par = 0;
+        logic seq_seen = 1'b0;
+        logic par_seen = 1'b0;
         @(posedge clk);
         start = 1'b1;
         @(posedge clk);
         start = 1'b0;
-        while (!done && cyc < 30000) begin
+        while ((!seq_seen || !par_seen) && cyc < 30000) begin
             @(posedge clk);
             cyc++;
+            if (done)     begin seq_seen = 1'b1; cyc_seq = cyc; end
+            if (par_done) begin par_seen = 1'b1; cyc_par = cyc; end
         end
         @(posedge clk);
-        if (!done && cyc >= 30000) begin
+        if (!seq_seen) begin
             $display("[FAIL] %s: TIMEOUT!", label);
             total_errors++;
+        end
+        if (!par_seen) begin
+            $display("[FAIL] %s: PARALLEL TIMEOUT!", label);
+            total_errors++;
+        end
+        if (sao_type !== par_sao_type || eo_class !== par_eo_class ||
+            eo_offset !== par_eo_offset || band_pos !== par_band_pos || bo_offset !== par_bo_offset) begin
+            $display("[FAIL] %s: PARALLEL MISMATCH seq(t=%b c=%b bp=%h) vs par(t=%b c=%b bp=%h)",
+                     label, sao_type, eo_class, band_pos, par_sao_type, par_eo_class, par_band_pos);
+            total_errors++;
+        end else begin
+            $display("  [PAR CHECK] %s matched in %0d cyc (vs %0d cyc seq)", label, cyc_par, cyc_seq);
         end
         // Mandatory norm checks across all tests
         if (sao_type[5:4] !== sao_type[3:2]) begin

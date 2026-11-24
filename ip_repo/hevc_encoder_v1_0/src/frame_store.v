@@ -276,66 +276,74 @@ module frame_store #(
     wire [AXI_DW-1:0] next_beat_data = beat_dirty ? beat_data : {AXI_DW{1'b0}};
     wire [31:0]       next_beat_strb = beat_dirty ? beat_strb : 32'd0;
 
-    // Ready unless we are stalled flushing an old beat
-    assign wr_ready = (wr_state == WR_IDLE) && (!beat_dirty || (beat_addr == cur_beat_addr));
+    // Decoupled zero-bubble AXI write flow control:
+    // Accept pixels continuously whenever they map to the active beat and do not
+    // require an immediate AXI flush while WR FSM is still busy.
+    wire beat_addr_mismatch = beat_dirty && (beat_addr != cur_beat_addr);
+    wire beat_completes_now = (pixel_idx == 4'd15) || wr_last;
+    assign wr_ready = !beat_addr_mismatch && (!beat_completes_now || (wr_state == WR_IDLE));
     assign axi_bready = 1'b1;
 
     always @(posedge clk) begin
         if (!rst_n) begin
             wr_state      <= WR_IDLE;
             beat_dirty    <= 1'b0;
+            cur_beat_addr <= 33'd0;
+            beat_data     <= {AXI_DW{1'b0}};
+            beat_strb     <= 32'd0;
+            flush_addr    <= 33'd0;
+            flush_data    <= {AXI_DW{1'b0}};
+            flush_strb    <= 32'd0;
             axi_awvalid   <= 1'b0;
             axi_wvalid    <= 1'b0;
             axi_wlast     <= 1'b0;
         end else begin
+            // 1. Beat accumulator runs independently of in-flight AXI write bursts
+            if (wr_valid && wr_ready) begin : slice_update
+                integer i;
+                reg [AXI_DW-1:0] temp_data;
+                reg [31:0]       temp_strb;
+                temp_data = next_beat_data;
+                temp_strb = next_beat_strb;
+                for (i = 0; i < 16; i = i + 1) begin
+                    if (i == pixel_idx) begin
+                        temp_data[i*16 +: 16] = {6'd0, wr_pixel};
+                        temp_strb[i*2 +: 2]   = 2'b11;
+                    end
+                end
+
+                // synthesis translate_off
+                if (wr_comp == 2'd1 && beat_addr == 8192) begin
+                    $display("Time=%0t: [frame_store] Cb beat write idx=%0d val=%0d data=%0h",
+                             $time, pixel_idx, wr_pixel, temp_data);
+                end
+                // synthesis translate_on
+
+                // Flush immediately if beat is full or it's the last pixel
+                if (beat_completes_now) begin
+                    wr_state   <= WR_AW;
+                    flush_addr <= beat_addr;
+                    flush_data <= temp_data;
+                    flush_strb <= temp_strb;
+                    beat_dirty <= 1'b0;
+                end else begin
+                    beat_dirty    <= 1'b1;
+                    cur_beat_addr <= beat_addr;
+                    beat_data     <= temp_data;
+                    beat_strb     <= temp_strb;
+                end
+            end
+
+            // 2. AXI4 Write Channel FSM
             case (wr_state)
                 WR_IDLE: begin
-                    if (wr_valid) begin
-                        if (!beat_dirty || (beat_addr == cur_beat_addr)) begin
-                            // Accumulate pixel into 16-bit padded boundary
-                            beat_dirty <= 1'b1;
-                            cur_beat_addr <= beat_addr;
-
-                            // Apply slice modifications to a local variable to bypass simulator RMW issues
-                            begin : slice_update
-                                integer i;
-                                reg [AXI_DW-1:0] temp_data;
-                                reg [31:0]       temp_strb;
-                                temp_data = next_beat_data;
-                                temp_strb = next_beat_strb;
-                                for (i = 0; i < 16; i = i + 1) begin
-                                    if (i == pixel_idx) begin
-                                        temp_data[i*16 +: 16] = {6'd0, wr_pixel};
-                                        temp_strb[i*2 +: 2]   = 2'b11;
-                                    end
-                                end
-                                beat_data <= temp_data;
-                                beat_strb <= temp_strb;
-
-                                // synthesis translate_off
-                                if (wr_comp == 2'd1 && beat_addr == 8192) begin
-                                    $display("Time=%0t: [frame_store] Cb beat write idx=%0d val=%0d data=%0h", 
-                                             $time, pixel_idx, wr_pixel, temp_data);
-                                end
-                                // synthesis translate_on
-
-                                // Flush immediately if beat is full or it's the last pixel
-                                if (pixel_idx == 4'd15 || wr_last) begin
-                                    wr_state   <= WR_AW;
-                                    flush_addr <= beat_addr;
-                                    flush_data <= temp_data;
-                                    flush_strb <= temp_strb;
-                                    beat_dirty <= 1'b0;
-                                end
-                            end
-                        end else begin
-                            // Flush old beat (pixel belongs to new block row / beat)
-                            wr_state   <= WR_AW;
-                            flush_addr <= cur_beat_addr;
-                            flush_data <= beat_data;
-                            flush_strb <= beat_strb;
-                            beat_dirty <= 1'b0;
-                        end
+                    if (wr_valid && beat_addr_mismatch) begin
+                        // Flush old beat before accepting pixel for next beat
+                        wr_state   <= WR_AW;
+                        flush_addr <= cur_beat_addr;
+                        flush_data <= beat_data;
+                        flush_strb <= beat_strb;
+                        beat_dirty <= 1'b0;
                     end
                 end
 
