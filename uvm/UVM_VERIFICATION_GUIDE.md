@@ -82,14 +82,14 @@ flowchart LR
     end
 
     subgraph DUT_BOX["DUT"]
-        DUT["hevc_encoder_axi_top\n(59 RTL .v + 4 .vh)"]
+        DUT["hevc_encoder_axi_top\n(60 RTL .v + 4 .vh)"]
     end
 
     subgraph CHECK["Scoreboard, Coverage & HM 18.0"]
         PRED["uvm_reg_predictor"]
-        SB["hevc_axi_scoreboard\n-> uvm_axi_out.bin\n(273B Questa / 626B xsim)"]
+        SB["hevc_axi_scoreboard\n-> uvm_axi_out.bin\n(256B v4.0 xsim / 273B historical Questa)"]
         COV["hevc_axi_coverage\ncg_soc_axi (100.00%)"]
-        DEC["HM 18.0 TAppDecoder.exe\n-> 12,288B YUV (47.79 dB Y)"]
+        DEC["HM 18.0 TAppDecoder.exe\n-> 12,288B YUV (Exit 0)"]
     end
 
     RAL_SEQ --> RAL --> LITE
@@ -121,7 +121,7 @@ flowchart LR
 ### 3.2 Bit-Exact HM 18.0 Reference Model (`cabac_scoreboard`)
 Inside [cabac_uvm_pkg.sv](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/uvm_cabac/cabac_uvm_pkg.sv#L456-L828), `cabac_scoreboard` implements a cycle-independent, bit-exact SystemVerilog replica of HM 18.0 `TEncBinCABAC`:
 - **Exact Probability Table:** `hm_lps_table[64][4]` reproducing `g_aucLPSTable[64][4]` (`TComCABACTables.cpp`).
-- **LZC Renormalization:** `hm_renorm_lzc` matching `range_coder.v`'s `-d REMEDIATION` LZC path (`renorm_shift_lzc`, 1..7 shifts).
+- **LZC Renormalization:** `hm_renorm_lzc` matching [`range_coder.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v)'s combinational LZC path (`renorm_shift_lzc`, 1..7 shifts).
 - **State Machine Parity:** `ref_init()` (`range=510`, `low=0`, `bits_left=23`, `buffered_byte=0xFF`, `num_buffered_bytes=0`), `ref_encode_bin()`, `ref_encode_ep()`, `ref_encode_trm()`, `ref_write_out()` (handling `0xFF` buffering and carry-1 ripple propagation), and `ref_flush()` (1/2/3-byte stop-bit emission matching `S_FLUSH_1..5`).
 - **Synchronization:** `cabac_monitor` samples accepted inputs in exact RTL priority order (`coder_init` -> `trm_valid` -> `ep_valid` -> `bin_valid` -> `flush_valid`) on `ap_in` and accepted bytes + `flush_done` markers on `ap_out`. At every `flush_done` marker and at `check_phase()`, `expected_byte_q` must be completely drained with `0` remaining bytes.
 
@@ -168,22 +168,22 @@ Inside [cabac_uvm_pkg.sv](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/uvm_cabac/cabac
 ### 4.3 Protocol SVA, Scoreboard, Coverage & HM 18.0 Closed-Loop
 - **SVA Protocol Checkers ([hevc_axi_if.sv](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/uvm_axi_top/vip/hevc_axi_if.sv#L109-L145)):**
   - `assert_axis_video_hold`: Verifies `s_axis_video_tdata`, `tlast`, and `tvalid` remain stable when `tvalid && !tready`.
-  - `assert_axis_bitstream_hold`: Verifies `m_axis_bitstream_tdata`, `tlast`, and `tvalid` remain stable across all `170` stalled handshake cycles.
+  - `assert_axis_bitstream_hold`: Verifies `m_axis_bitstream_tdata`, `tlast`, and `tvalid` remain stable across all stalled handshake cycles (`v4.0` `xsim`: `0` violations).
   - `assert_axi_lite_bresp_okay` & `assert_axi_lite_rresp_okay`: Enforce `OKAY` (`2'b00`) responses on every AXI4-Lite transaction.
 - **Test 1 — `hevc_ral_audit_test` (`ral_audit.log` / `regression.log` `5 s` QuestaSim; `xsim_ral.log`):**
   - Verifies identity CSRs (`MAGIC_ID == 0x48455643`, `RESOLUTION == 0x00400040`, `STATUS == 0x4`), runs built-in `uvm_reg_hw_reset_seq` (**10/10**) and `uvm_reg_bit_bash_seq` (**10/10**), checks black-box `soft_rst` assertion/release via `STATUS`, and sweeps `hevc_csr_rand_cfg` across low/mid/high QP buckets (`0..21`, `22..37`, `38..51`) and GOP modes (`0, 1, 2`) with `664R/653W` and `0` TB warnings.
-- **Test 2 — `hevc_full_uvm_test` (`regression.log` `7 s` / `axi_full.log` `6 s` QuestaSim; `xsim_full.log`):**
-  - Runs CSR sweep & soft-reset audit, configures a `64x64` frame (`QP=28`, `GOP=0`, `6000 kbps`), starts encoding (`CTRL = 0x5`), streams `4,096` pixels with `15%` source bubbles, absorbs `384/384` AXI4 256-bit DRAM writes with `0..2` cycle latency, exercises `25%` payload bitstream backpressure (`68/273` stalls in `regression.log`, `37/273` in `axi_full.log`, `170/626` in `xsim`), verifies `vif.irq == 1` (`59,087` / `59,121` cycles on Questa; `57,111` on `xsim`), polls `STATUS == 0x5`, clears IRQ via W1C (`0x08 <- 1`), captures **`273` Annex B bytes** on QuestaSim (`VPS 29B + SPS 35B + PPS 12B + IDR 197B`) into `uvm/sim/uvm_axi_out.bin`, and closes **`cg_soc_axi` at 100.00%** across all 9 coverpoints/crosses (`4/4` SVAs passing).
-- **Closed-Loop HM Decode (`Tier 2C`):** `TAppDecoder.exe -b uvm/sim/uvm_axi_out.bin -o questa_dec.yuv -d 10` exits **`0`** (`POC 0 TId: 0 ( I-SLICE, QP 28 )`), producing exact **`12,288` bytes** (`64*64*2 + 2*32*32*2` 10-bit 4:2:0 YUV) at **`PSNR_Y = 47.79 dB` (`MSE = 17.4`), `PSNR_U = 31.37 dB`, `PSNR_V = 35.12 dB`** *(whereas `xsim`'s `626 B` output degrades to `8.30 dB` due to a silent `xsim` `address_generator.v` `always @*` LUT sensitivity bug; see Section 7.4)*.
+- **Test 2 — `hevc_full_uvm_test` (`xsim_full.log` `v4.0`, plus historical QuestaSim `regression.log` `7 s`):**
+  - Runs CSR sweep & soft-reset audit, configures a `64x64` frame (`QP=28`, `GOP=0`, `6000 kbps`), starts encoding (`CTRL = 0x5`), streams `4,096` pixels with `15%` source bubbles, absorbs `384/384` AXI4 256-bit DRAM writes with `0..2` cycle latency, exercises `25%` bitstream backpressure, verifies `vif.irq == 1` + `STATUS == 0x5`, clears IRQ via W1C (`0x08 <- 1`), captures **`256` Annex B bytes** on `v4.0` `xsim` (`4` intact NALs, HM 18.0 `exit=0`, `12,288 B` decoded YUV; also passes forced header stall `+BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25` with `72/256` stalls, `0` errors), and closes **`cg_soc_axi` at 100.00%** across all 9 coverpoints/crosses (`4/4` SVAs passing). *(Historical pre-remediation `v2.0` QuestaSim captured `273 B` at `47.79 dB PSNR_Y`, while pre-fix `xsim` emitted `626 B` at `8.30 dB` before `address_generator.v`'s `always @*` LUT bug was fixed.)*
+- **Closed-Loop HM Decode (`Tier 2C`):** Both simulators now close HM 18.0 `TAppDecoder.exe` at **`exit=0`** (`POC 0 TId: 0 ( I-SLICE, QP 28 )`), producing exact **`12,288` bytes** (`64*64*2 + 2*32*32*2` 10-bit 4:2:0 YUV) after `address_generator.v` was remediated (`case`-based lookups + explicit sensitivity list).
 
 ---
 
 ## 5. UVM Bug-Hunting Case Study (Portfolio & Thesis Defense Highlight)
 
 ### 5.1 How UVM Found a Real SoC Protocol Bug Missed by Directed Verification
-During Gate G5, the legacy directed SoC testbench ([tb_hevc_encoder_axi_top.sv](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_axi_top/tb_hevc_encoder_axi_top.sv)) reported `9/9` passing checks, yet **never caught an authentic AXI4-Stream backpressure bug** inside the encoder's NAL framing pipeline for three reasons:
-1. **No Downstream Backpressure:** Line `318` of `tb_hevc_encoder_axi_top.sv` permanently tied `m_axis_bitstream_tready = 1;`.
-2. **Trivial Stimulus:** Line `430` drove flat constant pixels (`Y=304, U=340, V=1020`) emitting `119` bytes without verifying bitstream syntax.
+During initial Gate G5, the directed SoC testbench ([tb_hevc_encoder_axi_top.sv](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_axi_top/tb_hevc_encoder_axi_top.sv)) reported `9/9` passing checks, yet **never caught an authentic AXI4-Stream backpressure bug** inside the encoder's NAL framing pipeline for three reasons:
+1. **No Downstream Backpressure:** The directed testbench permanently tied `m_axis_bitstream_tready = 1;`.
+2. **Trivial Stimulus:** It drove flat constant pixels (`Y=304, U=340, V=1020`, emitting `113 B` on current HEAD / `119 B` pre-`param_set_writer` fix) without verifying bitstream syntax.
 3. **Open-Loop Checking:** The directed testbench checked `tlast_count >= 1` and never passed the AXI4-Stream output to **HM 18.0 `TAppDecoder.exe`**.
 
 When Tier 2 `hevc_full_uvm_test` introduced **randomized `m_axis_bitstream_tready` backpressure (`stall_prob=20%`)** paired with **closed-loop HM 18.0 decoding**, `TAppDecoder.exe` immediately aborted with **exit code 3** on `xsim`, and **both simulators independently exposed the exact `-17 B` parameter-set stripping (`273 B -> 256 B` on QuestaSim `bug_repro.log`; `626 B -> 609 B` on `xsim`)**:
@@ -226,13 +226,13 @@ sequenceDiagram
 4. **Secondary Timing Skew Caught ([hevc_encoder_axi_top.v:326-333](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v#L326-L333)):**  
    `irq_status` is asserted on `core_frame_done`, roughly 4 cycles before `gop_controller` sets `core_encode_done` (`STATUS.DONE=1, BUSY=0`), which `hevc_full_uvm_test` handles cleanly via bounded `STATUS` polling.
 
-### 5.3 Non-Invasive Verification Closure & Dual-Mode Plusargs
-Because Gate G8 enforces **Zero RTL Modifications** (preserving Gate G6 `64/64` SHA-256 IP parity), [hevc_axi_tests_pkg.sv](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/uvm_axi_top/tests/hevc_axi_tests_pkg.sv#L286-L366) resolves the finding cleanly while preserving bug observability:
+### 5.3 Non-Invasive Initial Closure & Subsequent RTL Remediation
+Initially, under Gate G8's **Zero RTL Modifications** phase (`pre-v2.0`), [hevc_axi_tests_pkg.sv](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/uvm_axi_top/tests/hevc_axi_tests_pkg.sv#L286-L366) added dual-mode plusargs to isolate and reproduce the `nal_writer`/`slice_controller` hazard. In subsequent RTL remediation ([`nal_writer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/input_output/nal_writer.v), [`slice_controller.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/slice_controller.v), [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v), preserved at `64/64` Gate G6 SHA-256 IP parity), **both** modes now pass with zero RTL edits during Gate G8 runs:
 
-- **Production Regression Mode (Default: `BS_FORCE_HDR_STALL=0`, `BS_STALL_PROB=25`):**  
-  `stall_prob` stays `0` across the initial `80` header bytes (`VPS 28B + SPS 34B + PPS 11B + slice header`), then dynamically enables `env.axis_bs_agt.set_stall_prob(25)` across the slice RBSP payload (`68/273` stalled cycles on QuestaSim `regression.log` / `37/273` on `axi_full.log`, `170/626` on `xsim`), proving **100% slice-payload backpressure compliance** (`273 B` intact on QuestaSim -> `12,288 B` decoded YUV at **`47.79 dB` `PSNR_Y`**, `100.00% cg_soc_axi`).
-- **Bug Reproduction Mode (`+BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=20`):**  
-  Immediately reproduces the `nal_writer`/`slice_controller` header-stall hazard (`256 B` corrupted on QuestaSim `bug_repro.log` with `65/256` stalls and `2` malformed NALs `32/34`; `609 B` + HM exit `3` on `xsim`) as an automated RTL regression target for future RTL fixes (latching `nal_end` in `nal_writer` and adding a `nal_idle` handshake to `slice_controller`).
+- **Default Regression Mode (`BS_FORCE_HDR_STALL=0`, `BS_STALL_PROB=25`):**  
+  `stall_prob` stays `0` across the initial `80` header bytes, then enables `env.axis_bs_agt.set_stall_prob(25)` across the slice RBSP payload (`v4.0` `xsim`: **`256 B`**, `4` NALs, HM 18.0 `exit=0`, `12,288 B` decoded YUV, `100.00% cg_soc_axi`). *(Historical `v1.0` QuestaSim captured `273 B` at `47.79 dB PSNR_Y` with `68/273` stalls before `param_set_writer` removed 3 trailing `0x00` bytes.)*
+- **Header-Stall Stress Mode (`+BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25`):**  
+  Historically reproduced the pre-fix `nal_writer`/`slice_controller` header-stall hazard (`609 B` + HM exit `3` on pre-remediation `xsim`, `256 B` / `2` malformed NALs on `bug_repro.log`). After adding `nal_ready`, `nal_end_pending`, and `core_encode_done` IRQ alignment in production RTL, `v4.0` `hevc_full_uvm_test +BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25` passes cleanly (`72/256` stalled cycles, **`0` errors**, `4` intact NALs, HM 18.0 `exit=0`).
 
 ---
 
@@ -285,11 +285,11 @@ cd sim
 ```
 
 - **Tier 1 (CABAC M-Coder `tb_uvm_cabac` -> `vopt_cabac`):**
-  - `make compile_cabac`: creates `work`, compiles `parameter_pkg.vh`, `hevc_interfaces.vh`, and `range_coder.v` (`+cover +define+REMEDIATION`), compiles `cabac_if.sv`, `cabac_uvm_pkg.sv`, `tb_uvm_cabac.sv`, and runs `vopt +acc tb_uvm_cabac -o vopt_cabac +designfile`.
+  - `make compile_cabac`: creates `work`, compiles `parameter_pkg.vh`, `hevc_interfaces.vh`, and `range_coder.v` (`+cover`), compiles `cabac_if.sv`, `cabac_uvm_pkg.sv`, `tb_uvm_cabac.sv`, and runs `vopt +acc tb_uvm_cabac -o vopt_cabac +designfile`.
   - `make vopt_run_cabac` / `make vopt_random_cabac`: executes `vsim -c vopt_cabac -do sim.do +UVM_TESTNAME=cabac_uvm_test` (with `-sv_seed random` for `vopt_random_cabac`).
   - `make coverage_cabac`: executes with `-sv_seed random -coverage` and saves directly via `-testname $(cabac_test_name)` into `cabac.ucdb`.
 - **Tier 2 (SoC AXI Top `tb_uvm_axi_top` -> `vopt_axi_top`):**
-  - `make compile_axi`: compiles all `59` RTL `.v` + `2` `.vh` files from `synth_vivado.tcl` (`+cover +define+REMEDIATION +incdir+$(RTL_DIR)/common +incdir+$(RTL_DIR)/top`), `hevc_axi_if.sv`, `hevc_ral_pkg.sv`, `hevc_axi_vip_pkg.sv`, `hevc_axi_env_pkg.sv`, `hevc_axi_tests_pkg.sv`, `tb_uvm_axi_top.sv`, and runs `vopt +acc tb_uvm_axi_top -o vopt_axi_top +designfile`.
+  - `make compile_axi`: compiles all `60` RTL `.v` + `2` `.vh` files from `synth_vivado.tcl` (`+cover +incdir+$(RTL_DIR)/common +incdir+$(RTL_DIR)/top`), `hevc_axi_if.sv`, `hevc_ral_pkg.sv`, `hevc_axi_vip_pkg.sv`, `hevc_axi_env_pkg.sv`, `hevc_axi_tests_pkg.sv`, `tb_uvm_axi_top.sv`, and runs `vopt +acc tb_uvm_axi_top -o vopt_axi_top +designfile`.
   - `make vopt_run test_name=hevc_ral_audit_test` / `make vopt_run` (default `test_name=hevc_full_uvm_test`, also `vopt_random`, `run`, `wave`, `vis_run` with `-qwavedb=+signal+class`).
   - `make coverage test_name=hevc_ral_audit_test` / `make coverage test_name=hevc_full_uvm_test`: saves directly with unique `-testname $(test_name)` into `hevc_ral_audit_test.ucdb` and `hevc_full_uvm_test.ucdb`.
 - **Unified Compile, Full Regression & `vcover` Merge:**
@@ -320,7 +320,7 @@ make regression tool=Cadence   # runs xrun -coverage all and imc merge/report
 
 Full `make regression` on **`asiclab` Siemens QuestaSim 2021.2_1** completed in **`31 s`** (`regression.log`, `cov_summary.log`, `uvm_axi_out.bin`, `0` UVM/TB warnings across all tiers):
 - **Closed-Loop HM 18.0 PSNR Verification (`273 B` Golden Stream):** Decoding [`sim/uvm_axi_out.bin`](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/sim/uvm_axi_out.bin) with HM 18.0 `TAppDecoder.exe` (`exit=0`, `12,288 B`, `POC 0 I-SLICE, QP 28`) achieves **`PSNR_Y = 47.79 dB` (`MSE = 17.4`), `PSNR_U = 31.37 dB`, `PSNR_V = 35.12 dB`** against `VIDEO_PAT_GRADIENT`.
-- **Silent Vivado 2026.1 `xsim` `always @*` LUT Bug (`address_generator.v`):** Cross-checking QuestaSim (`273 B`, `last_idx=2`, `PSNR_Y = 47.79 dB`) against Vivado `xsim` (`626 B`, `last_idx=15`, `PSNR_Y = 8.30 dB`) isolated an `xsim` simulator elaboration quirk in [`rtl/top/address_generator.v:11-32,222-275`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/address_generator.v#L11-L32): `xsim` omits `sub_idx` (`scan_idx[3:0]`) from `always @*` when calling `function automatic` helpers with local unpacked array LUTs (`reg [1:0] lut [0:15];`), freezing `(addr_x, addr_y) = (0,0)` across 4×4 CG positions and repeating DC `-57` 16× — whereas QuestaSim 2021.2_1, ModelSim, and Vivado synthesis evaluate it accurately (detailed in [HEVC_UVM_case_studies.md](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/HEVC_UVM_case_studies.md)).
+- **Remediated `xsim` `always @*` LUT Sensitivity Issue ([`address_generator.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/address_generator.v#L11-L35)):** Historical cross-checking of QuestaSim (`273 B`, `last_idx=2`, `PSNR_Y = 47.79 dB`) against pre-fix Vivado `xsim` (`626 B`, `last_idx=15`, `PSNR_Y = 8.30 dB`) isolated an `xsim` elaboration quirk where `xsim` omitted `sub_idx` (`scan_idx[3:0]`) from `always @*` when calling `function automatic` helpers containing local unpacked array LUTs (`reg [1:0] lut [0:15];`), detailed in [HEVC_UVM_case_studies.md](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/HEVC_UVM_case_studies.md). Production [`rtl/top/address_generator.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/address_generator.v#L11-L35) now uses pure `case` lookups and an explicit sensitivity list `always @(tu_size_log2 or scan_mode or cg_idx or sub_idx)`, closing `v4.0` `xsim` at HM 18.0 `exit=0`.
 - **Merged QuestaSim UCDB Code, Assertion & Functional Coverage (`sim/cov_summary.log`, `78` instances):**
   - **Covergroups:** **`100.00%`** (`2/2` covergroup types: `cg_cabac`, `cg_soc_axi`). **SVA Assertions:** **`100.00%`** (`6/6`, `0` failures).
   - **`range_coder` Tier 2 vs. Tier 1 Lift:** `84.34% -> 91.95%` Statements, `52.06% -> 76.03%` Branches (`+23.97%`), `27.58% -> 44.83%` Conditions, `50.00% -> 100.00%` Expressions, `66.66% -> 77.78%` FSM States, `40.00% -> 55.00%` FSM Transitions, `68.61% -> 77.01%` Toggles.

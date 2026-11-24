@@ -61,7 +61,7 @@ All behavioral/synthesis divergences in inter motion compensation remain permane
 
 ### Gate G4: Flaw Testbench Regression Suite (`scripts/run_all_flaw_tb.py`)
 - **Command:** `python scripts/run_all_flaw_tb.py`
-- **Result:** **28/28 test runs PASSED** (`19.0s`, 14/14 PROVEN BUGGY + 14/14 PASS REMEDIATED):
+- **Result:** **28/28 test runs PASSED** (`41.7s`, 14/14 PROVEN BUGGY against [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) + 14/14 PASS REMEDIATED compiled & asserted directly against live production [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl)):
   - D-01 (AMVP): PROVEN (FAIL) / PASS (100%)
   - D-13 (Sub-pel MC): PROVEN (FAIL) / PASS (100%)
   - D-02 (DST-VII): PROVEN (FAIL) / PASS (100%)
@@ -79,13 +79,13 @@ All behavioral/synthesis divergences in inter motion compensation remain permane
 
 ### Gate G5: Unit & Subsystem Test Suites
 - **Active Post-Remediation Verified Suites (`9` unit + `1` AXI SoC = `10` re-verified directly after `2026-11-19` RTL remediation edits, ModelSim 10.1d; all `26` suites pass across `2026-11-16..19`):**
-  - **SoC Integration AXI Top (`tb/run_tb_axi.do` / `tb/tb_axi_top/tb_hevc_encoder_axi_top.sv`):** ALL 9 TESTS PASSED (`119 B` AXI4-Stream bitstream output, `TLAST=1`, `irq` aligned with `STATUS.DONE=1`).
+  - **SoC Integration AXI Top (`tb/run_tb_axi.do` / `tb/tb_axi_top/tb_hevc_encoder_axi_top.sv`):** ALL 9 TESTS PASSED (`113 B` AXI4-Stream bitstream output, `TLAST=1`, `irq` aligned with `STATUS.DONE=1`).
   - **NAL & Slice/GOP Control (`tb_nal_writer` incl. Test 3 stalled `nal_end_pending` + final-byte `0x03` EPB = `10 B`, `tb_slice_controller`, `tb_gop_controller`):** All PASSED (`2026-11-19`).
   - **MC Window Fetch Engine (`tb/tb_mc_window_fetch/run.do`):** `ALL WINDOW CHECKS PASSED (6272 samples verified)` (`2026-11-19`).
   - **Inter Prediction & Sub-pel Cores (`tb/tb_inter/run.do` `tb_b_prediction`, `tb_ref_frame_buffer`, `tb_interpolation_filter`, `tb_mvp_predictor`):** `tb_b_prediction` & `tb_ref_frame_buffer` re-verified PASS (`2026-11-19`); `tb_interpolation_filter` (`0` fails) & `tb_mvp_predictor` (`20,000` tests) verified on pre-remediation HEAD.
   - **Intra, Transform, Quant & Partitioning (`tb_intra_pred_top`, `tb_transform_rigorous`, `tb_intra_planar`, `tb_intra_dc`, `tb_ref_sample_filter`, `tb_inv_quant`, `tb_spatial_availability`, `tb_rate_control_rdo`):** `tb_intra_pred_top` (`616,224` samples) & `tb_transform_rigorous` (`240/240`) re-verified PASS (`2026-11-19`); remaining units verified prior to `2026-11-19` cleanup edits.
   - **In-Loop Deblocking & SAO (`tb_boundary_strength`, `tb/tb_deblock/run.do`, `tb_db_filter_luma`, `tb_inloop_filters`, `tb_sao`, `tb_sao_stats`):** `tb_boundary_strength` (`1,010` vectors incl. Chroma CBF Clause 8.7.2.4, `0` errors) re-verified PASS (`2026-11-19`); remaining suites verified prior to `2026-11-19` edits.
-  - **Entropy (`tb_range_coder`, `tb_ctx_model_store`, `tb_syntax_pred`):** Verified on unchanged entropy modules (`19,391` matches, `186` models, `0` errors). *(Supplemental: `tb_entropy_chain` runs standalone emitting `7` bytes without golden `flat_field_qp32.bin`, and `tb_intra_angular` runs `0` vectors due to missing `.dat` files.)*
+  - **Entropy & Angular Unit Verification (`tb_range_coder`, `tb_ctx_model_store`, `tb_syntax_pred`, `tb_intra_angular`):** Verified on entropy modules (`19,391` matches, `186` models, `0` errors) and live [`rtl/intra/intra_angular.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_angular.v) (`tb_intra_angular` executed from `tb/tb_intra_pred_top/`: **`218,368`** predictions across `4x4..32x32`, **`0` errors**). *(Supplemental: `tb_entropy_chain` runs standalone emitting `7` bytes without golden `flat_field_qp32.bin`.)*
 - **Known Legacy Un-Updated Standalone TBs (15 un-updated TBs fail elaboration/assertions due to RTL port/design evolution):** `tb_syntax_coeff`, `tb_mode_decision`, `tb_db_filter_chroma`, `tb_syntax_cu`, `tb_ctu_partitioner`, `tb_pu_cu_splitter`, `tb_ctu_raster_scan`, `tb_recon_unit`, `tb_hpel_filter_luma`, `tb_hpel_filter_chroma`, `tb_mc_unit`, `tb_tz_search`, `tb_fwd_quant`, `tb_dct_top`, `tb_frame_store`.
 
 ### Gate G6: IP Packaging Parity

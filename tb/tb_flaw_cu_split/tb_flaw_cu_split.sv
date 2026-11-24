@@ -253,6 +253,7 @@ module tb_flaw_cu_split;
     int depth0_eval_count = 0;
     int depth1_eval_count = 0;
     int leaf_cu_count = 0;
+    bit depth0_split_observed = 1'b0;
 
     reg [5:0] observed_leaf_x    [0:15];
     reg [5:0] observed_leaf_y    [0:15];
@@ -277,6 +278,7 @@ module tb_flaw_cu_split;
         if (rst_n && cu_valid && split_valid) begin
             if (cu_depth == 2'd0) begin
                 depth0_eval_count <= depth0_eval_count + 1;
+                if (split_flag == 1'b1) depth0_split_observed <= 1'b1;
                 $display("Time=%0t: [TB_EVAL] Depth 0 (64x64) evaluated -> split_flag=%0b (best_cost=0x%08X)",
                          $time, split_flag, best_rd_cost);
             end else if (cu_depth == 2'd1) begin
@@ -388,14 +390,12 @@ module tb_flaw_cu_split;
 
         end else begin
             //-----------------------------------------------------------------
-            // STATE 2: Remediated Verification (+REMEDIATED plusarg)
-            // Verifies that with remediation applied, 64x64 splits into four
-            // 32x32 sub-CUs in Z-scan order without pipeline hang.
+            // STATE 2: Remediated Verification (+REMEDIATED against live rtl/)
+            // Verifies live rtl/partition/mode_decision.v organically splits
+            // 64x64 depth-0 into four 32x32 sub-CUs in Z-scan order without force.
             //-----------------------------------------------------------------
-            $display(">>> [PHASE 2] Executing Remediated Verification (+REMEDIATED) <<<\n");
+            $display(">>> [PHASE 2] Executing Remediated Verification (+REMEDIATED against live rtl/) <<<\n");
 
-            // Apply remediation dynamically: force split at depth 0 or when cost >= 32'hFFFF0000
-            // Remediation patch: (cur_pu_depth == 2'd0) || (best_rd_cost >= 32'hFFFF0000) || ...
             test_count = test_count + 1;
 
             // Submit 64x64 CTU
@@ -405,15 +405,14 @@ module tb_flaw_cu_split;
             while (!ctu_accepted) @(posedge clk);
             ctu_valid = 1'b0;
 
-            // At depth 0, apply remediated split decision
-            while (u_partitioner.state != 2'd2) @(posedge clk); // S_EVAL
+            wait(depth0_eval_count >= 1);
 
-            // Dynamic force to model remediated logic during S_DECIDE_SPLIT for depth 0
+`ifndef REMEDIATION
+            // Legacy force fallback only when running against pre-remediation baseline RTL
             fork
                 begin : apply_remediation_guard
                     forever @(posedge clk) begin
                         if (u_mode_decision.state == 3'd5 && u_mode_decision.cur_pu_depth == 2'd0) begin
-                            // Remediated condition: depth 0 forces split
                             force u_mode_decision.split_flag = 1'b1;
                         end else begin
                             release u_mode_decision.split_flag;
@@ -421,14 +420,18 @@ module tb_flaw_cu_split;
                     end
                 end
             join_none
+`endif
 
             // Wait for all 4 sub-CUs (depth 1) to be evaluated and emitted
             wait(u_partitioner.sp == 4'd0 && u_partitioner.state == 2'd0);
             repeat (10) @(posedge clk);
+`ifndef REMEDIATION
             disable apply_remediation_guard;
             release u_mode_decision.split_flag;
+`endif
 
             $display("\n--- Remediated Partitioning Results ---");
+            $display("   Depth 0 Split Observed: %0b (Expected: 1)", depth0_split_observed);
             $display("   Total Leaf CUs Emitted: %0d (Expected: 4 sub-CUs of size 32x32)", leaf_cu_count);
             for (int k = 0; k < leaf_cu_count; k++) begin
                 $display("   Leaf CU [%0d]: Position=(%0d,%0d), Size=%0d, Depth=%0d",
@@ -436,7 +439,11 @@ module tb_flaw_cu_split;
                          observed_leaf_size[k], observed_leaf_depth[k]);
             end
 
-            // Assertions on remediated behavior
+            // Assertions on live remediated DUT behavior
+            if (!depth0_split_observed) begin
+                fail_count = fail_count + 1;
+                $display("   [FAIL] Depth 0 did not organically output split_flag == 1!");
+            end
             if (leaf_cu_count != 4) begin
                 fail_count = fail_count + 1;
                 $display("   [FAIL] Expected 4 leaf CUs, but observed %0d!", leaf_cu_count);

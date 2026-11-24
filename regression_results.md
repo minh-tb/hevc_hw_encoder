@@ -5,7 +5,7 @@
 **Toolchain:** ModelSim Altera Starter Edition 10.1d (`vlog.exe`, `vsim.exe` headless batch) & AMD Vivado 2026.1 (64-bit, `xsim` UVM 1.2 + OOC Synth)  
 **Host Environment:** Windows PowerShell, Python 3.12.8  
 **Default RTL State:** Pure single-path production RTL across **64 files (`60` `.v` + `4` `.vh`)** with **0 `REMEDIATION` directives** in [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src); historical buggy baselines for the 14-flaw dual-state harness reside exclusively in [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) (`FAST_EARLY_CU_SPLIT = 0` default)  
-**Total Flaw Test Cases:** 14 (`28 / 28` dual-state runs completed in `19.0 seconds` wallclock runtime; `14/14` Buggy PROVEN FAIL + `14/14` Remediated PASS 100%)  
+**Total Flaw Test Cases:** 14 (`28 / 28` dual-state runs completed in `41.7 seconds` wallclock runtime; `14/14` Buggy `PROVEN (FAIL)` against locked `tb/flaw_baseline_rtl/` + `14/14` Remediated `PASS (100%)` compiled & asserted directly against live production `rtl/`)  
 **Total AXI SoC Test Cases:** 9 (`9 / 9 PASS` — `113 B`, `TLAST=1`, `irq` aligned with `STATUS.DONE=1`)  
 **Re-Verified Self-Checking Unit & SoC Suites:** Active unit & SoC suites incl. `tb_hevc_encoder_axi_top` (`9/9`, `113 B`, `TLAST=1`), `tb_nal_writer`, `tb_slice_controller`, `tb_gop_controller`, `tb_intra_pred_top` (`616,224` samples), `tb_ref_frame_buffer`, `tb_boundary_strength` (`1,010` vectors), `tb_transform_rigorous` (`240/240`), `tb_b_prediction`, `tb_mc_window_fetch` (`6,272` samples incl. `rd_hold`), `tb_sao`, `tb_sao_stats`, `tb_inloop_filters`, `tb_deblock`, `tb_db_filter_luma`, `tb_interpolation_filter`, `tb_spatial_availability`, `tb_range_coder`, `tb_ctx_model_store`, `tb_syntax_pred`, `tb_rate_control_rdo`, `tb_intra_planar`, `tb_intra_dc`, `tb_ref_sample_filter`, `tb_mvp_predictor`, `tb_inv_quant`  
 **3-Frame Pipeline Throughput (`v4.0` Phase A–C3):** **Avg CTU Period = 27,785 cycles/CTU** (`-30.5%` vs `v3.0` `39,970`, `-55.6%` vs `v2.0` `62,568`, `-78.2%` vs `127,647` baseline; **`T_MD = 6,403`**, **`T_TQ = 11,220`**, **`T_DB = 6,951`** `<= 12,500` target, **`T_CABAC = 35,094`** 2-stage overlapped FE->BE lifetime, **`Stall_CABAC = 0`** and **`Stall_Inloop = 0` (`0.00%`)** across all 12 CTUs; total sim `3,458,665 ns` / `345,866.5` cycles)  
@@ -39,84 +39,84 @@
 ## 2. Per-Testbench Execution Trace & Proof Analysis
 
 ### 2.1 [D-01] tb_flaw_amvp (Inter / AMVP)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/inter rtl/common/parameter_pkg.vh rtl/inter/mvp_predictor.v tb/tb_flaw_amvp/tb_flaw_amvp.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/inter tb/flaw_baseline_rtl/parameter_pkg.vh rtl/inter/mvp_predictor.v tb/tb_flaw_amvp/tb_flaw_amvp.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-01 CONFIRMED: NON-ZERO DECODER MVP RECONSTRUCTION DRIFT PROVEN ***`. Asserted that decoder derived non-zero spatial candidates ($MVP_A \ne 0$) while encoder hardwired MVP to 0, producing non-zero $\Delta MV$ drift. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION` -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+REMEDIATION +incdir+rtl/common +incdir+rtl/inter rtl/common/parameter_pkg.vh rtl/inter/mvp_predictor.v tb/tb_flaw_amvp/tb_flaw_amvp.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL TESTS PASSED: AMVP CONFORMANCE VERIFIED ***`. Status: **PASS (100%)**.
 
 ### 2.2 [D-13] tb_flaw_hpel (Inter / MC)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/inter rtl/common/parameter_pkg.vh rtl/inter/hpel_filter_luma.v rtl/inter/hpel_filter_chroma.v tb/tb_flaw_hpel/tb_flaw_hpel_ports.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/inter tb/flaw_baseline_rtl/parameter_pkg.vh rtl/inter/hpel_filter_luma.v rtl/inter/hpel_filter_chroma.v tb/tb_flaw_hpel/tb_flaw_hpel_ports.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-13 CONFIRMED: SUB-PEL FILTER DISCONNECTION & INTEGER TRUNCATION PROVEN ***`. Confirmed that floating `frac` ports forced integer pixel replication, creating 2,016 test errors. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION` -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+REMEDIATION +incdir+rtl/common +incdir+rtl/inter rtl/common/parameter_pkg.vh rtl/inter/hpel_filter_luma.v rtl/inter/hpel_filter_chroma.v tb/tb_flaw_hpel/tb_flaw_hpel_ports.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL TESTS PASSED: SUB-PEL FILTER PORTS PROPERLY CONNECTED ***`. Status: **PASS (100%)**.
 
 ### 2.3 [D-02] tb_flaw_dst7 (Transform)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common rtl/common/parameter_pkg.vh rtl/transform/transpose_ram_32x32.v rtl/transform/transform_1d_core.v rtl/transform/dct_top.v tb/tb_flaw_dst7/tb_flaw_dst7.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common tb/flaw_baseline_rtl/parameter_pkg.vh rtl/transform/transpose_ram_32x32.v rtl/transform/transform_1d_core.v tb/flaw_baseline_rtl/dct_top.v tb/tb_flaw_dst7/tb_flaw_dst7.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-02 CONFIRMED: 4x4 INTRA LUMA DST-VII TIE-OFF DEFECT PROVEN ***`. Divergence between DCT-II and DST-VII coefficients observed (DC coeff 2571 vs 3360). Status: **PROVEN (FAIL)**.
-- **Simulate Remediated:** `+REMEDIATED` -> Emitted `*** ALL 4 TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
+- **Compile & Simulate Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+REMEDIATION +incdir+rtl/common rtl/common/parameter_pkg.vh rtl/transform/transpose_ram_32x32.v rtl/transform/transform_1d_core.v rtl/transform/dct_top.v tb/tb_flaw_dst7/tb_flaw_dst7.sv` + `+REMEDIATED` driving live `dct_top.is_dst7 = 1'b1` (zero `force`) -> Emitted `*** ALL 4 TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
 
 ### 2.4 [D-14] tb_flaw_mdcs (Transform / Entropy)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common rtl/common/parameter_pkg.vh rtl/top/address_generator.v tb/tb_flaw_mdcs/tb_flaw_mdcs.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common tb/flaw_baseline_rtl/parameter_pkg.vh rtl/top/address_generator.v tb/tb_flaw_mdcs/tb_flaw_mdcs.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-14 / D-04 CONFIRMED: MDCS SCAN DESYNCHRONIZATION DEFECT PROVEN ***`. Coordinate transpose verified on angular modes 6..14 and 22..30. Status: **PROVEN (FAIL)**.
-- **Simulate Remediated:** `+REMEDIATED` -> Emitted `*** ALL TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
+- **Compile & Simulate Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +incdir+rtl/common rtl/common/parameter_pkg.vh rtl/top/address_generator.v tb/tb_flaw_mdcs/tb_flaw_mdcs.sv` + `+REMEDIATED` against live `address_generator.v` (paired with `[D-03]` on live `syntax_coeff.v`) -> Emitted `*** ALL TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
 
 ### 2.5 [D-07] tb_flaw_deblock (In-Loop / Deblock)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/inloop_filters rtl/common/parameter_pkg.vh rtl/inloop_filters/db_filter_luma.v rtl/inloop_filters/db_filter_chroma.v rtl/inloop_filters/boundary_strength.v rtl/inloop_filters/deblock_top.v tb/tb_flaw_deblock/tb_flaw_deblock_stages.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/inloop_filters tb/flaw_baseline_rtl/parameter_pkg.vh rtl/inloop_filters/db_filter_luma.v tb/flaw_baseline_rtl/db_filter_chroma.v rtl/inloop_filters/boundary_strength.v tb/flaw_baseline_rtl/deblock_top.v tb/tb_flaw_deblock/tb_flaw_deblock_stages.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FAILED: Deblocking edge stage truncation detected! (Flaw D-07) ***`. Vertical edges visited bitmap was `8'b00010001` (only 2/8 edges visited). Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION` -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/inloop_filters rtl/common/parameter_pkg.vh rtl/inloop_filters/db_filter_luma.v rtl/inloop_filters/db_filter_chroma.v rtl/inloop_filters/boundary_strength.v rtl/inloop_filters/deblock_top.v tb/tb_flaw_deblock/tb_flaw_deblock_stages.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL TESTS PASSED: All 8 CTU raster edges visited and filtered successfully ***`. Status: **PASS (100%)**.
 
 ### 2.6 [D-06] tb_flaw_chroma_tc (In-Loop / Deblock)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/inloop_filters rtl/common/parameter_pkg.vh rtl/inloop_filters/db_filter_chroma.v tb/tb_flaw_chroma_tc/tb_flaw_chroma_tc.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/inloop_filters tb/flaw_baseline_rtl/parameter_pkg.vh tb/flaw_baseline_rtl/db_filter_chroma.v tb/tb_flaw_chroma_tc/tb_flaw_chroma_tc.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FAILED: Chroma t_C table mapping flaw detected! (Flaw D-06) ***`. Zero-collapse errors confirmed for $QP \ge 52$ and index $\ge 54$. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION` -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/inloop_filters rtl/common/parameter_pkg.vh rtl/inloop_filters/db_filter_chroma.v tb/tb_flaw_chroma_tc/tb_flaw_chroma_tc.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL TESTS PASSED: Full Table 8-19 and Main10 scaling verified ***`. Status: **PASS (100%)**.
 
 ### 2.7 [D-09] tb_flaw_sao (In-Loop / SAO)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/inloop_filters +incdir+rtl/entropy rtl/common/parameter_pkg.vh rtl/inloop_filters/sao_stats.v rtl/inloop_filters/sao_edge_offset.v rtl/inloop_filters/sao_band_offset.v rtl/entropy/syntax_sao.v tb/tb_flaw_sao/tb_flaw_sao_integration.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/inloop_filters +incdir+rtl/entropy tb/flaw_baseline_rtl/parameter_pkg.vh tb/flaw_baseline_rtl/sao_stats.v rtl/inloop_filters/sao_edge_offset.v rtl/inloop_filters/sao_band_offset.v rtl/entropy/syntax_sao.v tb/tb_flaw_sao/tb_flaw_sao_integration.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FAILED: SAO integration flaw detected! (Flaw D-09) ***`. Confirmed `sao_stats.v` completed in 1 cycle with 0 pixel reads and `syntax_sao.v` omitted from CABAC top. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION` -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+REMEDIATION +incdir+rtl/common +incdir+rtl/inloop_filters +incdir+rtl/entropy rtl/common/parameter_pkg.vh rtl/inloop_filters/sao_stats.v rtl/inloop_filters/sao_edge_offset.v rtl/inloop_filters/sao_band_offset.v rtl/entropy/syntax_sao.v tb/tb_flaw_sao/tb_flaw_sao_integration.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL TESTS PASSED: SAO integration verified ***`. Status: **PASS (100%)**.
 
 ### 2.8 [D-04] tb_flaw_intra_rmd (Intra / RMD)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/intra rtl/common/parameter_pkg.vh rtl/common/hadamard_satd_4x4.v rtl/intra/intra_rmd.v tb/tb_flaw_intra_rmd/tb_flaw_intra_rmd.sv` (`+define+NO_REMEDIATION`) -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/intra tb/flaw_baseline_rtl/parameter_pkg.vh rtl/common/hadamard_satd_4x4.v tb/flaw_baseline_rtl/intra_rmd.v tb/tb_flaw_intra_rmd/tb_flaw_intra_rmd.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-04 CONFIRMED: SUB-OPTIMAL MODE SELECTION VIA PLAIN SAD ***`. Selected Ver mode with SATD cost 756 over optimal DC mode with SATD cost 729. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION` (exercises real `rtl/intra/intra_rmd.v` + `rtl/common/hadamard_satd_4x4.v` across `4x4..32x32` Luma and Chroma Table 8-2) -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+REMEDIATION +incdir+rtl/common +incdir+rtl/intra rtl/common/parameter_pkg.vh rtl/common/hadamard_satd_4x4.v rtl/intra/intra_rmd.v tb/tb_flaw_intra_rmd/tb_flaw_intra_rmd.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL TESTS PASSED ***`. Status: **PASS (100%)**.
 
 ### 2.9 [D-08] tb_flaw_planar_overflow (Intra / Planar)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/intra rtl/common/parameter_pkg.vh tb/tb_flaw_planar_overflow/tb_flaw_planar_overflow.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/intra tb/flaw_baseline_rtl/parameter_pkg.vh tb/tb_flaw_planar_overflow/tb_flaw_planar_overflow.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FAILED: 2 Accumulator Overflow Errors Detected ***`. 16-bit wrap-around modulo 65,536 produced black pixel on peak white input. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION_PATCH` -> Clean
-- **Simulate Remediated:** Emitted `*** ALL TESTS PASSED ***`. Status: **PASS (100%)**.
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+REMEDIATION_PATCH +incdir+rtl/common +incdir+rtl/intra rtl/common/parameter_pkg.vh rtl/common/hadamard_satd_4x4.v rtl/intra/intra_rmd.v rtl/intra/intra_planar.v tb/tb_flaw_planar_overflow/tb_flaw_planar_overflow.sv` -> Clean
+- **Simulate Remediated:** Verified live `intra_rmd.planar_sum*` (`18-bit`), `intra_planar.psum_s2` (`17-bit`), `2x1024` 32x32 Planar pixels (`peak=1023` + gradient), and 32x32 `intra_rmd` peak-white `best_cost == 0`; emitted `*** ALL TESTS PASSED ***`. Status: **PASS (100%)**.
 
 ### 2.10 [D-03] tb_flaw_syntax_coeff_cg (Entropy / Coeff)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/entropy rtl/common/parameter_pkg.vh rtl/entropy/syntax_coeff.v tb/tb_flaw_syntax_coeff_cg/tb_flaw_syntax_coeff_cg.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/entropy tb/flaw_baseline_rtl/parameter_pkg.vh tb/flaw_baseline_rtl/syntax_coeff.v tb/tb_flaw_syntax_coeff_cg/tb_flaw_syntax_coeff_cg.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-03 CONFIRMED: 8x8 TU CG 3 COORDINATE BIT-TRUNCATION ALIASING PROVEN ***`. CG 3 $(x=1, y=1)$ aliased onto CG 0 $(x=0, y=0)$. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION` -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/entropy rtl/common/parameter_pkg.vh rtl/entropy/syntax_coeff.v tb/tb_flaw_syntax_coeff_cg/tb_flaw_syntax_coeff_cg.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL 9 TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
 
 ### 2.11 [D-11] tb_flaw_cabac_init (Entropy / CABAC)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/entropy rtl/common/parameter_pkg.vh rtl/entropy/ctx_model_store.v tb/tb_flaw_cabac_init/tb_flaw_cabac_init.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/entropy tb/flaw_baseline_rtl/parameter_pkg.vh tb/flaw_baseline_rtl/ctx_model_store.v tb/tb_flaw_cabac_init/tb_flaw_cabac_init.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-11 CONFIRMED: SLICE TYPE MAPPING INVERSION PROVEN ***`. B-slice init values loaded when slice_type=0 was driven for I-slice. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+TEST_CONFORMANCE` -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+TEST_CONFORMANCE +incdir+rtl/common +incdir+rtl/entropy rtl/common/parameter_pkg.vh rtl/entropy/ctx_model_store.v tb/tb_flaw_cabac_init/tb_flaw_cabac_init.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL 186 CONTEXT MODELS PASSED TABLE 9-39 BIT-ACCURATELY ***`. Status: **PASS (100%)**.
 
 ### 2.12 [D-10] tb_flaw_range_coder (Entropy / RangeCoder)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/entropy rtl/common/parameter_pkg.vh rtl/entropy/range_coder.v tb/tb_flaw_range_coder/tb_flaw_range_coder.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/entropy tb/flaw_baseline_rtl/parameter_pkg.vh tb/flaw_baseline_rtl/range_coder.v tb/tb_flaw_range_coder/tb_flaw_range_coder.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-10 CONFIRMED: RANGE CODER CARRY & RENORM VULNERABILITY ***`. Status: **PROVEN (FAIL)**.
-- **Compile Remediated:** `+define+REMEDIATION` -> Clean
+- **Compile Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/entropy rtl/common/parameter_pkg.vh rtl/entropy/range_coder.v tb/tb_flaw_range_coder/tb_flaw_range_coder.sv` -> Clean
 - **Simulate Remediated:** Emitted `*** ALL RANGE CODER TESTS PASSED ***`. Tested multi-byte 0xFF carry ripple, `encodeBinTrm(1)`, finish flush, and LPS burst stress. Status: **PASS (100%)**.
 
 ### 2.13 [D-05] tb_flaw_cu_split (Partitioning)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/partition rtl/common/parameter_pkg.vh rtl/common/hevc_interfaces.vh rtl/partition/ctu_partitioner.v rtl/partition/mode_decision.v tb/tb_flaw_cu_split/tb_flaw_cu_split.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/partition tb/flaw_baseline_rtl/parameter_pkg.vh rtl/common/hevc_interfaces.vh tb/flaw_baseline_rtl/lambda_calc.v rtl/partition/rate_estimator.v rtl/partition/ctu_partitioner.v rtl/partition/pu_cu_splitter.v tb/flaw_baseline_rtl/mode_decision.v tb/tb_flaw_cu_split/tb_flaw_cu_split.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-05 CONFIRMED: 64x64 CU SPLIT DEADLOCK PROVEN ***`. CTU partitioner popped root CU after 1 leaf CU, freezing CTU pipeline. Status: **PROVEN (FAIL)**.
-- **Simulate Remediated:** `+REMEDIATED` -> Emitted `*** ALL TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
+- **Compile & Simulate Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+REMEDIATION +incdir+rtl/common +incdir+rtl/partition rtl/common/parameter_pkg.vh rtl/common/hevc_interfaces.vh rtl/rate_control/lambda_calc.v rtl/partition/rate_estimator.v rtl/partition/ctu_partitioner.v rtl/partition/pu_cu_splitter.v rtl/partition/mode_decision.v tb/tb_flaw_cu_split/tb_flaw_cu_split.sv` + `+REMEDIATED` against live `mode_decision.v` (zero `force`, observed `depth0_split_observed == 1` & 4x `32x32` Z-scan leaves) -> Emitted `*** ALL TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
 
 ### 2.14 [D-12] tb_flaw_lambda_rc (Rate Control)
-- **Compile Buggy:** `vlog.exe -sv -work work +incdir+rtl/common +incdir+rtl/rate_control rtl/common/parameter_pkg.vh rtl/rate_control/lambda_calc.v rtl/rate_control/rate_controller.v tb/tb_flaw_lambda_rc/tb_flaw_lambda_rc.sv` -> Clean
+- **Compile Buggy (Phase 1 Lockbox):** `vlog.exe -sv -work work +define+NO_REMEDIATION +incdir+tb/flaw_baseline_rtl +incdir+rtl/common +incdir+rtl/rate_control tb/flaw_baseline_rtl/parameter_pkg.vh tb/flaw_baseline_rtl/lambda_calc.v tb/flaw_baseline_rtl/rate_controller.v tb/tb_flaw_lambda_rc/tb_flaw_lambda_rc.sv` -> Clean
 - **Simulate Buggy:** Emitted `*** FLAW D-12 CONFIRMED: LAMBDA SCALING & VBV OVERFLOW DEFECTS PROVEN ***`. Underestimation of $\lambda$ by 42.9x and 32-bit fullness overflow at 50 Mbps confirmed. Status: **PROVEN (FAIL)**.
-- **Simulate Remediated:** `+REMEDIATED` -> Emitted `*** ALL TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
+- **Compile & Simulate Remediated (Phase 2 Live `rtl/`):** `vlog.exe -sv -work work +define+REMEDIATION +incdir+rtl/common +incdir+rtl/rate_control rtl/common/parameter_pkg.vh rtl/rate_control/lambda_calc.v rtl/rate_control/rate_controller.v tb/tb_flaw_lambda_rc/tb_flaw_lambda_rc.sv` + `+REMEDIATED` asserting directly on live `u_lambda_calc.lambda_mode` (`52/52` QPs, `QP51=76504105`) and live `u_rate_controller` (`50 Mbps`, `vbv_fullness_pct=100%`, `frame_qp>29`) -> Emitted `*** ALL TESTS PASSED SPECIFICATION ***`. Status: **PASS (100%)**.
 
 ---
 
@@ -133,7 +133,7 @@
 | Cell / Logic Primitive | Baseline Used | v2.0 Used (`50 MHz`) | v3.0 Used (`150 MHz`) | **v4.0 Final Used (`180 MHz`)** | Available | Utilization % | Total Delta vs Baseline |
 |---|---:|---:|---:|---:|---:|---|---|
 | **CLB LUTs** | 448,916 | 226,544 | 237,476 | **243,266** | 522,720 | **46.54%** | **-205,650 LUTs (-45.81%)** |
-| *-- Logic LUTs* | 446,581 | 218,785 | 229,718 | **237,812** | 522,720 | **45.50%** | **-208,769 LUTs (-46.75%)** |
+| *-- Logic LUTs* | 441,925 | 218,785 | 229,718 | **237,812** | 522,720 | **45.50%** | **-204,113 LUTs (-46.19%)** |
 | *-- LUT as Memory (LUTRAM + SRL)* | 6,991 | 7,759 | 7,758 | **5,454** | 161,280 | **3.38%** | 5,424 LUTRAM + 30 SRL |
 | **CLB Registers (Flip-Flops)** | 344,030 | 140,046 | 163,801 | **169,846** | 1,045,440 | **16.25%** | **-174,184 FFs (-50.63%)** |
 | **Register as Latch (`LDCE`)** | 0 | 0 | 0 | **0** | 1,045,440 | **0.00%** | 0 Unintended Latches |
@@ -212,7 +212,7 @@
 - **3-Frame Top-Level CABAC (`scripts/verify_3frames_bins.py`):** **28,581 / 28,581 (100.00%)** 6-field exact (`bin`, `type`, `range`, `pstate`, `valmps`, `ctx`) across POC 0 (`8,349`), POC 1 (`9,819`), and POC 2 (`10,413`).
 - **AXI4-Lite / AXI4 SoC Testbench ([`tb/tb_axi_top/tb_hevc_encoder_axi_top.sv`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_axi_top/tb_hevc_encoder_axi_top.sv) via [`tb/run_tb_axi.do`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/run_tb_axi.do)):** **9 / 9 test suites PASS** (`113 B` bitstream, `TLAST=1`, `irq` aligned with `STATUS.DONE=1`, CSR read/write, soft reset, frame encode, W1C interrupt clear, and VBV fullness telemetry).
 - **Gate G8 Dual-Tier UVM (`Vivado 2026.1 xsim` via `uvm/run_uvm_suite.py`):** `78.23 s`, **ALL GATES CONVERGED (`ERR=0 FAT=0 SVA=0`)**: Tier 1 (`5,940` bins, `1,266/1,266 B`, `cg_cabac=100%`), Tier 2A (`10/10` RAL), Tier 2B+C (**`256 B`**, `384/384` DRAM writes, `cg_soc_axi=100%`, HM 18.0 `exit=0`, `12,288 B`; plus `hevc_full_uvm_test +BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25` with `72/256` stalls, `0` errors), Gate G6 (`64/64` parity).
-- **Dual-State Algorithmic Flaw Testbenches (`scripts/run_all_flaw_tb.py`):** **14 / 14 PASS (100%)** against `rtl/` and **14 / 14 PROVEN (FAIL)** against locked [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) baselines (`28 / 28` runs in `19.0s`).
+- **Dual-State Algorithmic Flaw Testbenches (`scripts/run_all_flaw_tb.py`):** **14 / 14 PASS (100%)** compiled & asserted directly against live [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and **14 / 14 PROVEN (FAIL)** against locked [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) baselines (`28 / 28` runs in `41.7s`).
 - **IP-XACT Packaging Synchronization & Catalog Verification:** **64 / 64 `.v`/`.vh` RTL files** verified 100% SHA-256 identical (`0` mismatches) between [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src) (`65` total files incl. `hevc_encoder_top.xdc`), and `ipx::check_integrity status: 1` / Vivado IP Integrator verification passed (`synth/vivado_verify.log`).
 
 ---

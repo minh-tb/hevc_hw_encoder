@@ -67,7 +67,7 @@ RTL_HDRS = \
 	$(RTL_DIR)/common/parameter_pkg.vh \
 	$(RTL_DIR)/common/hevc_interfaces.vh
 
-# Exact 59 synthesizable RTL modules matching synth/synth_vivado.tcl (lines 43-103)
+# Exact 60 synthesizable RTL modules matching synth/synth_vivado.tcl
 RTL_SRCS = \
 	$(RTL_DIR)/common/axi_read_arbiter.v \
 	$(RTL_DIR)/common/hadamard_satd_4x4.v \

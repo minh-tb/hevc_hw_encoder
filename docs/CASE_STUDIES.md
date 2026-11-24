@@ -491,7 +491,7 @@ Following Design Decisions 1–2 and Mandatory Safeguards 1–4, all four hazard
 Following `v2.0` (`62,568 cycles/CTU`, `103.73 MHz` max clock under a `50 MHz` constraint, dual `REMEDIATION` preprocessor branches across 14 RTL files), three architectural limitations prevented higher real-time throughput and clean single-path production sign-off:
 1. **Preprocessor Branch Debt (`ifdef REMEDIATION`):** Production RTL carried legacy `!REMEDIATION` branches and `+define+REMEDIATION` flags across build scripts.
 2. **Sub-150 MHz Critical Paths:** Tightening [`synth/hevc_encoder_top.xdc`](file:///d:/UIT_Doc/hevc_hw_encoder/synth/hevc_encoder_top.xdc) to `6.667 ns` (`150 MHz`) exposed 37-level DSP/CARRY8 cascades in [`intra_rmd.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v) (`wB_v -> planar_sum_v`), combinational chains in [`db_filter_luma.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/db_filter_luma.v), and wide read/parse paths in [`syntax_coeff.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v).
-3. **CTU-Sequential Serialization & Inter Search Spikes:** Consecutive CTUs stalled waiting for in-loop filtering and serial CABAC drain (`Stall_CABAC = 6,763..12,119` cyc), while Frame 2 Inter search suffered `30,830`-cycle `T_MD` spikes from repeated AXI reference fetches.
+3. **CTU-Sequential Serialization & Inter Search Spikes:** Consecutive CTUs stalled waiting for in-loop filtering and serial CABAC drain (`Stall_CABAC = 4,296..12,119` cyc), while Frame 2 Inter search suffered `30,830`-cycle `T_MD` spikes from repeated AXI reference fetches.
 
 ### Multi-Phase Solution Implemented (Zero Behavioral Divergence, Bit-Exact Frozen)
 1. **Full Single-Path RTL Stripping & Flaw Lockbox:** Removed all `REMEDIATION`/`NO_REMEDIATION` directives from all **64** production files in [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src/), isolating historical buggy baselines exclusively inside [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) (`scripts/run_all_flaw_tb.py` `28/28` PASS).
@@ -529,7 +529,7 @@ Although `v3.0` (`3595c7b`) eliminated CABAC stalls (`Stall_CABAC = 0`) and clos
 |---|---:|---:|---:|---:|---|
 | **Avg CTU Period (cyc/CTU)** | 127,647 | 62,568 | 39,970 | **27,785** | **-30.5% vs `v3.0` / -78.2% vs Baseline** |
 | **3-Frame Total Sim Time** | — | 8,001,545 ns | 4,920,865 ns | **3,458,665 ns** | **-29.7% vs `v3.0` / -56.8% vs `v2.0`** |
-| **`Stall_CABAC` / `Stall_Inloop`** | — | `6,763–12,119 / —` | `0 / 3,799` | **`0 / 0` (all 12 CTUs)** | **100% FE/BE & In-Loop stall elimination** |
+| **`Stall_CABAC` / `Stall_Inloop`** | — | `4,296–12,119 / —` | `0 / 3,799` | **`0 / 0` (all 12 CTUs)** | **100% FE/BE & In-Loop stall elimination** |
 | **Avg `T_MD` / `T_TQ` / `T_DB`** | `— / — / 15,936` | `9,888 / — / 7,230` | `6,403 / 14,301 / 7,096` | **`6,403 / 11,220 / 6,951`** | `-21.5%` `T_TQ` vs `v3.0`, `T_CABAC = 35,094` |
 | **Vivado $F_{\max}$ / WNS** | 96.36 MHz (`@50M`) | 103.73 MHz (`@50M`) | 157.51 MHz (`+0.318 ns @150M`) | **188.50 MHz (`+0.250 ns @180M`)** | **`+19.7%` Fmax vs `v3.0` (`+95.6%` vs Base)** |
 | **LUTs / FFs / BRAM / DSP** | `448,916 / 344,030 / 12.5 / 920` | `226,544 / 140,046 / 41.5 / 63` | `237,476 / 163,801 / 60.0 / 63` | **`243,266 / 169,846 / 60.0 / 54`** | Within `46.54%` LUT, `2.74%` DSP, `0` latches |

@@ -62,6 +62,10 @@ module tb_flaw_dst7;
         .rst_n            (rst_n),
         .fwd_inv_n        (fwd_inv_n),
         .tu_size_log2     (tu_size_log2),
+`ifdef REMEDIATION
+        .is_dst7          (1'b1),
+        .fwd_in_done      (),
+`endif
         .in_valid         (in_valid),
         .in_ready         (in_ready),
         .in_data          (in_data),
@@ -273,12 +277,14 @@ module tb_flaw_dst7;
         while (!in_ready) @(posedge clk);
         #1;
 
-        // Apply dynamic remediation via hierarchical force if requested
+`ifndef REMEDIATION
+        // Buggy baseline snapshot lacks is_dst7 input port; legacy force path only
         if (is_remediated_mode) begin
             force uut.u_1d_core.is_dst7 = 1'b1;
         end else begin
             release uut.u_1d_core.is_dst7;
         end
+`endif
 
         fwd_inv_n    = 1'b1; // Forward 2D Transform
         tu_size_log2 = 3'd2; // 4x4 TU
