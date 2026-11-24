@@ -7,37 +7,37 @@
   "hw_results": [
     {
       "qp": 22,
-      "bytes": 5302,
-      "bitrate_kbps": 424.16,
+      "bytes": 5249,
+      "bitrate_kbps": 419.92,
       "psnr_y": 42.3266349769014,
-      "psnr_yuv": 42.7816584576473,
+      "psnr_yuv": 43.05238061089636,
       "bit_exact": true,
       "max_diff": 0
     },
     {
       "qp": 27,
-      "bytes": 3153,
-      "bitrate_kbps": 252.24,
+      "bytes": 3118,
+      "bitrate_kbps": 249.44,
       "psnr_y": 39.221938806953176,
-      "psnr_yuv": 39.94118868533601,
+      "psnr_yuv": 40.008616170993925,
       "bit_exact": true,
       "max_diff": 0
     },
     {
       "qp": 32,
-      "bytes": 2102,
-      "bitrate_kbps": 168.16,
+      "bytes": 2071,
+      "bitrate_kbps": 165.68,
       "psnr_y": 37.41441377255525,
-      "psnr_yuv": 37.855672026510696,
+      "psnr_yuv": 37.99825555149695,
       "bit_exact": true,
       "max_diff": 0
     },
     {
       "qp": 37,
-      "bytes": 1460,
-      "bitrate_kbps": 116.8,
+      "bytes": 1440,
+      "bitrate_kbps": 115.2,
       "psnr_y": 34.76904046306798,
-      "psnr_yuv": 35.27366084424102,
+      "psnr_yuv": 35.308814098149654,
       "bit_exact": true,
       "max_diff": 0
     }
@@ -73,7 +73,7 @@
     }
   ],
   "bd_metrics": {
-    "bd_rate_pct": 148.579,
-    "bd_psnr_db": -5.1084
+    "bd_rate_pct": 145.519,
+    "bd_psnr_db": -5.0248
   }
 }

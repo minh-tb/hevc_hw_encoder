@@ -8,7 +8,7 @@ This document provides an exact RTL-level reference for all Finite State Machine
 - [`pu_cu_splitter.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/partition/pu_cu_splitter.v) — Leaf-CU PU & TU quadtree dispatcher (`state[2:0]`, 32-deep 20-bit LIFO TU stack, 4:2:0 Chroma scheduling)
 - [`rate_estimator.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/partition/rate_estimator.v) — Combinational Q8.8 fixed-point syntax bit-cost estimator
 
-Global constants and bus definitions referenced below reside in [`parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh) and [`hevc_interfaces.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/hevc_interfaces.vh). By default, `parameter_pkg.vh` defines `` `REMEDIATION `` (unless `` `NO_REMEDIATION `` is defined).
+Global constants and bus definitions referenced below reside in [`parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh) and [`hevc_interfaces.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/hevc_interfaces.vh) (pure single-path Main10 RTL with `0` `REMEDIATION` directives).
 
 ---
 

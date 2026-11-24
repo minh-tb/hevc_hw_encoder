@@ -4,12 +4,13 @@
 
 The **Inter Prediction Subsystem** ([`rtl/inter/inter_pred_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/inter_pred_top.v)) computes temporal motion-compensated prediction blocks for $P$ and $B$ slices per **HEVC Section 8.5**.
 
-At the system level, inter prediction operates across five closely-coupled hardware modules:
+At the system level, inter prediction operates across six closely-coupled hardware modules:
 1. **[`mvp_predictor`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/mvp_predictor.v)** (Top-Level Engine): Evaluates spatial ($A_0, A_1, B_0, B_1, B_2$) and temporal collocated candidates to produce Advanced Motion Vector Prediction (AMVP) candidates (`mvp_x`, `mvp_y`) driving `inter_pred_top` and `mode_decision`.
-2. **[`ref_frame_buffer`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_frame_buffer.v)** (Inside `inter_pred_top`): Dual-port on-chip search window buffer fed via AXI4 DRAM burst reads.
-3. **[`tz_search`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/tz_search.v)** (Inside `inter_pred_top`): Integer Test Zone Search motion estimation engine.
-4. **[`fme_search`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/fme_search.v)** (Inside `inter_pred_top`): Fractional Motion Estimation engine (half-pel and quarter-pel refinement).
-5. **[`mc_unit`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/mc_unit.v)** (Inside `inter_pred_top`): Motion Compensation unit supporting Unidirectional ($L0, L1$) and Bidirectional ($BI$) prediction with 8-tap luma and 4-tap chroma sub-pel FIR filters.
+2. **[`ref_search_cache`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_search_cache.v)** (Inside `inter_pred_top`): `128x128` Luma on-chip search-window cache (`4 RAMB36 + 1 RAMB18`), eliminating repeated external AXI search stalls during `tz_search` / `fme_search`.
+3. **[`ref_frame_buffer`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_frame_buffer.v)** (Inside `inter_pred_top`): Dual-port on-chip search window buffer fed via AXI4 DRAM burst reads.
+4. **[`tz_search`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/tz_search.v)** (Inside `inter_pred_top`): Integer Test Zone Search motion estimation engine.
+5. **[`fme_search`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/fme_search.v)** (Inside `inter_pred_top`): Fractional Motion Estimation engine (half-pel and quarter-pel refinement).
+6. **[`mc_unit`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/mc_unit.v)** (Inside `inter_pred_top`) & **[`mc_window_fetch`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/mc_window_fetch.v)** (Top-Level TDP DPB Engine): Unidirectional ($L0, L1$) and Bidirectional ($BI$) prediction with 8-tap luma and 4-tap chroma sub-pel FIR filters (`subpel_interpolation_core.v`).
 
 ---
 

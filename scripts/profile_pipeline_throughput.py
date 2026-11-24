@@ -69,6 +69,8 @@ def parse_profiler_log(log_path="sim_profile.log"):
     sum_tq = 0
     sum_db = 0
     sum_cabac = 0
+    sum_stall_cabac = 0
+    sum_stall_inloop = 0
     sum_stall = 0
 
     for r in records:
@@ -80,6 +82,8 @@ def parse_profiler_log(log_path="sim_profile.log"):
         sum_tq += r["t_tq"]
         sum_db += r["t_db"]
         sum_cabac += r["t_cabac"]
+        sum_stall_cabac += r["stall_cabac"]
+        sum_stall_inloop += r["stall_inloop"]
         sum_stall += stalls
 
         print(f"   {r['frame']:2d}  |  {r['ctu']:2d} |   {r['total']:7d} |    {r['t_md']:7d} |    {r['t_tq']:7d} |    {r['t_db']:7d} |       {r['t_cabac']:7d} |     {r['stall_cabac']:7d} |      {r['stall_inloop']:7d} | {stall_pct:5.1f}%")
@@ -90,10 +94,12 @@ def parse_profiler_log(log_path="sim_profile.log"):
     avg_tq = sum_tq / n
     avg_db = sum_db / n
     avg_cabac = sum_cabac / n
+    avg_stall_cabac = sum_stall_cabac / n
+    avg_stall_inloop = sum_stall_inloop / n
     avg_stall_pct = (sum_stall * 100.0 / sum_total) if sum_total > 0 else 0.0
 
     print("-------+-----+-----------+------------+------------+------------+---------------+-------------+--------------+--------")
-    print(f"  AVG  |  -- |   {avg_total:7.0f} |    {avg_md:7.0f} |    {avg_tq:7.0f} |    {avg_db:7.0f} |       {avg_cabac:7.0f} |          -- |           -- | {avg_stall_pct:5.1f}%")
+    print(f"  AVG  |  -- |   {avg_total:7.0f} |    {avg_md:7.0f} |    {avg_tq:7.0f} |    {avg_db:7.0f} |       {avg_cabac:7.0f} |     {avg_stall_cabac:7.0f} |      {avg_stall_inloop:7.0f} | {avg_stall_pct:5.1f}%")
     print("====================================================================================================\n")
 
     # Bottleneck Analysis
@@ -104,9 +110,16 @@ def parse_profiler_log(log_path="sim_profile.log"):
         "CABAC Entropy (T_CABAC)": avg_cabac
     }
     bottleneck_stage = max(stages.items(), key=lambda x: x[1])
+    t_stage_max = max(avg_md, avg_tq, avg_db, avg_cabac, 1.0)
+    t_ctu_period = max(avg_total, 1.0)
+    is_overlapped = (avg_total < t_stage_max)
 
     print("--- 1. Pipeline Bottleneck & Gating Verification ---")
-    print(f"  Critical Stage Bottleneck: {bottleneck_stage[0]} with {bottleneck_stage[1]:.0f} cycles/CTU average.")
+    if is_overlapped:
+        print(f"  Overlapped Mode (2-Bank CTU Ping-Pong + Split CABAC FE/BE): Avg CTU Period = {avg_total:.0f} cycles/CTU (true steady-state initiation interval).")
+        print(f"  2-Stage Lifetime Note: {bottleneck_stage[0]} = {bottleneck_stage[1]:.0f} cycles/CTU spans overlapped FE->BE lifetime across consecutive CTUs (not the initiation-interval bottleneck).")
+    else:
+        print(f"  Critical Stage Bottleneck: {bottleneck_stage[0]} with {bottleneck_stage[1]:.0f} cycles/CTU average.")
     print(f"  Deblock Filter Verification: Observed average T_DB = {avg_db:.0f} cycles.")
     if avg_db == 0:
         print("  --> [INFO] Loop filters bypassed via DISABLE_LOOP_FILTERS (T_DB = 0 cycles).")
@@ -114,12 +127,11 @@ def parse_profiler_log(log_path="sim_profile.log"):
         print(f"  --> [PASS] Deblocking filter cycle gating verified intact ({avg_db:.0f} cycles/CTU <= 12,500 target)!")
     else:
         print(f"  --> [FAIL] Deblocking filter cycle gating exceeded target ({avg_db:.0f} cycles/CTU > 12,500)!")
+    print(f"  Stall Breakdown: Stall_CABAC avg = {avg_stall_cabac:.0f} cyc, Stall_Inloop avg = {avg_stall_inloop:.0f} cyc.")
     print(f"  Pipeline Stall Bubbles: Average stall = {avg_stall_pct:.2f}% of total processing time.")
 
     # Real-Time Throughput Projections
     print("\n--- 2. Real-Time Video Throughput Projections ---")
-    print("  Formula: Max FPS = F_target / (N_CTU_per_frame * max(T_stage))")
-    print("  Assuming pipelined stage throughput determined by bottleneck stage.\n")
 
     resolutions = [
         ("128x128 (Test Clip)", 4),
@@ -128,20 +140,34 @@ def parse_profiler_log(log_path="sim_profile.log"):
         ("1080p FHD (1920x1080)", 510)
     ]
 
-    t_crit = max(avg_md, avg_tq, avg_db, avg_cabac, 1.0)
-    t_seq = max(avg_total, 1.0)
-
-    for f_mhz in [150.0, 200.0]:
-        f_hz = f_mhz * 1e6
-        print(f"  [Clock Frequency: {f_mhz:.0f} MHz]")
-        print("  ---------------------------------------------------------------------------------------")
-        print("   Resolution              | N_CTU | Pipelined Max FPS (Bottleneck) | Sequential Max FPS  ")
-        print("  -------------------------+-------+--------------------------------+---------------------")
-        for res_name, n_ctu in resolutions:
-            fps_pipelined = f_hz / (n_ctu * t_crit)
-            fps_seq = f_hz / (n_ctu * t_seq)
-            print(f"   {res_name:<24} |  {n_ctu:4d} |           {fps_pipelined:6.1f} fps           |      {fps_seq:6.1f} fps")
-        print("  ---------------------------------------------------------------------------------------\n")
+    if is_overlapped:
+        print("  Formula: Max FPS = F_target / (N_CTU_per_frame * Avg_CTU_Period)")
+        print(f"  Using steady-state CTU initiation interval Avg CTU Period = {avg_total:.0f} cycles (T_CABAC = {avg_cabac:.0f} cycles is 2-stage FE->BE lifetime).\n")
+        for f_mhz, f_label in [(150.0, "150 MHz Constraint"), (157.51, "157.51 MHz Achieved Fmax"), (200.0, "200 MHz Reference")]:
+            f_hz = f_mhz * 1e6
+            print(f"  [Clock Frequency: {f_label}]")
+            print("  -----------------------------------------------------------------------------------------------")
+            print("   Resolution              | N_CTU | Steady-State Max FPS (Avg CTU Period) | 2-Stage Latency Ref (T_CABAC)")
+            print("  -------------------------+-------+---------------------------------------+------------------------------")
+            for res_name, n_ctu in resolutions:
+                fps_steady = f_hz / (n_ctu * t_ctu_period)
+                fps_lat_ref = f_hz / (n_ctu * t_stage_max)
+                print(f"   {res_name:<24} |  {n_ctu:4d} |              {fps_steady:6.1f} fps               |         {fps_lat_ref:6.1f} fps")
+            print("  -----------------------------------------------------------------------------------------------\n")
+    else:
+        print("  Formula: Max FPS = F_target / (N_CTU_per_frame * max(T_stage))")
+        print("  Assuming pipelined stage throughput determined by bottleneck stage.\n")
+        for f_mhz in [150.0, 200.0]:
+            f_hz = f_mhz * 1e6
+            print(f"  [Clock Frequency: {f_mhz:.0f} MHz]")
+            print("  ---------------------------------------------------------------------------------------")
+            print("   Resolution              | N_CTU | Pipelined Max FPS (Bottleneck) | Sequential Max FPS  ")
+            print("  -------------------------+-------+--------------------------------+---------------------")
+            for res_name, n_ctu in resolutions:
+                fps_pipelined = f_hz / (n_ctu * t_stage_max)
+                fps_seq = f_hz / (n_ctu * t_ctu_period)
+                print(f"   {res_name:<24} |  {n_ctu:4d} |           {fps_pipelined:6.1f} fps           |      {fps_seq:6.1f} fps")
+            print("  ---------------------------------------------------------------------------------------\n")
 
 if __name__ == "__main__":
     log_file = sys.argv[1] if len(sys.argv) > 1 else "sim_profile.log"

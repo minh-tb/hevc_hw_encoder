@@ -4,53 +4,56 @@ An RTL implementation of a high-throughput, pipelined **HEVC (ITU-T H.265 / ISO/
 
 ---
 
-## Conformance & Performance Scorecard
+## Conformance & Performance Scorecard (`v3.0-final-signoff`)
 
-- **Bit-Exact Conformance:** **100.00% sample-by-sample match (`max_diff == 0`)** across all 3 frames ($Y, Cb, Cr$: `73,728 / 73,728` post-filter `hw_recon.yuv` vs. `dec_gate.yuv` and `73,728 / 73,728` pre-filter `hw_recon_pre.yuv` vs. `rec_before_filter.yuv`) against the Fraunhofer **HM 18.0** reference decoder on `Foreman 128x128` 10-bit (pre-optimization 4-QP sweep $QP \in \{22, 27, 32, 37\}$ archived from `2026-11-14` in `qp_sweep_results.json`).
-- **4-Pillar Latency & Throughput Optimization:** Achieved **62,568 cycles/CTU** 3-frame average (**-51.0%** vs `127,647` baseline, `-179` cyc/CTU vs `62,747`, `< 71,348` target) and **`T_DB = 7,230` cycles/CTU** (**-54.6%** vs `15,936` baseline, `<= 12,500` target) with **`Stall = 9.95%`** and **`Stall_Inloop = 0`** across all 12 CTUs (`T_MD = 9,888`, `T_TQ = 14,172`, `T_CABAC = 40,142`) via TDP 2-sample/cycle DPB reads (**0 extra BRAM tiles**) + `mc_window_fetch` 0D/1D fast fetch/row-start reuse/bypass + `rd_hold`, `mode_decision` depth-0 bypass & `FAST_EARLY_CU_SPLIT=0` default, per-CU `tu_cg_nonzero_mask` zero-CG skip, `deblock_top` `bs_comb` 1-cycle skip/pipelined load/unmodified write-skip, `sao_top.v` BO bypass, `ref_frame_buffer.v`/`inter_pred_top.v` 4×4 Luma bypass, and `u_inter_pred.mc_start` tie-off (`800154` total cycles). *(Pre-remediation isolated `FAST_EARLY_CU_SPLIT=1` also verified 100% bit-exact: `63,959` avg, `3,023 B`, `27,028` bins, `PSNR-YUV = 40.109 dB`.)*
-- **Entropy Coding Conformance:** Standard-compliant CABAC bitstream output verified symbol-by-symbol (**28,962 / 28,962 bins, 100.00% bit-exact** across POC 0: 8,496, POC 1: 10,022, POC 2: 10,444 with Pillar 3 `tu_cg_nonzero_mask` zero-CG skipping, full-CTU 32-band `BO` / last-CTU `EO` SAO RDO, and Rate Control enabled) against the normative HM decoder without a single syntax desynchronization.
-- **Physical Synthesis Convergence & Timing Closure:** Fully synthesized in **AMD Vivado 2026.1 Enterprise** on **Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`** (`hevc_encoder_axi_top`, `-verilog_define {SYNTHESIS=1 REMEDIATION=1}`) with complete timing closure (**WNS = +10.360 ns, Fmax = 103.73 MHz @ 50 MHz target**, 0 failing endpoints out of **389,569**, **0 `Synth 8-614` warnings**, **0 `LUTAR-1` warnings**, and **0 unintended latches**).
-- **PPA Optimization:** Area optimized to **226,544 LUTs (43.34%)** (-222,372 LUTs / -49.54% vs. initial baseline), **140,046 FFs (13.40%)** (-203,984 FFs / -59.29% vs. initial baseline), **33 RAMB36 + 17 RAMB18 Blocks (41.5 BRAM Tiles, 4.22% — 0 extra BRAMs from TDP DPB conversion)**, and **63 DSPs (3.20%)** (-857 DSPs / -93.15% vs. initial baseline), with total on-chip power at **2.199 W** (**1.085 W** Dynamic, **1.115 W** Static).
-- **Regression, Dual-Tier UVM & IP Parity Suite:** **100% Convergence** across all **14 / 14** dual-state algorithmic flaw testbenches (`28 / 28` runs in `19.9s`, `scripts/run_all_flaw_tb.py`), **26** self-checking unit & SoC testbenches PASS (`10` re-verified after `2026-11-19` remediation incl. `tb_hevc_encoder_axi_top` **9 / 9** `119 B` `TLAST=1`, `tb_nal_writer` backpressure/EPB `10 B`, `tb_slice_controller`, `tb_gop_controller`, `tb_intra_pred_top` `616,224` samples, `tb_ref_frame_buffer`, `tb_boundary_strength` `1,010` vectors, `tb_transform_rigorous` `240/240`, `tb_b_prediction`, `tb_mc_window_fetch` `6,272` samples + `16` prior unmodified suites), **Gate G8 Dual-Tier UVM on Vivado 2026.1 `xsim`** (`uvm/run_uvm_suite.py`: Tier 1 `1,266/1,266 B`, Tier 2A `10/10` RAL, Tier 2B+C **`270 B`** default + **`269 B`** forced cycle-0 header stall `+BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25`, both **`PSNR_Y = 47.79 dB`** matching QuestaSim), **Full 3-Frame Gate 1 (`run_sim.do`) == Gate 2 (`tb/run_sim_synthdef.do`) Conformance (`str_b_frame.bin` `3,175 B` SHA-256 `B6544062BB2ED515C4FA48C77439D026694DE895F4CB4DDE1934EB23E16F1B99`, `hw_recon.yuv` & `hw_recon_pre.yuv` 147,456 B bit-identical, `max_diff = 0` across all 73,728 samples)** via `scripts/regression_gate.py`, and **63 / 63** SHA-256 synchronized IP-XACT source files (`ip_repo/hevc_encoder_v1_0/src/`).
+- **Bit-Exact Conformance:** **100.00% sample-by-sample match (`max_diff == 0`)** across all 3 frames ($Y, Cb, Cr$: `73,728 / 73,728` post-filter `hw_recon.yuv` vs. `dec_gate.yuv` and `73,728 / 73,728` pre-filter `hw_recon_pre.yuv` vs. `rec_before_filter.yuv`) against the Fraunhofer **HM 18.0** reference decoder on `Foreman 128x128` 10-bit (and **100.00% `max_diff == 0` across all 4 QPs** $QP \in \{22, 27, 32, 37\}$ in refreshed [`qp_sweep_results.json`](file:///d:/UIT_Doc/hevc_hw_encoder/qp_sweep_results.json)).
+- **`v3.0` Throughput & Timing Optimization (Phase A + Phase B1 + Phase B2):** Achieved **`39,970 cycles/CTU` steady-state CTU initiation interval** (**-36.1%** vs `v2.0` `62,568`, **-68.7%** vs initial `127,647` baseline; total 3-frame simulation `4,920,865 ns` / `492,086.5` cycles), **`T_MD = 6,403`**, **`T_TQ = 14,301`**, **`T_DB = 7,096`** (`<= 12,500` target), **`T_CABAC = 44,805`** (2-stage overlapped FE->BE lifetime), **`Stall_CABAC = 0`** across all 12 CTUs, and **`9.50%` average stall**. Projected steady-state throughput reaches **`938.2 / 156.4 / 17.1 / 7.4 fps`** (`128x128 / CIF / 720p / 1080p`) at **`150 MHz`**, and **`985.2 / 164.2 / 17.9 / 7.7 fps`** at achieved **`157.51 MHz` $F_{\max}$**, enabled by:
+  - **Phase A Timing Closure & Stage Pipelining:** Pipelined `intra_rmd.v` (`wB_v -> planar_sum_v`), 2-stage pipelined `db_filter_luma.v` + `decoder_inloop_filters.v` output skid buffer, 17-cycle pipelined `S_LOAD_CG` in `syntax_coeff.v`, and 2-bank `coeff_buffer.v` ping-pong (`v2.1-phase-a-150mhz`).
+  - **Phase B1 `128x128` Luma Search Cache ([`ref_search_cache.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_search_cache.v)):** Eliminates external AXI reference-burst stalls inside `inter_pred_top.v` / `tz_search.v` (`T_MD` spike `30,830 -> 6,403` avg).
+  - **Phase B2 2-Bank CTU Ping-Pong & Split CABAC FE/BE:** Dual-bank CTU pixel/in-loop/CABAC (`ctu_bin_ram_0/1`) ping-pong, 4-entry `cu_fifo` + 4-entry `tu_meta_fifo`, 4-bank `coeff_buffer.v` (`DEPTH=4096`), and decoupled `cabac_state` (FE) / `cabac_be_state` (BE) FSMs in [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v).
+- **Entropy Coding Conformance:** Standard-compliant CABAC bitstream output verified symbol-by-symbol (**28,581 / 28,581 bins, 100.00% bit-exact** across POC 0: 8,349, POC 1: 9,819, POC 2: 10,413; `str_b_frame.bin` `3,134 B` with Pillar 3 `tu_cg_nonzero_mask` zero-CG skipping, full-CTU 32-band `BO` / last-CTU `EO` SAO RDO, and Rate Control enabled) against HM 18.0 without a single syntax desynchronization.
+- **Physical Synthesis Convergence & `150 MHz` Timing Closure:** Fully synthesized in **AMD Vivado 2026.1 Enterprise** on **Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`** (`hevc_encoder_axi_top`, `-verilog_define {SYNTHESIS=1}`, `6.667 ns` / `150 MHz` constraint) with **complete timing closure (`WNS = +0.318 ns`, $F_{\max} = 157.51\text{ MHz}$, `TNS = 0.000 ns` across `451,909` total / `391,411` intra-clock endpoints, `WPWS = +2.791 ns` across `171,712` endpoints, 0 `Synth 8-614`, 0 `LUTAR-1`, 0 unintended latches)**.
+- **PPA Summary:** Synthesizes to **237,476 LUTs (45.43%)** (-47.10% vs initial `448,916` baseline), **163,801 FFs (15.67%)** (-52.39% vs baseline), **49 RAMB36 + 22 RAMB18 Blocks (60.0 BRAM Tiles, 6.10%)**, and **63 DSPs (3.20%)** (-93.15% vs baseline), with total on-chip power at **4.158 W** (**3.026 W** Dynamic, **1.132 W** Static @ `28.4 °C`).
+- **Pure Single-Path Production RTL, Regression, Dual-Tier UVM & IP Parity:** **0 `REMEDIATION` directives** across all **64 production files (`60` `.v` + `4` `.vh`)** in [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src/) (**64 / 64** SHA-256 identical + `hevc_encoder_top.xdc` = `65` packaged files), **0 behavioral `` `ifdef SYNTHESIS `` blocks**, **14 / 14** dual-state algorithmic flaw testbenches (`28 / 28` runs in `scripts/run_all_flaw_tb.py`, using locked baselines in [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl)), **9 / 9** AXI4-Lite/AXI4 SoC tests (`113 B`, `TLAST=1`, `irq=1`), **Gate G8 Dual-Tier UVM (`Vivado 2026.1 xsim` in `75.80 s`, `PASS`)** (`Tier 1`: `1,266/1,266 B`, `cg_cabac=100%`; `Tier 2A`: `10/10` RAL; `Tier 2B+C`: **`256 B`**, `384/384` DRAM writes, `cg_soc_axi=100%`, HM 18.0 `exit=0`), and **Gate 1 (`run_sim.do`) == Gate 2 (`tb/run_sim_synthdef.do`) Conformance (`str_b_frame.bin` `3,134 B` SHA-256 `FF2D0A83990DC94160627A8E061C8EC54F9EB07BECA3AC93F5C036ADD3DF820B`, `hw_recon.yuv` `147,456 B` SHA-256 `AE739FE1EDA914849D180F309A0B55B00AEC85B04619B49270DFBFAC0ADB049E`, `hw_recon_pre.yuv` `24F92B0B464255389E3D23DD6E87508798A4CCE8F3074E9088D482936192BA78`, `max_diff = 0` across all 73,728 samples)**.
 
 ---
 
 ## AMD Zynq UltraScale+ Synthesis Metrics (`xczu19eg-ffvb1517-2-e`)
 
-Out-of-context synthesis executed with `SYNTHESIS=1 REMEDIATION=1` on top-level `hevc_encoder_axi_top`:
+Out-of-context synthesis executed with `SYNTHESIS=1` under a `6.667 ns` (`150 MHz`) clock constraint on top-level `hevc_encoder_axi_top` ([`synth/vivado_output/`](file:///d:/UIT_Doc/hevc_hw_encoder/synth/vivado_output)):
 
-| Resource Type | Initial Baseline | Phase 2 Optimized | Sign-Off Final | Available | Final Utilization % | Net Reduction vs. Baseline |
+| Resource Type | Initial Baseline | v2.0 Sign-Off (`50 MHz`) | v3.0 Final (`150 MHz`) | Available | Final Utilization % | Net Reduction vs. Baseline |
 |---|---:|---:|---:|---:|---|---|
-| **CLB LUTs** | 448,916 | 225,933 | **226,544** | 522,720 | **43.34%** | **-222,372 LUTs (-49.54%)** |
-| *-- Logic LUTs* | 441,925 | 218,942 | **218,785** | 522,720 | **41.86%** | **-223,140 LUTs (-50.49%)** |
-| *-- Memory LUTs (LUTRAM + SRL)* | 6,991 | 6,991 | **7,759** | 161,280 | **4.81%** | 7,728 LUTRAM + 31 SRL |
-| **CLB Registers (FF)** | 344,030 | 249,980 | **140,046** | 1,045,440 | **13.40%** | **-203,984 FFs (-59.29%)** |
+| **CLB LUTs** | 448,916 | 226,544 | **237,476** | 522,720 | **45.43%** | **-211,440 LUTs (-47.10%)** |
+| *-- Logic LUTs* | 441,925 | 218,785 | **229,718** | 522,720 | **43.95%** | **-212,207 LUTs (-48.02%)** |
+| *-- Memory LUTs (LUTRAM + SRL)* | 6,991 | 7,759 | **7,758** | 161,280 | **4.81%** | 7,728 LUTRAM + 30 SRL |
+| **CLB Registers (FF)** | 344,030 | 140,046 | **163,801** | 1,045,440 | **15.67%** | **-180,229 FFs (-52.39%)** |
 | **Register as Latch (`LDCE`)** | 0 | 0 | **0** | 1,045,440 | **0.00%** | 0 unintended latches |
-| **Unique Control Sets** | 14,641 | 10,733 | **7,679** | 130,680 | **5.88%** | **-6,962 sets (-47.55%)** |
-| **Block RAM** | 12.5 Tiles | 30.0 Tiles | **33 RAMB36 + 17 RAMB18** | 984 Tiles | **4.22%** | **41.5 Tiles (+0 extra from TDP)** |
-| *-- RAMB36/FIFO* | 11 | 27 | **33** | 984 | **3.35%** | +22 `RAMB36E2` |
-| *-- RAMB18* | 3 | 6 | **17** | 1968 | **0.86%** | +14 `RAMB18E2` |
-| **DSP48E2 Slices** | 920 | 209 | **63** | 1,968 | **3.20%** | **-857 DSPs (-93.15%)** |
-| **Estimated $F_{\max}$** | 96.36 MHz | 105.33 MHz | **103.73 MHz** | 50.00 MHz | **2.07× margin** | **WNS: +10.360 ns (MET)**, TNS: 0.000 ns (0 / 389,569 failing), WPWS: 9.458 ns |
-| **Total On-Chip Power** | 2.910 W | 1.943 W | **2.199 W** | — | — | **Dynamic: 1.085 W**, Device Static: 1.115 W |
-| **Methodology `LUTAR-1` & `8-614`** | 1 Advisory | 1 Advisory | **0 Warnings** | — | **0 Latches** | Synchronous `core_rst_n_reg` & clean `address_generator` sensitivity |
+| **Unique Control Sets** | 14,641 | 7,679 | **9,158** | 130,680 | **7.01%** | **-5,483 sets (-37.45%)** |
+| **Block RAM** | 12.5 Tiles | 41.5 Tiles | **49 RAMB36 + 22 RAMB18** | 984 Tiles | **6.10%** | **60.0 Tiles** (incl. CTU ping-pong, `ref_search_cache`, `ctu_bin_ram_0/1`) |
+| *-- RAMB36/FIFO* | 11 | 33 | **49** | 984 | **4.98%** | +38 `RAMB36E2` |
+| *-- RAMB18* | 3 | 17 | **22** | 1,968 | **1.12%** | +19 `RAMB18E2` |
+| **DSP48E2 Slices** | 920 | 63 | **63** | 1,968 | **3.20%** | **-857 DSPs (-93.15%)** |
+| **Estimated $F_{\max}$** | 96.36 MHz | 103.73 MHz | **157.51 MHz** | 150.00 MHz | **MET (+0.318 ns)** | **TNS: 0.000 ns** (0 / 451,909 failing), WPWS: +2.791 ns |
+| **Total On-Chip Power** | 2.910 W | 2.199 W | **4.158 W** | — | — | **Dynamic: 3.026 W**, Device Static: 1.132 W (`28.4 °C`) |
+| **Methodology `LUTAR-1` & `8-614`** | 1 Advisory | 0 Warnings | **0 Warnings** | — | **0 Latches** | Synchronous `core_rst_n_reg` & clean `address_generator` sensitivity |
 
 ---
 
 ## Rate-Distortion & Multi-QP Conformance
 
-Evaluated on **Foreman 128x128 10-bit** (post-optimization 3-frame sign-off run: POC 0 I-Slice QP 29 `39.02 dB Y / 39.34 dB YUV / 0.9628 SSIM-Y`, POC 1 P-Slice QP 26 `39.34 dB Y / 40.15 dB YUV / 0.9627 SSIM-Y`, POC 2 B-Slice QP 26 `39.44 dB Y / 40.21 dB YUV / 0.9616 SSIM-Y`; 3-frame average `PSNR-Y = 39.268 dB`, `PSNR-U = 41.637 dB`, `PSNR-V = 41.952 dB`, `PSNR-YUV = 39.900 dB`) and archived pre-optimization 4-QP sweep (`2026-11-14`, $QP \in \{22, 27, 32, 37\}$, [qp_sweep_results.json](file:///d:/UIT_Doc/hevc_hw_encoder/qp_sweep_results.json)) vs. Fraunhofer HM 18.0 software anchor:
+Evaluated on **Foreman 128x128 10-bit** (`v3.0` default 3-frame sign-off run: POC 0 I-Slice QP 29 `39.024 dB Y / 39.549 dB YUV`, POC 1 P-Slice QP 26 `39.343 dB Y / 40.168 dB YUV`, POC 2 B-Slice QP 26 `39.438 dB Y / 40.227 dB YUV`; 3-frame average `PSNR-Y = 39.268 dB`, `PSNR-U = 41.866 dB`, `PSNR-V = 42.373 dB`, **`PSNR-YUV = 39.981 dB`**) and refreshed **4-QP sweep** ($QP \in \{22, 27, 32, 37\}$, [qp_sweep_results.json](file:///d:/UIT_Doc/hevc_hw_encoder/qp_sweep_results.json)) on the finalized `v3.0` RTL vs. Fraunhofer HM 18.0 software anchor:
 
 | Operating Point | HM 18.0 Rate (kbps) | HM 18.0 PSNR-Y (dB) | HW Encoder Rate (kbps) | HW Encoder PSNR-Y (dB) | $\Delta$ PSNR (dB) | Sample Exactness | Max Diff | Conformance |
 |---|---|---|---|---|---|---|---|---|
-| **QP = 22** | 186.56 | 42.83 | **424.16** | **42.33** | -0.50 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
-| **QP = 27** | 103.84 | 39.65 | **252.24** | **39.22** | -0.43 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
-| **QP = 32** | 64.00 | 36.58 | **168.16** | **37.41** | +0.83 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
-| **QP = 37** | 38.40 | 33.62 | **116.80** | **34.77** | +1.15 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
+| **QP = 22** | 186.56 | 42.83 | **419.92** | **42.33** | -0.50 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
+| **QP = 27** | 103.84 | 39.65 | **249.44** | **39.22** | -0.43 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
+| **QP = 32** | 64.00 | 36.58 | **165.68** | **37.41** | +0.83 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
+| **QP = 37** | 38.40 | 33.62 | **115.20** | **34.77** | +1.15 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
 
-- **Bjøntegaard Delta Rate (BD-Rate):** **+148.58%** (`+148.579%`, archived `2026-11-14` pre-4-Pillar sweep in `qp_sweep_results.json`; reflects single-pass fixed-hardware RDO trade-off against floating-point multi-pass software search).
-- **Bjøntegaard Delta PSNR (BD-PSNR):** **-5.11 dB** (`-5.1084 dB`, archived `2026-11-14` baseline; average quality delta across equivalent bitrates against reference software anchor).
-- **Bit-Exact Conformance:** **100.00% across all 4 QPs** (`max_diff == 0` on all 73,728 samples in archived `2026-11-14` sweep; default post-optimization Foreman I/P/B regression re-verified 100.00% `max_diff == 0` across all 73,728 samples).
+- **Bjøntegaard Delta Rate (BD-Rate):** **+145.52%** (`+145.519%`, refreshed `v3.0` sweep in `qp_sweep_results.json`; reflects single-pass fixed-hardware RDO trade-off against floating-point multi-pass software search).
+- **Bjøntegaard Delta PSNR (BD-PSNR):** **-5.02 dB** (`-5.0248 dB`; average quality delta across equivalent bitrates against reference software anchor).
+- **Bit-Exact Conformance:** **100.00% across all 4 QPs** (`max_diff == 0` on all 73,728 samples per QP; `5,249 B / 3,118 B / 2,071 B / 1,440 B`).
 - Rate-distortion curves are visualized in [rd_curve.svg](file:///d:/UIT_Doc/hevc_hw_encoder/rd_curve.svg) (source metrics in [qp_sweep_results.json](file:///d:/UIT_Doc/hevc_hw_encoder/qp_sweep_results.json)).
 
 ---
@@ -62,9 +65,9 @@ Evaluated on **Foreman 128x128 10-bit** (post-optimization 3-frame sign-off run:
   - **Rough Mode Decision (`rtl/intra/intra_rmd.v` + `rtl/common/hadamard_satd_4x4.v`):** Evaluates **4 Luma modes** (`Planar = 0`, `DC = 1`, `Hor = 10`, `Ver = 26`) via **4x4-tiled Hadamard SATD** (split-stage `signed [12:0]`/`signed [14:0]` butterflies, `wr_bank`/`rd_bank` ping-pong double-buffered 16-sample residual banks, and Stage-1 `row_t` start-edge latch) across full `4x4`, `8x8`, `16x16`, and `32x32` CU/PU sizes, plus normative **5-candidate Chroma Intra RDO** (`Planar`, `Ver = 26`, `Hor = 10`, `DC`, `DM_CHROMA`) per ITU-T H.265 Table 8-2 and sequential 1-pixel/cycle reference loading (`T3-14`) with $4\times4$ Chroma MDCS scan (`Clause 7.4.9.11`).
   - **Final Intra Prediction Reconstruction (`rtl/intra/intra_pred_top.v`, `rtl/intra/intra_angular.v`):** Supports all 35 Luma prediction modes (Planar, DC, and 33 Angular directions) for residual generation, with the `hevc_encoder_top.v` Chroma `above-right` reference fetch bit-5 truncation fix (`abs_top_x_raw` / `rmd_abs_top_x_c_raw`).
 - **Inter Prediction (`rtl/inter/`):**
-  - **Integer Motion Estimation (IME):** Hardware-optimized Test Zone Search (TZ-Search) algorithm with diamond and raster search patterns.
+  - **Integer Motion Estimation (IME) & Search Cache (`ref_search_cache.v`):** Hardware-optimized Test Zone Search (TZ-Search) backed by a **`128x128` on-chip Luma search-window cache (`4 RAMB36 + 1 RAMB18`)**, cutting Frame 2 inter CTU `T_MD` spikes (`30,830 -> 6,403` avg).
   - **Fractional Motion Estimation (FME):** Half-pel and quarter-pel interpolation filters (8-tap luma, 4-tap chroma).
-  - **Motion Compensation & TDP DPB (`mc_window_fetch.v`, `subpel_interpolation_core.v`):** True Dual-Port (TDP) 2-sample/cycle DPB reads (Port-A muxed between pipelined writeback `dpb_wr_*_d1` and `mc_window_fetch` + Read-Only Port-B, **0 extra BRAM tiles**) with `rd_hold` collision stall, `0D/1D` fast fetch, drain-to-emit write-through bypass, and vertical `row0_win` reuse.
+  - **Motion Compensation & TDP DPB (`mc_window_fetch.v`, `subpel_interpolation_core.v`):** True Dual-Port (TDP) 2-sample/cycle DPB reads (Port-A muxed between pipelined writeback `dpb_wr_*_d1` and `mc_window_fetch` + Read-Only Port-B) with `rd_hold` collision stall, `0D/1D` fast fetch, drain-to-emit write-through bypass, and vertical `row0_win` reuse.
   - Pipelined reference sample buffering and motion vector predictor (MVP) merge evaluation (`FAST_EARLY_CU_SPLIT = 0` default in `mode_decision.v` with depth-0 64×64 bit-exact bypass).
 
 ### 2. Transform & Quantization Engine
@@ -78,21 +81,21 @@ Evaluated on **Foreman 128x128 10-bit** (post-optimization 3-frame sign-off run:
 
 ### 3. Reconstruction & In-Loop Filters
 - **Deblocking Filter (`rtl/inloop_filters/`):**
-  - Boundary strength (`boundary_strength.v` `bs_comb`/`qp_avg_comb`) and 1-cycle `Bs == 0` fast-skip in `deblock_top.v` with grid-stepped traversal (`+2`/`+4`), pipelined 1-sample/cycle `S_PIX_LOAD` (`db_pix_rd_ready`), and unmodified write-back skip (`T_DB = 7,230` cycles/CTU, `-54.6%`).
-  - Normal and strong filtering paths with threshold adaptivity.
+  - Boundary strength (`boundary_strength.v` `bs_comb`/`qp_avg_comb`) and 1-cycle `Bs == 0` fast-skip in `deblock_top.v` with grid-stepped traversal (`+2`/`+4`), pipelined 1-sample/cycle `S_PIX_LOAD` (`db_pix_rd_ready`), 2-stage pipelined `db_filter_luma.v` (`150 MHz` timing closure), and unmodified write-back skip (`T_DB = 7,096` cycles/CTU).
+  - Dual-bank CTU Ping-Pong in [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v) + output skid buffer overlapping filtering across consecutive CTUs.
 - **Sample Adaptive Offset (SAO):**
   - Band Offset (BO) and Edge Offset (EO) classification datapaths (`0°, 90°, 135°, 45°`) with 2-phase single-port BRAM neighbor read (`S_REQ_PIX -> S_REQ_N1 -> S_WAIT_PIX`), internal `64x10b` line caching and `EO_45` right-border `n0_rd_valid` handling in [`sao_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v), latched neighbor BO offset forwarding in [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), and full-CTU sequential `Y -> Cb -> Cr` 32-band BO RDO (causality border-skip `x>=60||y>=60` Y / `x>=28||y>=30` C when non-last, symmetric `[-15, +15]` clamp matching `syntax_sao.v` `cMax=31`, and `ctu_qp` Q8 lambda LUT) plus last-CTU (`is_last_col && is_last_row`) EO 4-class RDO in [`sao_stats.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v) (`T3-13`).
 
 ### 4. CABAC Arithmetic Entropy Encoder & Synthesis Hygiene
-- **CTU-Delayed Bitstream Serialization (`rtl/entropy/cabac_enc_top.v`):**
-  - Synchronous Block RAM bin queue (`ctu_bin_ram`, `8192 x 10-bit`, `2 RAMB36E2 + 1 RAMB18E2`) with 1-cycle lookahead `drain_prefetched_valid` BRAM serializer buffers `coding_quadtree()` syntax bins during CTU reconstruction so `sao(rx, ry)` is normatively emitted first after `sao_stats` finishes (`Clause 7.3.8.2`).
+- **Split FE/BE CABAC & 2-Bank CTU-Delayed Bitstream Serialization (`rtl/entropy/cabac_enc_top.v`):**
+  - Dual-bank synchronous Block RAM bin queue (`ctu_bin_ram_0` & `ctu_bin_ram_1`, `2x 8192 x 10-bit`, `4 RAMB36E2 + 2 RAMB18E2`), **4-bank `coeff_buffer.v` (`DEPTH=4096`)**, and **4-entry `cu_fifo` / `tu_meta_fifo`** decouple front-end `cabac_state` from back-end `cabac_be_state` (`Stall_CABAC = 0` across all 12 CTUs), while preserving normative `sao(rx, ry)`-first ordering (`Clause 7.3.8.2`).
 - **Binary Arithmetic Range Coder (`rtl/entropy/range_coder.v`):**
   - Fully pipelined renormalization engine emitting standard-compliant byte streams with 16-bit carry-propagation protection.
 - **Context Modeling (`rtl/entropy/ctx_model_store.v`):**
   - **186** CABAC context models (`0..185`) initialized in **186 cycles** per slice type (I/P/B).
 - **Syntax Generators (`rtl/entropy/syntax_*.v`):**
-  - Hardware binarization for CU modes, split flags, transform tree, SAO offsets (`cMax=31`), and quantized residual coefficients (`syntax_coeff.v`) with per-CU `tu_cg_nonzero_mask` zero-CG skipping (`cur_cg == 0` inferred `coded_sub_block_flag = 1`, `tu_cg_mask_en` gated).
-- **Simulation-vs-Synthesis Parity:** `0` behavioral `` `ifdef SYNTHESIS `` blocks remain in `rtl/` (`3` 4-state `===` X-safety `` `ifdef SYNTHESIS `` guards in `rtl/entropy/syntax_coeff.v`, `rtl/inter/mc_window_fetch.v`, and `rtl/inter/ref_frame_buffer.v`, `11` `` `ifndef SYNTHESIS `` init/clear blocks across 8 RTL files, and `72` `synthesis translate_off` directives for deterministic simulation startup/logging). Gate 1 (`run_sim.do`) and Gate 2 (`tb/run_sim_synthdef.do`, `+define+SYNTHESIS`) on [`tb/tb_full_encoder/tb_b_frame_encoder.v`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_full_encoder/tb_b_frame_encoder.v) finish at `8,001,545 ns` (`800154` cycles) and produce bit-identical `str_b_frame.bin` (`3,175 B`, SHA-256 `B6544062BB2ED515C4FA48C77439D026694DE895F4CB4DDE1934EB23E16F1B99`) and `hw_recon.yuv` (`147,456 B`, SHA-256 `FDAB258067650458E281E0DF5F2C0DE33FA19D57B8B56FAE2E014CAF409E683F`) at **62,568 cycles/CTU** average latency.
+  - Hardware binarization for CU modes, split flags, transform tree, SAO offsets (`cMax=31`), and quantized residual coefficients (`syntax_coeff.v`) with per-CU `tu_cg_nonzero_mask` zero-CG skipping and 17-cycle pipelined `S_LOAD_CG` (`150 MHz` timing closure).
+- **Single-Path Production RTL & Simulation-vs-Synthesis Parity:** `0` `REMEDIATION` directives in `rtl/` and `ip_repo/hevc_encoder_v1_0/src/` (buggy regression baselines isolated in [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl)) and `0` behavioral `` `ifdef SYNTHESIS `` blocks (`3` 4-state `===` X-safety guards). Gate 1 (`run_sim.do`) and Gate 2 (`tb/run_sim_synthdef.do`, `+define+SYNTHESIS`) on [`tb/tb_full_encoder/tb_b_frame_encoder.v`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_full_encoder/tb_b_frame_encoder.v) finish at `4,920,865 ns` (`492,086.5` cycles) and produce bit-identical `str_b_frame.bin` (`3,134 B`, SHA-256 `FF2D0A83990DC94160627A8E061C8EC54F9EB07BECA3AC93F5C036ADD3DF820B`) and `hw_recon.yuv` (`147,456 B`, SHA-256 `AE739FE1EDA914849D180F309A0B55B00AEC85B04619B49270DFBFAC0ADB049E`) at **`39,970 cycles/CTU` steady-state CTU period** (`938.2 / 156.4 / 17.1 / 7.4 fps` @ `150 MHz`, `985.2 / 164.2 / 17.9 / 7.7 fps` @ `157.51 MHz`).
 
 ---
 

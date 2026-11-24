@@ -2,22 +2,21 @@
 
 ## Executive Summary
 
-An exhaustive normative conformance audit comparing Verilog/SystemVerilog source code in `rtl/` directly against the official ITU-T H.265 (V11, 01/2026) specification PDF and Fraunhofer HM 18.0 reference software, followed by a **4-Pillar Cycles-per-CTU Optimization & TDP BRAM Zero-Replication** program and **Full-Chip Audit Remediation** (stall-safe `nal_writer`/`slice_controller` handshake, `u_inter_pred.mc_start` tie-off, `hevc_encoder_axi_top` edge-detected IRQ counters, and `address_generator` sensitivity parity), cut 3-frame average CTU latency by **51.0%** (`127,647 -> 62,568` cycles/CTU) and deblocking filter latency by **54.6%** (`15,936 -> 7,230` cycles/CTU) while preserving **100.00% bit-exact sample and CABAC bin conformance** and achieving **47.79 dB `PSNR_Y`** closed-loop UVM parity on Vivado `xsim`.
-All behavioral/synthesis divergences in inter motion compensation were permanently eliminated via [`rtl/inter/mc_window_fetch.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/mc_window_fetch.v) (`0` behavioral `` `ifdef SYNTHESIS `` branches remain; the `3` remaining `` `ifdef SYNTHESIS `` directives in `rtl/entropy/syntax_coeff.v`, `rtl/inter/mc_window_fetch.v`, and `rtl/inter/ref_frame_buffer.v` are strictly 4-state `===` X-safety guards with `11` simulation-only `` `ifndef SYNTHESIS `` init/reset blocks across 8 RTL files and `72` `synthesis translate_off` logging/assertion lines).
+An exhaustive normative conformance audit comparing Verilog/SystemVerilog source code in `rtl/` directly against the official ITU-T H.265 (V11, 01/2026) specification PDF and Fraunhofer HM 18.0 reference software — followed by the `v2.0` **4-Pillar Optimization**, **`v2.1` Phase A `150 MHz` Timing Closure & Single-Path RTL Stripping**, **`v3.0` Phase B1 `128x128` Search Cache (`ref_search_cache.v`)**, and **`v3.0` Phase B2 2-Bank CTU Ping-Pong + Split CABAC FE/BE** — reduced steady-state CTU period by **68.7%** (`127,647 -> 62,568 -> 39,970 cycles/CTU`), closed **`150 MHz` (`6.667 ns`)** timing in Vivado (`WNS = +0.318 ns`, $F_{\max} = 157.51\text{ MHz}$), eliminated all `REMEDIATION` preprocessor branches from production RTL (`0` in `rtl/` and `ip_repo/hevc_encoder_v1_0/src/`), and preserved **100.00% bit-exact sample (`max_diff = 0`) and CABAC bin conformance** against HM 18.0.
+All behavioral/synthesis divergences in inter motion compensation remain permanently eliminated via [`rtl/inter/mc_window_fetch.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/mc_window_fetch.v) (`0` behavioral `` `ifdef SYNTHESIS `` branches; only `3` 4-state `===` X-safety `` `ifdef SYNTHESIS `` guards remain in `rtl/entropy/syntax_coeff.v`, `rtl/inter/mc_window_fetch.v`, and `rtl/inter/ref_frame_buffer.v`).
 
 ---
 
-## 1. Summary of Architectural Changes & 4-Pillar Latency Optimization
+## 1. Summary of `v2.0 -> v3.0` Architectural Optimizations
 
-| Category | Canonical Maintained / Implemented (KEEP) | Removed / Consolidated |
+| Phase / Pillar | Canonical Implemented Architecture | Latency / Timing Impact |
 |---|---|---|
-| **Pillar 1: Inter MC & TDP DPB (`mc_window_fetch.v`, `hevc_encoder_top.v`)** | True Dual-Port (TDP) 2-sample/cycle DPB reads (Port-A muxed between pipelined in-loop writeback `dpb_wr_*_d1` and `mc_window_fetch` even-column reads + Read-Only Port-B odd-column reads, yielding **0 extra BRAM tiles**) + `rd_hold` collision stall on Port-A writes + `0D/1D` fast fetch + drain-to-emit write-through bypass + vertical row-start window reuse (`row0_win`). | Replaced single-port DPB stall bottleneck; deleted `rtl/inter/streaming_subpel_filter.v` & obsolete `tb_streaming_subpel_filter.sv`; `0` behavioral `` `ifdef SYNTHESIS `` blocks remain. |
-| **Pillar 2: Mode Decision (`mode_decision.v`, `hevc_encoder_top.v`)** | Depth-0 (`64x64`) bit-exact bypass + parameterized `FAST_EARLY_CU_SPLIT` (`0` default for 100% bit-exact sign-off & `D-05` `tb_flaw_cu_split`; `= 1` relaxes `eff_split_threshold` by `1.5×` at depths 1–2). | Eliminates dead evaluation cycles on non-encodable depth-0 64×64 root CUs. |
-| **Pillar 3: Entropy Zero-CG Skip (`syntax_coeff.v`, `cabac_enc_top.v`, `hevc_encoder_top.v`)** | Three per-CU CG non-zero masks (`tu_cg_nonzero_mask_y[63:0]`, `_cb[15:0]`, `_cr[15:0]`) indexed by `quant_out_scan_idx[9:4]` and gated by `tu_cg_mask_en` (defaulting to all-1s when `tu_cg_mask_en !== 1'b1` for standalone `D-03` TB). Enforces Clause 7.3.8.11 inferred `coded_sub_block_flag = 1` on `cur_cg == 0` while skipping 32-cycle SRAM reads on all-zero CGs. | Eliminates wasted coeff-buffer SRAM reads across zero sub-blocks without altering encoded CABAC bins. |
-| **Pillar 4: In-Loop Deblock & SAO/Inter Prefetch (`deblock_top.v`, `boundary_strength.v`, `decoder_inloop_filters.v`, `sao_top.v`, `ref_frame_buffer.v`, `inter_pred_top.v`)** | Combinational `bs_comb` / `qp_avg_comb` 1-cycle `Bs == 0` skip, grid-stepped edge traversal (`+2` Luma / `+4` Chroma), pipelined 1-sample/cycle `S_PIX_LOAD` (`db_pix_rd_ready`), skipping unmodified `p`/`q` write-backs (`!luma_skip_write`, `chroma_skip_write`) preserving `D-07`, plus `sao_top.v` BO bypass & `ref_frame_buffer.v`/`inter_pred_top.v` 4×4 Luma bypass (`ref_req_is_4x4_safe`). | Cuts `T_DB` from `15,936` to `7,230` cycles/CTU (`-54.6%`, well below `12,500` target) with `Stall_Inloop = 0`. |
-| **Unit Verification** | [`tb/tb_mc_window_fetch/tb_mc_window_fetch.sv`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_mc_window_fetch/tb_mc_window_fetch.sv) (6,272 samples across TU 4/8/16/32, Y/Cb/Cr, 0D/1D-H/1D-V/2D, boundary MVs, and `rd_hold` Port-A write collision stress + `1'bx` guard). | Deleted obsolete `tb_streaming_subpel_filter.sv`. |
-| **IP Packaging** | `ip_repo/hevc_encoder_v1_0/src/` synchronized 1-to-1 with `rtl/` (**63 / 63** RTL `.v`/`.vh` source/header files at 100% SHA-256 parity + `hevc_encoder_top.xdc` = 64 files). | Removed `streaming_subpel_filter.v` from `synth/synth_vivado.tcl`, `synth/package_ip.tcl`, and `component.xml`. |
-| **Normative Documentation** | `docs/H265_CONFORMANCE_MATRIX.md` (clause-by-clause, equation-by-equation mapping across In-loop, Transform/Pred, and CABAC syntax). | Page-calibrated extraction via `scripts/extract_h265_clauses.py` (spec page offset +17). |
+| **Single-Path RTL Cleanup & Lockbox** | Stripped all `REMEDIATION`/`NO_REMEDIATION` `` `ifdef `` branches from all **64** production files (`60` `.v` + `4` `.vh`) in `rtl/` & `ip_repo/hevc_encoder_v1_0/src/`. Historical buggy baselines live exclusively in [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl). | Pure single-path Main10 RTL; `28/28` flaw suite (`14/14` FAIL vs `14/14` PASS) intact. |
+| **Phase A Timing Closure & Stage Pipelining (`v2.1`)** | Pipelined `intra_rmd.v` (`wB_v -> planar_sum_v`), 2-stage pipelined `db_filter_luma.v` + output skid buffer in `decoder_inloop_filters.v`, 17-cycle pipelined `S_LOAD_CG` in `syntax_coeff.v`, and 2-bank `coeff_buffer.v` ping-pong (`v2.1-phase-a-150mhz`). | Closed **`150 MHz` (`6.667 ns`)** Vivado timing (`WNS >= 0`, 0 failing endpoints). |
+| **Phase B1 `128x128` Luma Search Cache ([`ref_search_cache.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_search_cache.v))** | On-chip `128x128` Luma search-window cache (`4 RAMB36 + 1 RAMB18`) integrated into `inter_pred_top.v` / `tz_search.v`. | Eliminated Frame 2 `T_MD` spike (`30,830 -> 8,442`, `T_MD` avg `6,403` cyc/CTU). |
+| **Phase B2 2-Bank CTU Ping-Pong & Split CABAC FE/BE** | Dual-bank CTU pixel/in-loop/CABAC (`ctu_bin_ram_0/1`) ping-pong, **4-entry `cu_fifo` & `tu_meta_fifo`**, **4-bank `coeff_buffer.v` (`DEPTH=4096`)**, and decoupled `cabac_state` (FE) / `cabac_be_state` (BE) FSMs in `hevc_encoder_top.v`. | **`39,970 cycles/CTU`** steady-state period (`-36.1%` vs `62,568`), **`Stall_CABAC = 0`**, `938.2/156.4/17.1/7.4 fps` @ `150 MHz`, `985.2/164.2/17.9/7.7 fps` @ `157.51 MHz`. |
+| **Core Pillars (`v2.0` Foundation)** | TDP 2-sample/cycle DPB reads (`mc_window_fetch.v`), Depth-0 `64x64` bypass (`FAST_EARLY_CU_SPLIT = 0`), Pillar 3 per-CU `tu_cg_nonzero_mask` zero-CG skip, and Pillar 4 `deblock_top` `bs_comb` 1-cycle skip + write-skip. | `T_DB = 7,096` cycles/CTU (`<= 12,500` target), total 3-frame sim cut `800154 -> 492086` cycles (`-38.5%`). |
+| **IP Packaging & Compliance** | `ip_repo/hevc_encoder_v1_0/src/` synchronized 1-to-1 with `rtl/` (**64 / 64** RTL `.v`/`.vh` files SHA-256 identical + `hevc_encoder_top.xdc` = `65` files); normative mapping in `docs/H265_CONFORMANCE_MATRIX.md`. | `0` SHA-256 mismatches; `ipx::check_integrity status: 1`. |
 
 ---
 
@@ -32,30 +31,30 @@ All behavioral/synthesis divergences in inter motion compensation were permanent
 
 ### Gate G1: Behavioral Parity (`run_sim.do`)
 - **Command:** `python scripts/regression_gate.py --enable-loop-filters --num-frames 3`
-- **Result:** **100.00% BIT-EXACT MATCH across all 73,728 samples in Frames 0, 1, and 2** against HM 18.0 reference decoder (`Global Max Sample Difference = 0`) for both **post-filter** (`hw_recon.yuv` vs `dec_gate.yuv`) and **pre-filter** (`hw_recon_pre.yuv` vs `rec_before_filter.yuv`, `6CFC954D3A337CBF4D5C810DF83B5C71A372A6FFF4FD1CA724B55AA2EC115A38`):
-  - Frame 0 (I-Slice, QP 29): Y exact 100.00% (max=0), Cb exact 100.00% (max=0), Cr exact 100.00% (max=0) | Quality vs original YUV: `39.02 dB Y / 39.34 dB YUV` (SSIM-Y `0.9628`).
-  - Frame 1 (P-Slice, QP 26): Y exact 100.00% (max=0), Cb exact 100.00% (max=0), Cr exact 100.00% (max=0) | Quality vs original YUV: `39.34 dB Y / 40.15 dB YUV` (SSIM-Y `0.9627`).
-  - Frame 2 (B-Slice, QP 26): Y exact 100.00% (max=0), Cb exact 100.00% (max=0), Cr exact 100.00% (max=0) | Quality vs original YUV: `39.44 dB Y / 40.21 dB YUV` (SSIM-Y `0.9616`).
-  - 3-frame average quality ([`scripts/calc_psnr_ssim.py`](file:///d:/UIT_Doc/hevc_hw_encoder/scripts/calc_psnr_ssim.py)): `39.268 dB Y / 41.637 dB U / 41.952 dB V / 39.900 dB YUV`.
-  - **Pre-Optimization Baseline 4-QP Sweep (`2026-11-14`, [`qp_sweep_results.json`](file:///d:/UIT_Doc/hevc_hw_encoder/qp_sweep_results.json), `QP ∈ {22, 27, 32, 37}`):** Archived from pre-optimization HEAD (`73,728 / 73,728 max_diff = 0` at every QP; `BD-Rate +148.58%`, `BD-PSNR -5.11 dB` vs HM 18.0; not re-run post-4-Pillar optimization).
+- **Result:** **100.00% BIT-EXACT MATCH across all 73,728 samples in Frames 0, 1, and 2** against HM 18.0 reference decoder (`Global Max Sample Difference = 0`) for both **post-filter** (`hw_recon.yuv` vs `dec_gate.yuv`) and **pre-filter** (`hw_recon_pre.yuv` vs `rec_before_filter.yuv`, `24F92B0B464255389E3D23DD6E87508798A4CCE8F3074E9088D482936192BA78`):
+  - Frame 0 (I-Slice, QP 29): Y exact 100.00% (max=0), Cb exact 100.00% (max=0), Cr exact 100.00% (max=0) | Quality vs original YUV: `39.024 dB Y / 39.549 dB YUV`.
+  - Frame 1 (P-Slice, QP 26): Y exact 100.00% (max=0), Cb exact 100.00% (max=0), Cr exact 100.00% (max=0) | Quality vs original YUV: `39.343 dB Y / 40.168 dB YUV`.
+  - Frame 2 (B-Slice, QP 26): Y exact 100.00% (max=0), Cb exact 100.00% (max=0), Cr exact 100.00% (max=0) | Quality vs original YUV: `39.438 dB Y / 40.227 dB YUV`.
+  - 3-frame average quality ([`scripts/calc_psnr_ssim.py`](file:///d:/UIT_Doc/hevc_hw_encoder/scripts/calc_psnr_ssim.py)): **`39.268 dB Y / 41.866 dB U / 42.373 dB V / 39.981 dB YUV`**.
+  - **Refreshed `v3.0` 4-QP Sweep ([`qp_sweep_results.json`](file:///d:/UIT_Doc/hevc_hw_encoder/qp_sweep_results.json), `QP ∈ {22, 27, 32, 37}`):** Re-executed via `python scripts/run_qp_sweep_and_bd_rate.py --force` (`73,728 / 73,728 max_diff = 0` at every QP: `5,249 B / 3,118 B / 2,071 B / 1,440 B`; **`BD-Rate +145.52%`, `BD-PSNR -5.02 dB`** vs HM 18.0).
 - **Pipeline Throughput Profile ([`scripts/profile_pipeline_throughput.py`](file:///d:/UIT_Doc/hevc_hw_encoder/scripts/profile_pipeline_throughput.py)):**
-  - **3-Frame Average Latency (`FAST_EARLY_CU_SPLIT = 0`, Post-Remediation):** **`62,568` cycles/CTU** (`-51.0%` vs `127,647` baseline, `< 71,348` target) | **`T_MD = 9,888`**, **`T_TQ = 14,172`**, **`T_DB = 7,230`** (`-54.6%` vs `15,936` baseline, `<= 12,500` target), **`T_CABAC = 40,142`**, **`Stall = 9.95%` (`10.0%`)**, **`Stall_Inloop = 0`** across all 12 CTUs.
-  - **Pre-Remediation Isolated `-gFAST_EARLY_CU_SPLIT=1` Check (`1.5× eff_split_threshold` at depths 1–2):** **`63,959` cycles/CTU** (`T_MD = 7,230` `-27.6%`, `T_TQ = 13,455` `-5.1%`, `T_DB = 5,530` `-23.5%`, `T_CABAC = 45,112` `+11.9%`), `3,023 B`, `27,028 / 27,028` 6-field exact CABAC bins, `73,728 / 73,728` samples `max_diff = 0`, `PSNR-Y = 39.262 dB`, `PSNR-YUV = 40.109 dB`.
+  - **3-Frame Steady-State CTU Initiation Interval (`v3.0`, Overlapped CTU Ping-Pong):** **`39,970` cycles/CTU** (`-36.1%` vs `v2.0` `62,568`, `-68.7%` vs `127,647` baseline) | **`T_MD = 6,403`**, **`T_TQ = 14,301`**, **`T_DB = 7,096`** (`<= 12,500` target), **`T_CABAC = 44,805`** (2-stage overlapped FE->BE lifetime), **`Stall_CABAC = 0`** across all 12 CTUs, **`Stall = 9.50%`** (`Stall_Inloop` avg `3,799`).
+  - **Projected Steady-State FPS:** **`938.2 / 156.4 / 17.1 / 7.4 fps`** (`128x128 / CIF / 720p / 1080p`) @ `150 MHz`, **`985.2 / 164.2 / 17.9 / 7.7 fps`** @ **`157.51 MHz` achieved Fmax**, and **`1,250.9 / 208.5 / 22.7 / 9.8 fps`** @ `200 MHz`.
 
 ### Gate G2: Synthesis-Define Parity (`tb/run_sim_synthdef.do`)
-- **Command:** `vsim -c -do tb/run_sim_synthdef.do` (compiled with `+define+SYNTHESIS+REMEDIATION+CFG_TOTAL_FRAMES=3`).
-- **Result:** Finished cleanly at `8,001,545 ns` (`800154` cycles total, `-2,144` cycles vs pre-remediation `8,022,985 ns`) with **identical** throughput profile (`AVG Total = 62,568`, `T_DB = 7,230`) and **100% SHA-256 IDENTICAL** binary outputs between G1 (behavioral) and G2 (`+define+SYNTHESIS`):
-  - `str_b_frame.bin` (`3,175 B`): `B6544062BB2ED515C4FA48C77439D026694DE895F4CB4DDE1934EB23E16F1B99`
-  - `hw_recon.yuv` (`147,456 B`): `FDAB258067650458E281E0DF5F2C0DE33FA19D57B8B56FAE2E014CAF409E683F`
+- **Command:** `vsim -c -do tb/run_sim_synthdef.do` (compiled with `+define+SYNTHESIS +define+CFG_TOTAL_FRAMES=3` — zero `+define+REMEDIATION`).
+- **Result:** Finished cleanly at `4,920,865 ns` (`492,086.5` cycles total, F0 `161,390`, F1 `160,280`, F2 `157,969` cycles) with **identical** throughput profile (`Avg CTU Period = 39,970`, `T_DB = 7,096`, `Stall_CABAC = 0`) and **100% SHA-256 IDENTICAL** binary outputs between G1 (behavioral) and G2 (`+define+SYNTHESIS`):
+  - `str_b_frame.bin` (`3,134 B`): `FF2D0A83990DC94160627A8E061C8EC54F9EB07BECA3AC93F5C036ADD3DF820B`
+  - `hw_recon.yuv` (`147,456 B`): `AE739FE1EDA914849D180F309A0B55B00AEC85B04619B49270DFBFAC0ADB049E`
 
 ### Gate G3: Bitstream Invariance & HM Decoder Conformance
 - **Command:** `HM\bin\mgwmake\gcc-mingw-14.2\x86_64\release\TAppDecoder.exe -b str_b_frame.bin -o dec_out.yuv -d 10`
 - **Result:** Clean decode of all 3 frames with exit code 0.
 - **CABAC Bin Conformance (`scripts/verify_3frames_bins.py`):**
-  - Total Bins (with Pillar 3 zero-CG skipping, CTU-delayed dynamic `BO`/`EO`/`OFF` SAO, and Rate Control enabled): **28,962 / 28,962 bins (100.00% BIT-EXACT)** across all 6 fields (`bin`, `type`, `range`, `pstate`, `valmps`, `ctx`) in both `transcript_3frames.log` and `transcript_synthdef.log`:
-    - POC 0: `8,496 / 8,496` bins (100.00%).
-    - POC 1: `10,022 / 10,022` bins (100.00%).
-    - POC 2: `10,444 / 10,444` bins (100.00%).
+  - Total Bins (with Pillar 3 zero-CG skipping, 17-cycle `S_LOAD_CG`, CTU-delayed dynamic `BO`/`EO`/`OFF` SAO, and Rate Control enabled): **28,581 / 28,581 bins (100.00% BIT-EXACT)** across all 6 fields (`bin`, `type`, `range`, `pstate`, `valmps`, `ctx`) in both `transcript_3frames.log` and `transcript_synthdef.log`:
+    - POC 0: `8,349 / 8,349` bins (100.00%).
+    - POC 1: `9,819 / 9,819` bins (100.00%).
+    - POC 2: `10,413 / 10,413` bins (100.00%).
 
 ### Gate G4: Flaw Testbench Regression Suite (`scripts/run_all_flaw_tb.py`)
 - **Command:** `python scripts/run_all_flaw_tb.py`
@@ -88,28 +87,28 @@ All behavioral/synthesis divergences in inter motion compensation were permanent
 
 ### Gate G6: IP Packaging Parity
 - **Command:** SHA-256 comparison between `rtl/` and `ip_repo/hevc_encoder_v1_0/src/`.
-- **Result:** `diff=0` across all **63 / 63** Verilog/SystemVerilog `.v`/`.sv` and header `.vh` files (`64` total files in `ip_repo/hevc_encoder_v1_0/src/` including `hevc_encoder_top.xdc`), and Vivado IP Integrator catalog verification emitted `[SUCCESS] HEVC Encoder IP Catalog & IP Integrator Verification PASSED!` (`synth/vivado_verify.log`).
+- **Result:** `diff=0` across all **64 / 64** RTL `.v` and `.vh` files (`60` `.v` + `4` `.vh`, `65` total files in `ip_repo/hevc_encoder_v1_0/src/` including `hevc_encoder_top.xdc`), and `ipx::check_integrity status: 1` / Vivado IP Integrator catalog verification passed (`synth/vivado_verify.log`).
 
-### Gate G7: AMD Vivado 2026.1 Synthesis & Timing Closure (`hevc_encoder_axi_top`)
+### Gate G7: AMD Vivado 2026.1 Synthesis & `150 MHz` Timing Closure (`hevc_encoder_axi_top`)
 - **Target Part:** AMD Zynq UltraScale+ `xczu19eg-ffvb1517-2-e`
-- **Target Clock:** 50.00 MHz ($T = 20.000\text{ ns}$)
-- **Setup Timing Slack (WNS):** **+10.360 ns (MET)** (`Data Path Delay = 9.422 ns`, `WPWS = 9.458 ns`, `0 / 147,907` failing pulse checks)
-- **Total Negative Slack (TNS):** **0.000 ns (0 failing endpoints out of 389,569 total / 344,074 intra-clock endpoints)**
-- **Estimated Maximum Frequency ($F_{\max}$):** **103.73 MHz**
-- **CLB LUTs:** **226,544 / 522,720 (43.34%)**
-  - Logic LUTs: **218,785 (41.86%)**
-  - Memory LUTs (LUTRAM + SRL): **7,759 (4.81%)** (`7,728` LUTRAM + `31` SRL)
-- **CLB Registers (FFs):** **140,046 / 1,045,440 (13.40%)**
+- **Target Clock:** **150.00 MHz** ($T = 6.667\text{ ns}$, `hevc_encoder_top.xdc`)
+- **Setup Timing Slack (WNS):** **+0.318 ns (MET)** (`Data Path Delay = 6.131 ns`, 27 logic levels, `WPWS = +2.791 ns`, `0 / 171,712` failing pulse checks)
+- **Total Negative Slack (TNS):** **0.000 ns (0 failing endpoints out of 451,909 total / 391,411 intra-clock endpoints)**
+- **Estimated Maximum Frequency ($F_{\max}$):** **157.51 MHz**
+- **CLB LUTs:** **237,476 / 522,720 (45.43%)**
+  - Logic LUTs: **229,718 (43.95%)**
+  - Memory LUTs (LUTRAM + SRL): **7,758 (4.81%)** (`7,728` LUTRAM + `30` SRL)
+- **CLB Registers (FFs):** **163,801 / 1,045,440 (15.67%)**
 - **Unintended Latches (`LDCE`) & Warnings:** **0 `LDCE` latches (0.00%)**, **0 `Synth 8-614` incomplete sensitivity warnings**, **0 `LUTAR-1` warnings**
-- **Block RAM (BRAM Tile):** **41.5 Tiles (4.22%)** (`0` extra BRAMs from DPB TDP conversion)
-  - RAMB36/FIFO: 33 / 984 (3.35%)
-  - RAMB18: 17 / 1,968 (0.86%)
+- **Block RAM (BRAM Tile):** **60.0 Tiles (6.10%)** (includes dual-bank CTU ping-pong, `ref_search_cache`, `ctu_bin_ram_0/1`)
+  - RAMB36/FIFO: 49 / 984 (4.98%)
+  - RAMB18: 22 / 1,968 (1.12%)
 - **DSP Slices:** **63 / 1,968 (3.20%)**
-- **Power Estimation:** **2.199 W Total** (`1.085 W` Dynamic, `1.115 W` Static, `26.8 °C` Junction Temp)
+- **Power Estimation:** **4.158 W Total** (`3.026 W` Dynamic, `1.132 W` Static, `28.4 °C` Junction Temp)
 
 ### Gate G8: Dual-Tier UVM & HM 18.0 Closed-Loop Verification (`Vivado 2026.1 xsim`)
-- **Suite Runner (`python uvm/run_uvm_suite.py --all --simulator xsim`):** `97.98s`, **ALL PASS (`ERR=0 FAT=0 SVA=0`)**:
-  - **Tier 1 (`cabac_uvm_test`):** `5,940` bins (`18` slices), **`1,266 / 1,266 B`** (`0` mismatches), `Max Buffered 0xFFs = 32`, `Carry Ripples = 2`, `409 / 1,675` stall cycles, **`cg_cabac = 100.00%`**.
-  - **Tier 2A (`hevc_ral_audit_test`):** `hw_reset = 10/10`, `bit_bash = 10/10`, `664R / 653W` AXI4-Lite, `Scoreboard Errors = 0`, `cg_soc_axi = 66.67%`.
-  - **Tier 2B+C (`hevc_full_uvm_test`, Default `+BS_FORCE_HDR_STALL=0 +BS_STALL_PROB=25`):** `4` intact NALs (`28, 34, 11, 197 B` -> **`270 B`**), `384/384` DRAM writes, `59/270` stall cycles, **`cg_soc_axi = 100.00%`**, HM 18.0 `exit=0` (`12,288 B` YUV), **`PSNR_Y = 47.79 dB`** (`U = 31.37 dB`, `V = 35.12 dB`) — matching QuestaSim!
-  - **Forced Cycle-0 Header Backpressure (`+BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25`):** `PASS` (`ERR=0 FAT=0 SVA=0`, `5.12s`), `4` intact NALs, **`269 B`**, `97/269` stall cycles, **`cg_soc_axi = 100.00%`**, HM 18.0 `exit=0`, **`PSNR_Y = 47.79 dB`** (`U = 31.37 dB`, `V = 35.12 dB`).
+- **Suite Runner (`python uvm/run_uvm_suite.py --all --simulator xsim`):** `75.80 s`, **ALL GATES CONVERGED (`ERR=0 FAT=0 SVA=0`)**:
+  - **Tier 1 (`cabac_uvm_test`):** `5,940` bins (`18` slices), **`1,266 / 1,266 B`** (`0` mismatches), `Max Buffered 0xFFs = 32`, `Carry Ripples = 2`, **`cg_cabac = 100.00%`**.
+  - **Tier 2A (`hevc_ral_audit_test`):** `hw_reset = 10/10`, `bit_bash = 10/10`, `Scoreboard Errors = 0`.
+  - **Tier 2B+C (`hevc_full_uvm_test`):** `4` intact NALs (**`256 B`**), `384/384` AXI4 DRAM writes, **`cg_soc_axi = 100.00%`**, HM 18.0 `exit=0` (`12,288 B` decoded YUV).
+  - **Gate G6 Check:** `64/64` RTL↔IP SHA-256 parity verified inside `run_uvm_suite.py`.

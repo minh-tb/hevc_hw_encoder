@@ -18,7 +18,7 @@ Within [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_en
 
 1. **Coarse Pre-Screening ([`intra_rmd.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v) + [`hadamard_satd_4x4.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/hadamard_satd_4x4.v))**:
    - Triggered per CU candidate by `eval_intra_start` from [`mode_decision.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/partition/mode_decision.v) (`L1057`, `L2041` in `hevc_encoder_top.v`).
-   - Evaluates **4 Luma Intra modes** (`Planar = 0`, `DC = 1`, `Horizontal = 10`, `Vertical = 26`) using **4x4-tiled 2D Hadamard SATD** (`REMEDIATION` active by default in [`parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh#L26-L30)) across all valid PU/TU widths (`4x4`, `8x8`, `16x16`, `32x32`; `pu_size_log2` `2..5`), utilizing ping-pong double-buffered 16-sample residual banks (`wr_bank` / `rd_bank`).
+   - Evaluates **4 Luma Intra modes** (`Planar = 0`, `DC = 1`, `Horizontal = 10`, `Vertical = 26`) using **4x4-tiled 2D Hadamard SATD** (`150 MHz` pipelined `wB_v -> planar_sum_v` stages) across all valid PU/TU widths (`4x4`, `8x8`, `16x16`, `32x32`; `pu_size_log2` `2..5`), utilizing ping-pong double-buffered 16-sample residual banks (`wr_bank` / `rd_bank`).
    - Simultaneously evaluates **5 Chroma Intra RDO candidates** per ITU-T H.265 Clause 8.4.3 Table 8-2 (`Planar = 0`, `Ver = 26`, `Hor = 10`, `DC = 1`, with any Luma-matching slot replaced by diagonal `34`, plus `DM_CHROMA = win_luma_mode`) via spatial L1 SAD on the 4:2:0 Cb/Cr planes (`N_C x N_C`, `2x2..16x16`).
    - Reports `rmd_done`, `best_mode[5:0]`, and `best_cost[31:0]` to `mode_decision.v`, and `best_chroma_pred_mode[2:0]` / `best_chroma_dir[5:0]` to `hevc_encoder_top.v` (`L605-L606`).
 

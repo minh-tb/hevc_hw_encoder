@@ -6,13 +6,13 @@
 
 ## 1. Executive Summary & Dual-Tier Methodology
 
-To elevate verification of the synthesizable **HEVC / H.265 Main10 Hardware Video Encoder** beyond directed Verilog regression (Gates **G0–G7**), **Gate G8** implements a **Dual-Tier UVM Verification Environment** verified across **both Siemens QuestaSim 2021.2_1 (`asiclab` Linux server, UVM-1.1d, `make regression` in `31 s` with merged UCDB coverage)** and **AMD Vivado 2026.1 Simulator (`xsim`, UVM 1.2)**, plus **Cadence Xcelium (`tool=Cadence`)** support — with **zero RTL edits** (verified continuously via Gate G6 `63/63` SHA-256 parity between `rtl/` and `ip_repo/hevc_encoder_v1_0/src/`):
+To elevate verification of the synthesizable **HEVC / H.265 Main10 Hardware Video Encoder** beyond directed Verilog regression (Gates **G0–G7**), **Gate G8** implements a **Dual-Tier UVM Verification Environment** verified across **both Siemens QuestaSim 2021.2_1 (`asiclab` Linux server, UVM-1.1d, `make regression` in `31 s` with merged UCDB coverage)** and **AMD Vivado 2026.1 Simulator (`xsim`, UVM 1.2, `v3.0` sign-off in `75.80 s`)**, plus **Cadence Xcelium (`tool=Cadence`)** support — with **zero RTL edits** (verified continuously via Gate G6 `64/64` SHA-256 parity between `rtl/` and `ip_repo/hevc_encoder_v1_0/src/`):
 
-| Verification Tier | DUT Target | Key UVM Infrastructure | Golden Reference / Oracle | Verified Closure Metrics (`QuestaSim 2021.2_1` & `Vivado 2026.1 xsim`) |
+| Verification Tier | DUT Target | Key UVM Infrastructure | Golden Reference / Oracle | Verified Closure Metrics (`Vivado 2026.1 xsim v3.0` & `QuestaSim 2021.2_1`) |
 |---|---|---|---|---|
 | **Tier 1 (Block)** | [`range_coder.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v) | `cabac_if` (2 SVA), `cabac_agent` (active driver + randomized sink stall), `cabac_scoreboard`, `cabac_coverage` | Bit-exact SystemVerilog HM 18.0 `TEncBinCABAC` model | **5,940 bins** (`18` slices), **1,327/1,327 B** Questa / **1,266/1,266 B** `xsim` (`0` mismatches), **100.00% `cg_cabac`**, `91.95%` Stmt / `76.03%` Br, `0` errors |
 | **Tier 2A (SoC RAL)** | [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v) | `hevc_reg_block` (`0x00..0x24`), `reg2axi_lite_adapter`, explicit `uvm_reg_predictor`, `hevc_axi_scoreboard` | Built-in `uvm_reg_hw_reset_seq`, `uvm_reg_bit_bash_seq`, black-box CSR mirrors | **10/10** hw_reset, **10/10** bit_bash, **664R/653W** AXI4-Lite txns, `0` TB warnings, `0` errors |
-| **Tier 2B/C (SoC E2E)** | [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v) | 4 AMBA VIP agents, `hevc_virtual_sequencer`, 4 SVA assertions, `cg_soc_axi` | Annex B framing + **HM 18.0 `TAppDecoder.exe`** closed-loop PSNR | **273 B** Questa (**47.79 dB `PSNR_Y`**, `4` NALs, `68/273` stalls) / **626 B** `xsim`, **384/384** AXI4 DRAM beats, **100.00% `cg_soc_axi`**, `12,288 B` YUV |
+| **Tier 2B/C (SoC E2E)** | [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v) | 4 AMBA VIP agents, `hevc_virtual_sequencer`, 4 SVA assertions, `cg_soc_axi` | Annex B framing + **HM 18.0 `TAppDecoder.exe`** closed-loop PSNR | **`256 B`** (`v3.0` `xsim`, `4` NALs, HM `exit=0`, `12,288 B` YUV), **384/384** AXI4 DRAM beats, **100.00% `cg_soc_axi`** |
 
 ---
 
@@ -256,7 +256,7 @@ python uvm/run_uvm_suite.py --tier 1
 python uvm/run_uvm_suite.py --tier 2
 ```
 
-> **Note:** Under `--simulator xsim`, `run_uvm_suite.py` automatically configures `XILINXD_LICENSE_FILE=C:\Users\Admin\.Xilinx\Xilinx.lic`, dynamically resolves all `59` RTL modules from [synth_vivado.tcl](file:///d:/UIT_Doc/hevc_hw_encoder/synth/synth_vivado.tcl), runs both Tier 1 and Tier 2 Vivado `xsim` flows, executes HM 18.0 `TAppDecoder.exe`, verifies `63/63` SHA-256 parity against `ip_repo/hevc_encoder_v1_0/src/`, and exits `0` only if every check passes. Under `--simulator questa`, it drives `make -C uvm/sim`, parses QuestaSim `# `-prefixed transcripts, runs Linux `TAppDecoder` if installed (or validates `uvm_axi_out.bin` Annex B framing), and prints the same Gate G8 summary table.
+> **Note:** Under `--simulator xsim`, `run_uvm_suite.py` automatically configures `XILINXD_LICENSE_FILE=C:\Users\Admin\.Xilinx\Xilinx.lic`, dynamically resolves all `60` RTL modules from [synth_vivado.tcl](file:///d:/UIT_Doc/hevc_hw_encoder/synth/synth_vivado.tcl), runs both Tier 1 and Tier 2 Vivado `xsim` flows, executes HM 18.0 `TAppDecoder.exe`, verifies `64/64` SHA-256 parity against `ip_repo/hevc_encoder_v1_0/src/`, and exits `0` only if every check passes. Under `--simulator questa`, it drives `make -C uvm/sim`, parses QuestaSim `# `-prefixed transcripts, runs Linux `TAppDecoder` if installed (or validates `uvm_axi_out.bin` Annex B framing), and prints the same Gate G8 summary table.
 
 ---
 

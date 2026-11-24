@@ -9,9 +9,9 @@ Key architectural features:
 2. **8x8 Grid Filtering**: Evaluates edges on an $8\times 8$ sample grid to prevent overlapping filter dependencies and allow efficient line-buffered pipelining.
 3. **Dedicated Submodules**:
    - **[`boundary_strength`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/boundary_strength.v)**: Calculates Boundary Strength ($bS \in \{0, 1, 2\}$) from CU prediction modes, transform coefficients (CBF), and motion vector distances.
-   - **[`db_filter_luma`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/db_filter_luma.v)**: Evaluates filter threshold criteria ($d < \beta$), executes Strong or Weak 3-tap filtering, and computes clipping values based on $t_C$.
+   - **[`db_filter_luma`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/db_filter_luma.v)**: 2-stage pipelined (`150 MHz`) Strong/Weak 3-tap luma filter evaluating $d < \beta$ and $t_C$ clipping.
    - **[`db_filter_chroma`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/db_filter_chroma.v)**: Filters chroma boundaries when $bS = 2$.
-   - **Cross-CTU Boundary SRAMs**: Manages left column and above row shadow maps and pixel line buffers.
+   - **2-Bank CTU Ping-Pong & Output Skid Buffer ([`decoder_inloop_filters`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v))**: Overlaps CTU fill/dump across banks (`col_buf_*`, `line_buf_*`, `corner_buf_*`) while closing `150 MHz` timing.
 
 ---
 

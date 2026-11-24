@@ -2,7 +2,7 @@
 
 This document specifies every finite state machine (FSM), context/bin pipeline stage, and byte-packing controller in the HEVC hardware encoder entropy and output subsystems under [`rtl/entropy/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) and [`rtl/input_output/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/input_output/nal_writer.v).
 
-Unless explicitly noted as legacy (`NO_REMEDIATION`), all behavior reflects the active production configuration (`REMEDIATION` defined by default in [`rtl/common/parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh#L26-L30)).
+All behavior reflects the pure single-path production RTL across `rtl/` (`0` `REMEDIATION` directives in [`rtl/common/parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh) or any production module; legacy buggy baselines for dual-state flaw verification reside exclusively in [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl)).
 
 **Covered Modules:**
 1. [CABAC Top-Level & CTU-Delayed Bin Queue (`cabac_enc_top.v`)](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) (plus top-level orchestrator `cabac_state` in [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v#L268-L281))

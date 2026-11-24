@@ -7,12 +7,12 @@
 ```
 cabac_enc_top
  ├── ctx_model_store    (186 × 7-bit Context RAM, ctx 0..185, 186-cycle slice init, read/write)
- ├── ctu_bin_ram        (8192 × 10-bit BRAM, 2 RAMB36 + 1 RAMB18, CTU-delayed bin queue w/ drain_prefetched_valid)
+ ├── ctu_bin_ram_0/1    (Dual-bank 2 × 8192 × 10-bit Ping-Pong BRAMs, 4 RAMB36 + 2 RAMB18, drain_prefetched_valid)
  ├── bin_encoder        (Context address lookup, MPS/LPS dispatch, bypass multiplexer)
  ├── range_coder        (M-coder arithmetic engine, renormalization, byte accumulation)
  ├── syntax_cu          (split_flag, skip_flag, merge_flag, pred_mode, part_mode)
  ├── syntax_pred        (inter_dir, ref_idx, mvp_flag, MVD binarization, 5-cand chroma intra)
- ├── syntax_coeff       (last_sig_pos, sig_coeff_map, gt1, gt2, signs, levels)
+ ├── syntax_coeff       (17-cyc pipelined S_LOAD_CG + Pillar 3 zero-CG skip, last_sig_pos, sig_map, levels)
  └── syntax_sao         (sao_merge, sao_type, band_pos, bo_offsets, eo_classes)
 ```
 
@@ -99,7 +99,7 @@ Arbitration across the syntax modules guarantees **zero bus conflict**:
 |:---|:---|:---:|:---:|:---|
 | **Global** | `clk`, `rst_n` | In | 1 | Clock and active-low reset. |
 | **Slice Init** | `slice_init` | In | 1 | Pulse to trigger 186-cycle context initialization (`ctx 0..185`, `N_CTX = 186`). |
-| | `slice_type` | In | 2 | Under `` `define REMEDIATION `` (HEVC Table 7-23): `0: B`, `1: P`, `2: I` (driven by `gop_frame_slice_type`). |
+| | `slice_type` | In | 2 | HEVC Table 7-23 slice type (`0: B`, `1: P`, `2: I`, driven by `gop_frame_slice_type`). |
 | | `qp_in` | In | 7 | Quantization parameter for context initialization. |
 | **CU Interface**| `cu_req`, `cu_done`| In/Out | 1 | Handshake for CU syntax generation. |
 | | `cu_depth`, `cu_is_split` | In | 2, 1 | CU depth and split status. |
@@ -113,7 +113,7 @@ Arbitration across the syntax modules guarantees **zero bus conflict**:
 | | `coeff_tu_size_log2` | In | 3 | TU size ($2=4\times 4..5=32\times 32$). |
 | | `coeff_tu_cbf` | In | 1 | Coded Block Flag. |
 | | `coeff_last_sig_pos` | In | 10 | Raster position of last non-zero coefficient. |
-| | `coeff_scan_mode` | In | 2 | Under `` `define REMEDIATION ``: MDCS scan (`0: diag, 1: horiz, 2: vert`). |
+| | `coeff_scan_mode` | In | 2 | MDCS scan mode (`0: diag, 1: horiz, 2: vert`). |
 | | `coeff_rd_addr`, `coeff_rd_data` | Out/In | 12, 16 | SRAM interface to on-chip `coeff_buffer.v`. |
 | **SAO & CTU Delay** | `ctu_x`, `ctu_y` | In | 6 | Current CTU coordinates gating `sao_merge_left/up_flag`. |
 | | `sao_req`, `sao_done` | In/Out | 1 | Handshake for CTU-first SAO parameters (`sao_type`, `sao_eo_class`, `sao_eo_offset`, `sao_band_pos`, `sao_bo_offset`). |

@@ -5,7 +5,7 @@ This specification documents every finite-state machine (FSM), sequential arbite
 - [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v) — SoC wrapper (AXI4-Lite CSR/W1C interrupt controller, soft-reset synchronizer, AXI4-Stream `s_axis_video` / `m_axis_bitstream` 2-entry `TLAST` staging FIFO).
 - [`gop_controller.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/gop_controller.v) — Frame-level GOP sequencer (`state[2:0]`: `S_IDLE`..`S_DONE`), POC/slice-type assignment, and DPB slot allocation/recycling.
 - [`slice_controller.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/slice_controller.v) — Slice/NAL orchestrator (`state[4:0]`: `S_IDLE`..`S_DONE`), VPS/SPS/PPS `param_set_writer` sequencing, `slice_cases.vh` header packing, and slice RBSP handoff.
-- [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v) — Master CABAC/CTU/CU/TU control FSM (`cabac_state[3:0]`), post-slice flush timer (`cabac_flush_state[1:0]`), `reg_tu_comp` Y/Cb/Cr TU/Transform/Recon interlocks, Pillar 3 `tu_cg_nonzero_mask_y/cb/cr`, Pillar 1 TDP DPB Port-A/Port-B arbitration (`dpb_wr_*_d1`, `mc_dpb_wr_collision`), and CTU/frame completion barriers (`ctu_both_done`, `sync_frame_done_pulse`).
+- [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v) — Top-level orchestrator featuring **2-bank CTU Ping-Pong** (`orig_*_ram` banks, `decoder_inloop_filters`, `cabac_enc_top` `ctu_bin_ram_0/1`), **4-entry `cu_fifo` & `tu_meta_fifo`**, **4-bank `coeff_buffer.v` (`DEPTH=4096`)**, decoupled front-end **`cabac_state[3:0]`** & back-end **`cabac_be_state`** FSMs, post-slice flush timer (`cabac_flush_state[1:0]`), `reg_tu_comp` Y/Cb/Cr TU/Transform/Recon interlocks, Pillar 3 `tu_cg_nonzero_mask_y/cb/cr`, Pillar 1 TDP DPB Port-A/Port-B arbitration (`dpb_wr_*_d1`, `mc_dpb_wr_collision`), and CTU/frame completion barriers (`ctu_both_done`, `sync_frame_done_pulse`).
 - [`axi_read_arbiter.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/axi_read_arbiter.v) — Dual-master L0/L1 AXI4 Read Lock Arbiter (`active_read`, `sel`).
 
 ---
@@ -674,7 +674,7 @@ flowchart TD
 
 #### (c) Corner-Case Behavior
 - **CTU-0 Deferred Frame Start**: `ctu_frame_start` fires as soon as `slice_controller` finishes transmitting the slice header, potentially before the external video source finishes streaming CTU 0's 4,096 pixels (`4096` beats). `frame_start_pending` holds off `deferred_frame_start` until `ctu_pixels_ready == 1`, preventing `ctu_raster_scan` from timing out or launching on uninitialized `orig_*_ram`.
-- **Out-of-Order CTU Completion**: With `cfg_sao_enable = 0`, `cabac_state` finishes `CABAC_TRM_CTU` while `decoder_inloop_filters` is still in `S_DB`/`S_DUMP` (`cabac_done_pending` waits for `inloop_ctu_done`). With `cfg_sao_enable = 1`, `inloop_ctu_done` fires during `S_DUMP` at roughly the same time `CABAC_DRAIN_CTU_BINS` drains `ctu_bin_ram` (`inloop_done_pending` and `cabac_done_pending` handle either arrival order identically).
+- **Out-of-Order & Overlapped 2-Bank CTU Ping-Pong (`v3.0`):** `hevc_encoder_top.v` pipelines two active CTUs across dual-bank CTU pixel storage, `decoder_inloop_filters`, `cabac_enc_top` (`ctu_bin_ram_0/1`), 4-bank `coeff_buffer.v` (`DEPTH=4096`), 4-entry `cu_fifo` & `tu_meta_fifo`, and decoupled `cabac_state` (FE) / `cabac_be_state` (BE) FSMs, achieving `Avg CTU Period = 39,970 cyc` and `Stall_CABAC = 0`. Both `inloop_done_pending` and `cabac_done_pending` remain guarded by `ctu_both_done`.
 
 ---
 

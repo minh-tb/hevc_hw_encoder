@@ -10,7 +10,7 @@ Covered RTL modules (and their top-level coordination logic in [`hevc_encoder_to
 - **DPB AXI4 Frame Store**: [`frame_store.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/recon/frame_store.v)
 - **Rate Control & Lambda Lookup**: [`rate_controller.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/rate_control/rate_controller.v), [`lambda_calc.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/rate_control/lambda_calc.v)
 
-> **Build Configuration Note**: Unless `NO_REMEDIATION` is defined, [`parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh#L26-L30) defines `` `REMEDIATION 1 `` globally (`BIT_DEPTH = 10`, `PIXEL_WIDTH = 10`, `COEFF_WIDTH = 16`). Both `` `ifdef REMEDIATION `` and legacy `` `else `` behaviors are noted wherever the RTL branches.
+> **Build Configuration Note**: [`parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh) defines single-path Main10 parameters (`BIT_DEPTH = 10`, `PIXEL_WIDTH = 10`, `COEFF_WIDTH = 16`, `0` `REMEDIATION` directives in production RTL).
 
 ---
 

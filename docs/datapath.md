@@ -5,14 +5,14 @@
 The hardware datapath of the **HEVC Main10 Hardware Video Encoder** processes high-definition video frames with 10-bit color depth (YUV 4:2:0 format) through a synthesizable, decoupled pipeline. The architecture is engineered around the standard HEVC hybrid video coding model: **Inter/Intra Prediction $\to$ Residual Subtraction $\to$ 2D Transform (DCT/DST) $\to$ Scalar Quantization $\to$ CABAC Entropy Coding $\to$ Inverse Quantization / Inverse Transform $\to$ Local Reconstruction $\to$ In-Loop Filtering (Deblock + SAO) $\to$ External Decoded Picture Buffer (DPB)**.
 
 Key pipeline design principles implemented:
-1. **Critical Path Decoupling**: The **Reconstruction Loop** (which generates reference samples for spatial intra prediction) is isolated from the slower **CABAC Bitstream Serialization Path** using an intermediate dual-port SRAM coefficient buffer (`coeff_buffer.v`).
+1. **Critical Path & CTU Ping-Pong Decoupling**: Front-end prediction/partitioning, transform/reconstruction (`4-bank` [`coeff_buffer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/coeff_buffer.v) + **4-entry `cu_fifo` / `tu_meta_fifo`**), in-loop filtering (2-bank CTU Ping-Pong in [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v) + output skid buffer), and CABAC entropy serialization (2-bank `ctu_bin_ram_0/1` + split FE `cabac_state` / BE `cabac_be_state` in [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v)) overlap across consecutive CTUs, sustaining **`39,970` cycles/CTU** steady-state period with **`Stall_CABAC = 0`** and **`157.51 MHz`** Vivado timing closure (`WNS = +0.318 ns` @ `150 MHz`).
 2. **Spatial vs Temporal Feedback Loops**:
-   - **Intra Spatial Feedback**: Unfiltered reconstructed samples from `recon_unit` are immediately registered into CTU line buffers to serve as boundary references for neighboring CUs.
-   - **Inter Temporal Feedback**: Fully filtered frames (post-Deblock and post-SAO) are committed to external DRAM via an AXI4 memory controller, forming the multi-frame Decoded Picture Buffer (DPB) for subsequent $P$ and $B$ frames.
+   - **Intra Spatial Feedback**: Unfiltered reconstructed samples from `recon_unit` are immediately registered into CTU line buffers to serve as boundary references for neighboring CUs (`intra_rmd` features `150 MHz` `wB_v -> planar_sum_v` pipeline stages).
+   - **Inter Temporal Feedback**: Fully filtered frames (post-Deblock and post-SAO) are committed both to external DRAM via an AXI4 memory controller and to on-chip TDP DPB BRAMs plus the `128x128` Luma [`ref_search_cache.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_search_cache.v) (`4 RAMB36 + 1 RAMB18`), cutting `T_MD` spikes (`30,830 -> 6,403` avg).
 3. **Multi-Rate Processing**:
    - Pixel domains operate on $16\text{-pixel}$ parallel buses ($16 \times 10\text{-bit} = 160\text{ bits}$).
    - Transform cores operate in row-serial mode ($32 \times 16\text{-bit} = 512\text{ bits/cycle}$) with transpose RAM.
-   - CABAC serializes symbols at 1 bin/cycle for bypass and 1 bin per 1–2 cycles for regular context bins.
+   - CABAC serializes symbols at 1 bin/cycle for bypass and 1 bin per 1–2 cycles for regular context bins, with 17-cycle pipelined `S_LOAD_CG` in [`syntax_coeff.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v).
 
 ---
 
@@ -38,20 +38,20 @@ flowchart TD
     %% Prediction Engines
     Intra["Intra Prediction Subsystem<br/>&bull; intra_rmd.v (4-mode Luma 4x4-tiled SATD + 5-cand Chroma)<br/>&bull; ref_sample_filter.v (3-tap filter)<br/>&bull; intra_pred_top.v (35-mode Planar, DC, Angular)"]:::process
 
-    Inter["Inter Prediction Subsystem<br/>&bull; mvp_predictor.v (AMVP L0/L1)<br/>&bull; tz_search.v (Diamond/Raster Integer ME)<br/>&bull; fme_search.v (Quarter-pel Fractional ME)<br/>&bull; mc_unit.v (8-tap/4-tap Sub-pel Filter)"]:::process
+    Inter["Inter Prediction Subsystem<br/>&bull; mvp_predictor.v (AMVP L0/L1)<br/>&bull; ref_search_cache.v (128x128 Luma Cache)<br/>&bull; tz_search.v (Diamond/Raster Integer ME)<br/>&bull; fme_search.v (Quarter-pel Fractional ME)<br/>&bull; mc_window_fetch.v + subpel_interpolation_core.v"]:::process
 
     ModeSwitch{"Mode Decision Engine<br/>(mode_decision.v)<br/>Minimizes J = D + &lambda; &times; R"}:::decision
 
     %% Residual Path
     ResSub["Residual Subtraction Unit<br/>(residual_sub.v)<br/>Residual = Original - Predicted"]:::process
 
-    Trans["TU Quadtree & 2D Transform<br/>(dct_top.v & transform_1d_core.v)<br/>&bull; DST-VII (4x4 Intra Luma)<br/>&bull; DCT-II (4x4, 8x8, 16x16, 32x32)<br/>&bull; Transform Skip Support"]:::process
+    Trans["TU Quadtree &amp; 2D Transform<br/>(dct_top.v &amp; transform_1d_core.v)<br/>&bull; DST-VII (4x4 Intra Luma)<br/>&bull; DCT-II (4x4, 8x8, 16x16, 32x32)<br/>&bull; Transform Skip Support"]:::process
 
     Quant["Forward Quantization<br/>(fwd_quant.v)<br/>Scalar Uniform Quantization (QP: 0..51)"]:::process
 
     %% Decoupled Entropy Branch
-    CoeffBuf[("Coefficient SRAM Buffer<br/>(coeff_buffer.v)<br/>Decouples Recon from CABAC")]:::storage
-    Entropy["CABAC Entropy Coding Engine<br/>(cabac_enc_top.v &amp; nal_writer.v)<br/>186 Contexts, ctu_bin_ram Drain, M-Coder"]:::process
+    CoeffBuf[("4-Bank Coeff Buffer + 4-Entry FIFOs<br/>(coeff_buffer.v, cu_fifo, tu_meta_fifo)<br/>Decouples FE Recon from CABAC BE")]:::storage
+    Entropy["Split FE/BE CABAC Engine<br/>(cabac_enc_top.v &amp; nal_writer.v)<br/>186 Ctx, 2-Bank ctu_bin_ram_0/1, M-Coder"]:::process
 
     %% Reconstruction Branch (Critical Path)
     IQ["Inverse Quantization<br/>(inv_quant.v)"]:::process
@@ -59,7 +59,7 @@ flowchart TD
     ReconAdd(("Tái tạo (+)<br/>recon_unit.v")):::math
 
     %% In-Loop Filters & External Memory
-    Filter["In-Loop Filtering Subsystem<br/>(decoder_inloop_filters.v)<br/>1. Deblocking Filter (deblock_top.v)<br/>2. Sample Adaptive Offset (sao_top.v)"]:::process
+    Filter["2-Bank CTU Ping-Pong In-Loop Filters<br/>(decoder_inloop_filters.v + Skid Buf)<br/>1. 2-Stage Deblock (deblock_top.v)<br/>2. Sample Adaptive Offset (sao_top.v)"]:::process
 
     DPB[("Decoded Picture Buffer (DPB)<br/>(External DRAM via AXI4 Master)<br/>Stores Reference Frames for Inter ME")]:::storage
 

@@ -482,3 +482,37 @@ Following Design Decisions 1–2 and Mandatory Safeguards 1–4, all four hazard
 | **Tier 2B+C: Forced Cycle-0 Header Stall (`+BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25`)** | **PASS** | `ERR=0 FAT=0 SVA=0` | `5.12` | `NALs=4` intact, **`Bitstream=269B`**, `DRAM_WR=384/384`, `Stall/Rd=97/269`, **`cg_soc_axi=100.00%`**, HM `exit=0` (`Out=12288B`, **`PSNR_Y=47.79 dB`**) |
 | **Pre-Remed. `asiclab` QuestaSim Archive + UCDB Coverage (`regression.log`, `cov_summary.log`)** | **PASS** | `ERR=0` | `31.0` | Tier 1 (`1327/1327 B`), Tier 2A (`10/10`), Tier 2B (`273 B`, `68/273` stalls), Tier 2C (**`PSNR_Y=47.79 dB`**), **`2/2` Covergroups `100%`**, **`6/6` SVAs**, **`72.37%` SoC Stmts** |
 | **Gate G6: IP SHA-256 Parity** | **PASS** | `DIFF=0` | `0.01` | **Matched `63/63`**, `Missing=0`, `Extra=0`, `SHA256_Diff=0` |
+
+---
+
+## 13. Case Study 12: `v3.0` Throughput Optimization, Single-Path RTL Cleanup & `150 MHz` Timing Closure
+
+### Problem Statement & Optimization Roadmap
+Following `v2.0` (`62,568 cycles/CTU`, `103.73 MHz` max clock under a `50 MHz` constraint, dual `REMEDIATION` preprocessor branches across 14 RTL files), three architectural limitations prevented higher real-time throughput and clean single-path production sign-off:
+1. **Preprocessor Branch Debt (`ifdef REMEDIATION`):** Production RTL carried legacy `!REMEDIATION` branches and `+define+REMEDIATION` flags across build scripts.
+2. **Sub-150 MHz Critical Paths:** Tightening [`synth/hevc_encoder_top.xdc`](file:///d:/UIT_Doc/hevc_hw_encoder/synth/hevc_encoder_top.xdc) to `6.667 ns` (`150 MHz`) exposed 37-level DSP/CARRY8 cascades in [`intra_rmd.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v) (`wB_v -> planar_sum_v`), combinational chains in [`db_filter_luma.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/db_filter_luma.v), and wide read/parse paths in [`syntax_coeff.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v).
+3. **CTU-Sequential Serialization & Inter Search Spikes:** Consecutive CTUs stalled waiting for in-loop filtering and serial CABAC drain (`Stall_CABAC = 6,763..12,119` cyc), while Frame 2 Inter search suffered `30,830`-cycle `T_MD` spikes from repeated AXI reference fetches.
+
+### Multi-Phase Solution Implemented (Zero Behavioral Divergence, Bit-Exact Frozen)
+1. **Full Single-Path RTL Stripping & Flaw Lockbox:** Removed all `REMEDIATION`/`NO_REMEDIATION` directives from all **64** production files in [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src/), isolating historical buggy baselines exclusively inside [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) (`scripts/run_all_flaw_tb.py` `28/28` PASS).
+2. **Phase A (`v2.1-phase-a-150mhz`) — `150 MHz` Timing Closure & Stage Overlap:**
+   - Pipelined [`intra_rmd.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v), converted [`db_filter_luma.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/db_filter_luma.v) to a 2-stage pipeline + output skid buffer in [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), pipelined [`syntax_coeff.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v) `S_LOAD_CG` to 17 cycles, and split [`coeff_buffer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/coeff_buffer.v) into dual-bank ping-pong with `tu_meta_fifo`. Closed `6.667 ns` (`150 MHz`) Vivado OOC timing with `0` failing endpoints.
+3. **Phase B1 (`8cbb107`) — `128x128` On-Chip Luma Search Cache ([`ref_search_cache.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_search_cache.v)):**
+   - Added a `128x128` Luma search-window cache (`4 RAMB36 + 1 RAMB18`) inside `inter_pred_top.v` / `tz_search.v`, slashing Frame 2 CTU 1 `T_MD` from `30,830` to `8,442` cycles (`T_MD` 3-frame avg `9,888 -> 6,403` cycles/CTU).
+4. **Phase B2 (`bbc3086`, Final RTL Freeze) — 2-Bank CTU Ping-Pong & Split CABAC FE/BE:**
+   - Upgraded CTU pixel storage, [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), and [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) (`ctu_bin_ram_0/1`) to **2-bank CTU Ping-Pong**, scaled [`coeff_buffer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/coeff_buffer.v) to **4 banks (`DEPTH=4096`)** with **4-entry `cu_fifo` & `tu_meta_fifo`**, and decoupled front-end `cabac_state` from back-end `cabac_be_state` (`CABAC_BE_*`) in [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v).
+
+### Progression Scorecard (`Baseline -> v2.0 -> v3.0-final-signoff`)
+
+| Metric | Initial Baseline | `v2.0` Sign-Off (`50 MHz`) | **`v3.0` Final (`150 MHz`)** | Net Gain (`v3.0` vs `v2.0` / Baseline) |
+|---|---:|---:|---:|---|
+| **Avg CTU Period (cyc/CTU)** | 127,647 | 62,568 | **39,970** | **-36.1% vs `v2.0` / -68.7% vs Baseline** |
+| **3-Frame Total Sim Time** | — | 8,001,545 ns | **4,920,865 ns** | **-38.5% total simulation cycles** |
+| **`Stall_CABAC` (cyc/CTU)** | — | 6,763–12,119 | **0 (all 12 CTUs)** | **100% FE/BE stall elimination** |
+| **Avg `T_MD` / `T_DB`** | `— / 15,936` | `9,888 / 7,230` | **`6,403 / 7,096`** | `-35.2%` `T_MD` (`ref_search_cache`) |
+| **Vivado $F_{\max}$ / WNS** | 96.36 MHz (`@50M`) | 103.73 MHz (`@50M`) | **157.51 MHz (`+0.318 ns @150M`)** | **`+51.8%` Fmax, 0 / 451,909 failing** |
+| **LUTs / FFs / BRAM / DSP** | `448,916 / 344,030 / 12.5 / 920` | `226,544 / 140,046 / 41.5 / 63` | **`237,476 / 163,801 / 60.0 / 63`** | Within `45.43%` LUT, `6.10%` BRAM, `0` latches |
+| **3-Frame Bitstream / Bins / PSNR-YUV** | — | `3,175 B / 28,962 / 39.900 dB` | **`3,134 B / 28,581 / 39.981 dB`** | **`73,728/73,728 max_diff=0`**, `+0.081 dB` |
+| **4-QP BD-Rate / BD-PSNR (HM 18.0)** | — | `+148.58% / -5.11 dB` | **`+145.52% / -5.02 dB`** | **Improved BD-Rate (`-3.06%`)**, `0 Max Diff` all QPs |
+| **Projected Steady-State 720p / 1080p** | — | `10.9 / 4.7 fps @ 150M` | **`17.9 / 7.7 fps @ 157.51M`** | `985.2` (128x128) / `164.2` (CIF) fps @ Fmax |
+

@@ -8,7 +8,7 @@ This document details every Finite State Machine (FSM) and stateful hardware pip
 - **SAO Filter Controller & Datapath**: [`rtl/inloop_filters/sao_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_top.v) (`state[2:0]`), [`rtl/inloop_filters/sao_edge_offset.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_edge_offset.v), [`rtl/inloop_filters/sao_band_offset.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_band_offset.v)
 
 > [!NOTE]
-> [`rtl/common/parameter_pkg.vh`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/common/parameter_pkg.vh) defines `` `define REMEDIATION 1 `` whenever `NO_REMEDIATION` is not defined. Unless explicitly marked as legacy (`!REMEDIATION`), descriptions below document the active production/synthesis `REMEDIATION` behavior.
+> Production RTL uses a single clean Main10 path with `0` `REMEDIATION` directives (`rtl/` and `ip_repo/hevc_encoder_v1_0/src/`). Historical buggy baselines for the dual-state flaw regression reside exclusively in [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl). In `v3.0`, [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v) uses a **2-bank CTU Ping-Pong** architecture + output skid buffer paired with a **2-stage pipelined** [`db_filter_luma.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/db_filter_luma.v) for `150 MHz` timing closure (`WNS = +0.318 ns`).
 
 ---
 
