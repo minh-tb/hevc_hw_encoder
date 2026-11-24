@@ -54,7 +54,8 @@ module dct_top (
 
     // Passthrough size info for downstream quant_unit (driven combinationally)
     output wire [2:0]   out_tu_size_log2,
-    output wire         out_fwd_inv_n
+    output wire         out_fwd_inv_n,
+    output wire         fwd_in_done
 );
 
     //-------------------------------------------------------------------------
@@ -109,6 +110,7 @@ module dct_top (
     reg [5:0] feed_cnt;
     reg [5:0] wr_cnt;
     reg [5:0] out_cnt;
+    assign fwd_in_done      = (state == S_ROW_FEED) && latched_fwd_inv_n && (feed_cnt == tu_size - 6'd1);
 
     //-------------------------------------------------------------------------
     // 1D Transform Core Connections

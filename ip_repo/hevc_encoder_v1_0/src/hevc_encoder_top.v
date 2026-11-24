@@ -289,20 +289,25 @@ module hevc_encoder_top #(
     // 4. Transform & Quantization
     //-------------------------------------------------------------------------
     wire        dct_in_valid;
+    wire        dct_fwd_in_done;
     wire signed [15:0] dct_in_data [0:31][0:31];
 
     wire        dct_out_valid;
     wire signed [15:0] dct_out_data [0:31][0:31];
     wire [2:0]  dct_out_tu_size_log2;
 
-    wire        quant_out_valid;
-    wire [15:0] quant_out_level;
-    wire [9:0]  quant_out_scan_idx;
-    wire        quant_out_last;
-    wire        quant_out_cbf;
+    wire        quant_out_valid_0;
+    wire [15:0] quant_out_level_0;
+    wire [9:0]  quant_out_scan_idx_0;
+    wire        quant_out_last_0;
+    wire        quant_out_valid_1;
+    wire [15:0] quant_out_level_1;
+    wire [9:0]  quant_out_scan_idx_1;
 
-    wire        inv_quant_out_valid;
-    wire [15:0] inv_quant_out_coeff;
+    wire        inv_quant_out_valid_0;
+    wire [15:0] inv_quant_out_coeff_0;
+    wire        inv_quant_out_valid_1;
+    wire [15:0] inv_quant_out_coeff_1;
 
     wire        idct_out_valid;
     wire [2:0]  idct_out_tu_size_log2;
@@ -942,10 +947,23 @@ module hevc_encoder_top #(
         end
     end
 
-    // Forward declarations for TU sequencer registers used in map update
+    // Forward declarations for TU sequencer / Stage-2 registers used in map update
     reg [5:0]   reg_tu_x;
     reg [5:0]   reg_tu_y;
     reg [1:0]   reg_tu_comp;
+    reg         res_buf_busy;
+    reg         res_buf_ready;
+    reg         pred_wr_bank;
+    reg         tq_stage_busy;
+    reg [5:0]   tq_tu_x;
+    reg [5:0]   tq_tu_y;
+    reg [2:0]   tq_tu_size_log2;
+    reg [1:0]   tq_tu_comp;
+    reg         tq_tu_is_last_in_cu;
+    reg         tq_pred_bank;
+    reg         tu_has_nonzero;
+    wire        quant_cur_nz;
+    wire        final_tu_nz;
 
     // ---- CU map update generation for deblocking filter ----
     reg         map_update_valid_r;
@@ -1007,17 +1025,17 @@ module hevc_encoder_top #(
                 map_update_mvx_r       <= {{4{md_best_inter_mv_x[11]}}, md_best_inter_mv_x};
                 map_update_mvy_r       <= {{4{md_best_inter_mv_y[11]}}, md_best_inter_mv_y};
                 map_update_cbf_r       <= 1'b0;
-                if (quant_out_valid && quant_out_last) begin
+                if (quant_out_valid_0 && quant_out_last_0) begin
                     map_cbf_pending        <= 1'b1;
-                    map_cbf_pend_x         <= reg_tu_x;
-                    map_cbf_pend_y         <= reg_tu_y;
+                    map_cbf_pend_x         <= tq_tu_x;
+                    map_cbf_pend_y         <= tq_tu_y;
                     map_cbf_pend_size      <= {4'd0, 3'd1} << dct_out_tu_size_log2;
-                    map_cbf_pend_comp      <= reg_tu_comp;
+                    map_cbf_pend_comp      <= tq_tu_comp;
                     map_cbf_pend_pred_mode <= latched_cu_is_intra;
                     map_cbf_pend_qp        <= ctu_qp;
                     map_cbf_pend_mvx       <= {{4{latched_cu_mv_x[11]}}, latched_cu_mv_x};
                     map_cbf_pend_mvy       <= {{4{latched_cu_mv_y[11]}}, latched_cu_mv_y};
-                    map_cbf_pend_cbf       <= quant_out_cbf;
+                    map_cbf_pend_cbf       <= final_tu_nz;
                 end
             end else if (map_cbf_pending) begin
                 map_cbf_pending        <= 1'b0;
@@ -1032,30 +1050,30 @@ module hevc_encoder_top #(
                 map_update_mvx_r       <= map_cbf_pend_mvx;
                 map_update_mvy_r       <= map_cbf_pend_mvy;
                 map_update_cbf_r       <= map_cbf_pend_cbf;
-                if (quant_out_valid && quant_out_last) begin
+                if (quant_out_valid_0 && quant_out_last_0) begin
                     map_cbf_pending        <= 1'b1;
-                    map_cbf_pend_x         <= reg_tu_x;
-                    map_cbf_pend_y         <= reg_tu_y;
+                    map_cbf_pend_x         <= tq_tu_x;
+                    map_cbf_pend_y         <= tq_tu_y;
                     map_cbf_pend_size      <= {4'd0, 3'd1} << dct_out_tu_size_log2;
-                    map_cbf_pend_comp      <= reg_tu_comp;
+                    map_cbf_pend_comp      <= tq_tu_comp;
                     map_cbf_pend_pred_mode <= latched_cu_is_intra;
                     map_cbf_pend_qp        <= ctu_qp;
                     map_cbf_pend_mvx       <= {{4{latched_cu_mv_x[11]}}, latched_cu_mv_x};
                     map_cbf_pend_mvy       <= {{4{latched_cu_mv_y[11]}}, latched_cu_mv_y};
-                    map_cbf_pend_cbf       <= quant_out_cbf;
+                    map_cbf_pend_cbf       <= final_tu_nz;
                 end
-            end else if (quant_out_valid && quant_out_last) begin
+            end else if (quant_out_valid_0 && quant_out_last_0) begin
                 map_update_valid_r     <= 1'b1;
                 map_update_cbf_only_r  <= 1'b1;
-                map_update_x_r         <= reg_tu_x;
-                map_update_y_r         <= reg_tu_y;
+                map_update_x_r         <= tq_tu_x;
+                map_update_y_r         <= tq_tu_y;
                 map_update_size_r      <= {4'd0, 3'd1} << dct_out_tu_size_log2;
-                map_update_comp_r      <= reg_tu_comp;
+                map_update_comp_r      <= tq_tu_comp;
                 map_update_pred_mode_r <= latched_cu_is_intra;
                 map_update_qp_r        <= ctu_qp;
                 map_update_mvx_r       <= {{4{latched_cu_mv_x[11]}}, latched_cu_mv_x};
                 map_update_mvy_r       <= {{4{latched_cu_mv_y[11]}}, latched_cu_mv_y};
-                map_update_cbf_r       <= quant_out_cbf;
+                map_update_cbf_r       <= final_tu_nz;
             end
         end
     end
@@ -1322,7 +1340,6 @@ module hevc_encoder_top #(
     reg         inter_p2s_active;
     reg         intra_ref_active;
     reg [7:0]   intra_ref_idx; // 0 to 4N (max 128)
-    reg         tu_can_start;
     reg         mc_data_ready;
     reg [2:0]   reg_tu_size_log2;
     reg         reg_tu_is_last_in_cu;
@@ -1340,18 +1357,23 @@ module hevc_encoder_top #(
     wire [5:0] orig_res_rd_x = reg_tu_x + active_pred_x[5:0];
     wire [5:0] orig_res_rd_y = reg_tu_y + active_pred_y[5:0];
 
-    // Multiplex read address between recon_out_valid (for SAO / in-loop filters) and orig_res_rd_x/y (for residual)
-    wire [5:0] orig_ram_rd_x = recon_out_valid ? recon_out_x[5:0] : orig_res_rd_x;
-    wire [5:0] orig_ram_rd_y = recon_out_valid ? recon_out_y[5:0] : orig_res_rd_y;
-
-    wire [9:0] orig_c_ram_rd_addr = {orig_ram_rd_y[4:0], orig_ram_rd_x[4:0]};
+    // Per-plane read address mux so Stage-2 recon_out_valid (in-loop orig capture) never collides with Stage-1 Inter pred orig reads
+    wire       recon_rd_y = recon_out_valid && (recon_out_comp == 2'd0);
+    wire       recon_rd_u = recon_out_valid && (recon_out_comp == 2'd1);
+    wire       recon_rd_v = recon_out_valid && (recon_out_comp == 2'd2);
+    wire [5:0] orig_y_rd_x = recon_rd_y ? recon_out_x[5:0] : orig_res_rd_x;
+    wire [5:0] orig_y_rd_y = recon_rd_y ? recon_out_y[5:0] : orig_res_rd_y;
+    wire [4:0] orig_u_rd_x = recon_rd_u ? recon_out_x[4:0] : orig_res_rd_x[4:0];
+    wire [4:0] orig_u_rd_y = recon_rd_u ? recon_out_y[4:0] : orig_res_rd_y[4:0];
+    wire [4:0] orig_v_rd_x = recon_rd_v ? recon_out_x[4:0] : orig_res_rd_x[4:0];
+    wire [4:0] orig_v_rd_y = recon_rd_v ? recon_out_y[4:0] : orig_res_rd_y[4:0];
 
     reg [9:0] orig_y_data_q, orig_u_data_q, orig_v_data_q;
     reg [9:0] rmd_orig_u_data_q, rmd_orig_v_data_q;
     always @(posedge clk) begin
-        orig_y_data_q     <= orig_y_ram[{orig_rd_bank, orig_ram_rd_y[5:0], orig_ram_rd_x[5:0]}];
-        orig_u_data_q     <= orig_u_ram[{orig_rd_bank, orig_c_ram_rd_addr}];
-        orig_v_data_q     <= orig_v_ram[{orig_rd_bank, orig_c_ram_rd_addr}];
+        orig_y_data_q     <= orig_y_ram[{orig_rd_bank, orig_y_rd_y, orig_y_rd_x}];
+        orig_u_data_q     <= orig_u_ram[{orig_rd_bank, orig_u_rd_y, orig_u_rd_x}];
+        orig_v_data_q     <= orig_v_ram[{orig_rd_bank, orig_v_rd_y, orig_v_rd_x}];
         rmd_orig_u_data_q <= orig_u_ram_rmd[{orig_rd_bank, rmd_orig_c_rd_addr}];
         rmd_orig_v_data_q <= orig_v_ram_rmd[{orig_rd_bank, rmd_orig_c_rd_addr}];
     end
@@ -1414,14 +1436,15 @@ module hevc_encoder_top #(
     reg signed [15:0] residual_buffer [0:31][0:31];
     reg               dct_start;
     reg               dct_start_pre;
-    
+    wire              dct_fwd_launch = (dct_start_pre || res_buf_ready) && !tq_stage_busy;
+
 `ifndef SYNTHESIS
     integer r_i, r_j;
 `endif
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             dct_start_pre <= 1'b0;
-            dct_start <= 1'b0;
+            dct_start     <= 1'b0;
 `ifndef SYNTHESIS
             for (r_i = 0; r_i < 32; r_i = r_i + 1) begin
                 for (r_j = 0; r_j < 32; r_j = r_j + 1) begin
@@ -1429,13 +1452,16 @@ module hevc_encoder_top #(
                 end
             end
 `endif
+        end else if (ctu_frame_start) begin
+            dct_start_pre <= 1'b0;
+            dct_start     <= 1'b0;
         end else begin
             if (res_sub_valid) begin
                 residual_buffer[res_sub_y[4:0]][res_sub_x[4:0]] <= $signed(res_sub_data);
             end
-            
+
             dct_start_pre <= (pred_valid_q && active_pred_last_q);
-            dct_start     <= dct_start_pre;
+            dct_start     <= dct_fwd_launch;
         end
     end
 
@@ -1443,7 +1469,7 @@ module hevc_encoder_top #(
     always @(posedge clk) begin
         if (dct_start) begin
             $display("Time=%0t: [HEVC_TOP] DCT START! tu=(%0d,%0d), comp=%0d, size=%0d, res[0][0]=%0d, res[0][31]=%0d, res[31][0]=%0d, res[31][31]=%0d, res_mean_approx=%0d",
-                     $time, reg_tu_x, reg_tu_y, reg_tu_comp, reg_tu_size_log2,
+                     $time, tq_tu_x, tq_tu_y, tq_tu_comp, tq_tu_size_log2,
                      $signed(residual_buffer[0][0]), $signed(residual_buffer[0][31]),
                      $signed(residual_buffer[31][0]), $signed(residual_buffer[31][31]),
                      ($signed(residual_buffer[0][0]) + $signed(residual_buffer[0][31]) + $signed(residual_buffer[31][0]) + $signed(residual_buffer[31][31])) / 4);
@@ -1484,7 +1510,7 @@ module hevc_encoder_top #(
             mc_data_ready <= 1'b0;
         else if (trigger_leaf_cu)
             mc_data_ready <= !md_eff_is_intra;
-        else if (recon_out_valid && recon_out_last && reg_tu_is_last_in_cu)
+        else if (recon_out_valid && recon_out_last && tq_tu_is_last_in_cu)
             mc_data_ready <= 1'b0;
     end
     
@@ -1609,55 +1635,98 @@ module hevc_encoder_top #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            intra_ref_active <= 0;
-            intra_ref_idx <= 0;
-            tu_can_start <= 1'b1;
-            reg_tu_x <= 0;
-            reg_tu_y <= 0;
-            reg_tu_size_log2 <= 0;
-            reg_tu_comp <= 0;
+            intra_ref_active    <= 0;
+            intra_ref_idx       <= 0;
+            res_buf_busy        <= 1'b0;
+            res_buf_ready       <= 1'b0;
+            pred_wr_bank        <= 1'b0;
+            tq_stage_busy       <= 1'b0;
+            tq_tu_x             <= 6'd0;
+            tq_tu_y             <= 6'd0;
+            tq_tu_size_log2     <= 3'd2;
+            tq_tu_comp          <= 2'd0;
+            tq_tu_is_last_in_cu <= 1'b0;
+            tq_pred_bank        <= 1'b0;
+            reg_tu_x            <= 0;
+            reg_tu_y            <= 0;
+            reg_tu_size_log2    <= 0;
+            reg_tu_comp         <= 0;
             reg_tu_is_last_in_cu <= 0;
-            reg_pu_x <= 0;
-            reg_pu_y <= 0;
-            recon_ctu_x <= 0;
-            recon_ctu_y <= 0;
+            reg_pu_x            <= 0;
+            reg_pu_y            <= 0;
+            recon_ctu_x         <= 0;
+            recon_ctu_y         <= 0;
         end else if (ctu_frame_start) begin
-            intra_ref_active <= 0;
-            intra_ref_idx <= 0;
-            tu_can_start <= 1'b1;
+            intra_ref_active    <= 0;
+            intra_ref_idx       <= 0;
+            res_buf_busy        <= 1'b0;
+            res_buf_ready       <= 1'b0;
+            pred_wr_bank        <= 1'b0;
+            tq_stage_busy       <= 1'b0;
+            tq_tu_is_last_in_cu <= 1'b0;
+            tq_pred_bank        <= 1'b0;
         end else begin
+            // Stage 1: Prediction & residual_buffer ownership
             if (tu_valid && tu_ready_signal) begin
-                tu_can_start <= 1'b0;
-                reg_tu_x <= tu_x;
-                reg_tu_y <= tu_y;
-                reg_tu_size_log2 <= tu_size_log2;
-                reg_tu_comp <= tu_comp;
+                res_buf_busy         <= 1'b1;
+                reg_tu_x             <= tu_x;
+                reg_tu_y             <= tu_y;
+                reg_tu_size_log2     <= tu_size_log2;
+                reg_tu_comp          <= tu_comp;
                 reg_tu_is_last_in_cu <= tu_is_last_in_cu;
-                reg_pu_x <= pu_x;
-                reg_pu_y <= pu_y;
-                recon_ctu_x <= latched_cu_ctu_x;
-                recon_ctu_y <= latched_cu_ctu_y;
+                reg_pu_x             <= pu_x;
+                reg_pu_y             <= pu_y;
+                recon_ctu_x          <= latched_cu_ctu_x;
+                recon_ctu_y          <= latched_cu_ctu_y;
                 if (latched_cu_is_intra) begin
                     intra_ref_active <= 1'b1;
-                    intra_ref_idx <= 8'd0;
+                    intra_ref_idx    <= 8'd0;
                 end
-            end else if (intra_ref_active) begin
-                if (intra_ref_idx == intra_ref_max) begin
-                    intra_ref_active <= 1'b0;
-                end else begin
-                    intra_ref_idx <= intra_ref_idx + 1;
+            end else begin
+                if (dct_fwd_in_done) begin
+                    res_buf_busy <= 1'b0;
+                end
+                if (intra_ref_active) begin
+                    if (intra_ref_idx == intra_ref_max) begin
+                        intra_ref_active <= 1'b0;
+                    end else begin
+                        intra_ref_idx <= intra_ref_idx + 1;
+                    end
                 end
             end
 
-            if (recon_out_valid && recon_out_last) begin
-                tu_can_start <= 1'b1;
+            // Stage 1 -> Stage 2 handoff (residual_buffer ready + pred_sram bank flip)
+            if (dct_fwd_launch) begin
+                res_buf_ready       <= 1'b0;
+                tq_stage_busy       <= 1'b1;
+                tq_tu_x             <= reg_tu_x;
+                tq_tu_y             <= reg_tu_y;
+                tq_tu_size_log2     <= reg_tu_size_log2;
+                tq_tu_comp          <= reg_tu_comp;
+                tq_tu_is_last_in_cu <= reg_tu_is_last_in_cu;
+                tq_pred_bank        <= pred_wr_bank;
+                pred_wr_bank        <= ~pred_wr_bank;
+            end else begin
+                if (dct_start_pre) begin
+                    res_buf_ready <= 1'b1;
+                end
+                if (recon_out_valid && recon_out_last) begin
+                    tq_stage_busy <= 1'b0;
+                end
             end
         end
     end
-    
-    assign tq_cu_idle      = tu_can_start && !inter_p2s_active && !intra_ref_active && !p2s_active && !idct_p2s_active &&
-                             !idct_active && !idct_start && !idct_start_pre;
-    assign tu_ready_signal = tq_cu_idle && (tu_fifo_count < 3'd4) &&
+
+    wire tu_stage1_free = !res_buf_busy && !res_buf_ready && !inter_p2s_active && !intra_ref_active &&
+                          !dct_start_pre && !dct_start;
+    wire tu_stage2_ok   = !tq_stage_busy || (!latched_cu_is_intra && (tu_comp != tq_tu_comp));
+    wire tu_fifo_ok     = tq_stage_busy ? (tu_fifo_count < 3'd3) : (tu_fifo_count < 3'd4);
+
+    assign tq_cu_idle      = !res_buf_busy && !res_buf_ready && !tq_stage_busy &&
+                             !inter_p2s_active && !intra_ref_active && !p2s_active &&
+                             !idct_p2s_active && !idct_active && !idct_start && !idct_start_pre &&
+                             !dct_start && !dct_start_pre;
+    assign tu_ready_signal = tu_stage1_free && tu_stage2_ok && tu_fifo_ok &&
                              (latched_cu_is_intra || mc_data_ready);
     
     //-------------------------------------------------------------------------
@@ -2640,9 +2709,9 @@ module hevc_encoder_top #(
         .clk              (clk),
         .rst_n            (rst_n),
         .fwd_inv_n        (!idct_start),
-        .tu_size_log2     (idct_start ? dct_out_tu_size_log2 : reg_tu_size_log2),
-        .is_dst7          (idct_start ? ((dct_out_tu_size_log2 == 3'd2) && latched_cu_is_intra && (reg_tu_comp == 2'd0))
-                                      : ((reg_tu_size_log2 == 3'd2)     && latched_cu_is_intra && (reg_tu_comp == 2'd0))),
+        .tu_size_log2     (idct_start ? dct_out_tu_size_log2 : tq_tu_size_log2),
+        .is_dst7          (idct_start ? ((dct_out_tu_size_log2 == 3'd2) && latched_cu_is_intra && (tq_tu_comp == 2'd0))
+                                      : ((tq_tu_size_log2 == 3'd2)     && latched_cu_is_intra && (tq_tu_comp == 2'd0))),
         .in_valid         (dct_in_valid | idct_start),
         .in_ready         (),  // streaming pipeline, never stalls
         .in_data          (use_idct_bus ? idct_in_data_flat : dct_in_data_flat),
@@ -2650,7 +2719,8 @@ module hevc_encoder_top #(
         .out_ready        (1'b1),  // downstream scanner always ready (streaming)
         .out_data         (dct_out_data_flat),
         .out_tu_size_log2 (dct_out_tu_size_log2),
-        .out_fwd_inv_n    (shared_xform_out_fwd_inv_n)
+        .out_fwd_inv_n    (shared_xform_out_fwd_inv_n),
+        .fwd_in_done      (dct_fwd_in_done)
     );
 
     assign dct_out_valid         = shared_xform_out_valid &&  shared_xform_out_fwd_inv_n;
@@ -2658,121 +2728,201 @@ module hevc_encoder_top #(
     assign idct_out_tu_size_log2 = dct_out_tu_size_log2;
 
     //-------------------------------------------------------------------------
-      // Parallel to Serial (P2S) Scanner via address_generator
-      //-------------------------------------------------------------------------
-      // p2s_active declared above (forward declaration)
-      reg  [9:0] p2s_idx;
-      reg  [9:0] p2s_max;
-      reg signed [15:0] p2s_coeff;
-      
-      wire [4:0] p2s_x, p2s_y;
+    // Dual-Lane Parallel-to-Serial (P2S) Scanner (2 coeffs/cycle: even + odd)
+    //-------------------------------------------------------------------------
+    // p2s_active declared above (forward declaration)
+    reg  [9:0] p2s_idx;
+    reg  [9:0] p2s_max;
+    reg signed [15:0] p2s_coeff_0;
+    reg signed [15:0] p2s_coeff_1;
 
-      // Shared 1,024:1 read multiplexer across Forward and Reconstruction P2S scanners
-      wire [4:0] shared_xform_rd_y = idct_p2s_active ? idct_p2s_y_next : p2s_y;
-      wire [4:0] shared_xform_rd_x = idct_p2s_active ? idct_p2s_x_next : p2s_x;
-      wire signed [15:0] shared_xform_rd_sample = dct_out_data[shared_xform_rd_y][shared_xform_rd_x];
-      
-      // Derive scan_mode from intra mode per HEVC spec (diagonal=0, horiz=1, vert=2)
-      // HEVC Clause 6.5.3: Only 4x4 and 8x8 Intra TUs can use horizontal/vertical scan. 16x16 and 32x32 are always Diagonal (0).
+    wire [4:0] p2s_x0, p2s_y0;
+    wire [4:0] p2s_x1, p2s_y1;
+
+    // Shared 1,024:1 read multiplexer across Lane-0 Forward and Reconstruction P2S scanners
+    wire [4:0] shared_xform_rd_y = idct_p2s_active ? idct_p2s_y_next : p2s_y0;
+    wire [4:0] shared_xform_rd_x = idct_p2s_active ? idct_p2s_x_next : p2s_x0;
+    wire signed [15:0] shared_xform_rd_sample = dct_out_data[shared_xform_rd_y][shared_xform_rd_x];
+
+    // Pruned Lane-1 grid (544:1 vs 1024:1): [0:7][0:7] full (MDCS) + outer odd-diagonal cells only
+    wire signed [15:0] p2s_lane1_grid [0:31][0:31];
+    generate
+        for (gi = 0; gi < 32; gi = gi + 1) begin : gen_l1_row
+            for (gj = 0; gj < 32; gj = gj + 1) begin : gen_l1_col
+                if ((gi < 8 && gj < 8) ||
+                    !(((gi % 4 == 0) && (gj % 4 <= 1)) ||
+                      ((gi % 4 == 1) && (gj % 4 >= 1)) ||
+                      ((gi % 4 == 2) && (gj % 4 == 3)) ||
+                      ((gi % 4 == 3) && (gj % 4 <= 1)))) begin : g_l1_active
+                    assign p2s_lane1_grid[gi][gj] = dct_out_data[gi][gj];
+                end else begin : g_l1_zero
+                    assign p2s_lane1_grid[gi][gj] = 16'sd0;
+                end
+            end
+        end
+    endgenerate
+
+    // Derive scan_mode from intra mode per HEVC spec (diagonal=0, horiz=1, vert=2)
     // MDCS applies to Intra TUs: 4x4 and 8x8 for Luma, and 4x4 for Chroma (4:2:0 format) per Clause 7.4.9.11
-    wire tu_mdcs_eligible = latched_cu_is_intra && 
-                            ((reg_tu_comp == 2'd0 && dct_out_tu_size_log2 <= 3'd3) ||
-                             (reg_tu_comp != 2'd0 && dct_out_tu_size_log2 == 3'd2));
+    wire tu_mdcs_eligible = latched_cu_is_intra &&
+                            ((tq_tu_comp == 2'd0 && dct_out_tu_size_log2 <= 3'd3) ||
+                             (tq_tu_comp != 2'd0 && dct_out_tu_size_log2 == 3'd2));
 
-    wire [5:0] mdcs_pred_mode_intra = (reg_tu_comp == 2'd0) ? latched_cu_intra_mode : latched_cu_chroma_dir;
+    wire [5:0] mdcs_pred_mode_intra = (tq_tu_comp == 2'd0) ? latched_cu_intra_mode : latched_cu_chroma_dir;
 
     wire [1:0] scan_mode = (tu_mdcs_eligible && mdcs_pred_mode_intra >= 6'd6  && mdcs_pred_mode_intra <= 6'd14) ? 2'd2 :
-                           (tu_mdcs_eligible && mdcs_pred_mode_intra >= 6'd22 && mdcs_pred_mode_intra <= 6'd30) ? 2'd1 : 2'd0; 
-      
-      address_generator u_addr_gen (
-          .tu_size_log2 (dct_out_tu_size_log2),
-          .scan_mode    (scan_mode),
-          .scan_idx     (p2s_idx + 10'd1), // Look ahead 1 cycle for synchronous read
-          .addr_x       (p2s_x),
-          .addr_y       (p2s_y)
-      );
-  
-      wire fwd_quant_in_ready;
-      always @(posedge clk or negedge rst_n) begin
-          if (!rst_n) begin
-              p2s_active <= 0;
-              p2s_idx <= 0;
-              p2s_max <= 0;
-              p2s_coeff <= 0;
-          end else begin
-              if (dct_out_valid) begin
-                  p2s_active <= 1'b1;
-                  p2s_idx <= 10'd0;
-                  p2s_max <= (10'd1 << (dct_out_tu_size_log2 * 2)) - 10'd1;
-                  p2s_coeff <= dct_out_data[0][0];
-              end else if (p2s_active && fwd_quant_in_ready) begin
-                  if (p2s_idx == p2s_max) begin
-                      p2s_active <= 1'b0;
-                  end else begin
-                      p2s_idx <= p2s_idx + 10'd1;
-                      p2s_coeff <= shared_xform_rd_sample;
-                  end
-              end
-          end
-      end
-    fwd_quant u_fwd_quant (
+                           (tu_mdcs_eligible && mdcs_pred_mode_intra >= 6'd22 && mdcs_pred_mode_intra <= 6'd30) ? 2'd1 : 2'd0;
+
+    address_generator u_addr_gen_e (
+        .tu_size_log2 (dct_out_tu_size_log2),
+        .scan_mode    (scan_mode),
+        .scan_idx     (p2s_idx + 10'd2), // Look ahead 1 cycle for next even coeff
+        .addr_x       (p2s_x0),
+        .addr_y       (p2s_y0)
+    );
+
+    address_generator u_addr_gen_o (
+        .tu_size_log2 (dct_out_tu_size_log2),
+        .scan_mode    (scan_mode),
+        .scan_idx     (p2s_idx + 10'd3), // Look ahead 1 cycle for next odd coeff
+        .addr_x       (p2s_x1),
+        .addr_y       (p2s_y1)
+    );
+
+    wire fwd_quant_in_ready_0;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            p2s_active  <= 1'b0;
+            p2s_idx     <= 10'd0;
+            p2s_max     <= 10'd0;
+            p2s_coeff_0 <= 16'sd0;
+            p2s_coeff_1 <= 16'sd0;
+        end else begin
+            if (dct_out_valid) begin
+                p2s_active  <= 1'b1;
+                p2s_idx     <= 10'd0;
+                p2s_max     <= (10'd1 << (dct_out_tu_size_log2 * 2)) - 10'd2;
+                p2s_coeff_0 <= dct_out_data[0][0];
+                p2s_coeff_1 <= (scan_mode == 2'd1) ? dct_out_data[0][1] : dct_out_data[1][0];
+            end else if (p2s_active && fwd_quant_in_ready_0) begin
+                if (p2s_idx == p2s_max) begin
+                    p2s_active <= 1'b0;
+                end else begin
+                    p2s_idx     <= p2s_idx + 10'd2;
+                    p2s_coeff_0 <= shared_xform_rd_sample;
+                    p2s_coeff_1 <= p2s_lane1_grid[p2s_y1][p2s_x1];
+                end
+            end
+        end
+    end
+
+    fwd_quant u_fwd_quant_0 (
         .clk              (clk),
         .rst_n            (rst_n),
         .qp               (ctu_qp),
-        .tu_comp          (reg_tu_comp),
+        .tu_comp          (tq_tu_comp),
         .tu_size_log2     (dct_out_tu_size_log2),
         .is_intra         (latched_cu_is_intra),
         .in_valid         (p2s_active),
-        .in_ready         (fwd_quant_in_ready),
-        .in_coeff         (p2s_coeff), 
+        .in_ready         (fwd_quant_in_ready_0),
+        .in_coeff         (p2s_coeff_0),
         .in_scan_idx      (p2s_idx),
         .in_last          (p2s_idx == p2s_max),
-        .out_valid        (quant_out_valid),
-        .out_ready        (1'b1),  // inv_quant always ready (streaming)
-        .out_level        (quant_out_level),
-        .out_scan_idx     (quant_out_scan_idx),
-        .out_last         (quant_out_last),
-        .out_cbf          (quant_out_cbf)
+        .out_valid        (quant_out_valid_0),
+        .out_ready        (1'b1),
+        .out_level        (quant_out_level_0),
+        .out_scan_idx     (quant_out_scan_idx_0),
+        .out_last         (quant_out_last_0),
+        .out_cbf          ()
     );
 
-    //-------------------------------------------------------------------------
-    // Reconstruction Loop
-    //-------------------------------------------------------------------------
-    wire [9:0] inv_quant_out_scan_idx;
-    wire       inv_quant_out_last;
-
-    inv_quant u_inv_quant (
+    fwd_quant u_fwd_quant_1 (
         .clk              (clk),
         .rst_n            (rst_n),
         .qp               (ctu_qp),
-        .tu_comp          (reg_tu_comp),
+        .tu_comp          (tq_tu_comp),
         .tu_size_log2     (dct_out_tu_size_log2),
-        .in_valid         (quant_out_valid),
-        .in_ready         (),  // streaming pipeline, always accepts
-        .in_level         (quant_out_level),
-        .in_scan_idx      (quant_out_scan_idx),
-        .in_last          (quant_out_last),
-        .out_valid        (inv_quant_out_valid),
-        .out_ready        (1'b1),  // S2P buffer always ready (streaming)
-        .out_coeff        (inv_quant_out_coeff),
-        .out_scan_idx     (inv_quant_out_scan_idx),
-        .out_last         (inv_quant_out_last)
+        .is_intra         (latched_cu_is_intra),
+        .in_valid         (p2s_active),
+        .in_ready         (),
+        .in_coeff         (p2s_coeff_1),
+        .in_scan_idx      (p2s_idx | 10'd1),
+        .in_last          (p2s_idx == p2s_max),
+        .out_valid        (quant_out_valid_1),
+        .out_ready        (1'b1),
+        .out_level        (quant_out_level_1),
+        .out_scan_idx     (quant_out_scan_idx_1),
+        .out_last         (),
+        .out_cbf          ()
     );
 
     //-------------------------------------------------------------------------
-    // Serial to Parallel (S2P) Diagonal Scanner (4x4)
+    // Dual-Lane Reconstruction Loop
     //-------------------------------------------------------------------------
-    reg               tu_has_nonzero;
-    reg signed [15:0] s2p_buffer [0:31][0:31];
+    wire [9:0] inv_quant_out_scan_idx_0;
+    wire       inv_quant_out_last_0;
+    wire [9:0] inv_quant_out_scan_idx_1;
+
+    inv_quant u_inv_quant_0 (
+        .clk              (clk),
+        .rst_n            (rst_n),
+        .qp               (ctu_qp),
+        .tu_comp          (tq_tu_comp),
+        .tu_size_log2     (dct_out_tu_size_log2),
+        .in_valid         (quant_out_valid_0),
+        .in_ready         (),
+        .in_level         (quant_out_level_0),
+        .in_scan_idx      (quant_out_scan_idx_0),
+        .in_last          (quant_out_last_0),
+        .out_valid        (inv_quant_out_valid_0),
+        .out_ready        (1'b1),
+        .out_coeff        (inv_quant_out_coeff_0),
+        .out_scan_idx     (inv_quant_out_scan_idx_0),
+        .out_last         (inv_quant_out_last_0)
+    );
+
+    inv_quant u_inv_quant_1 (
+        .clk              (clk),
+        .rst_n            (rst_n),
+        .qp               (ctu_qp),
+        .tu_comp          (tq_tu_comp),
+        .tu_size_log2     (dct_out_tu_size_log2),
+        .in_valid         (quant_out_valid_1),
+        .in_ready         (),
+        .in_level         (quant_out_level_1),
+        .in_scan_idx      (quant_out_scan_idx_1),
+        .in_last          (quant_out_last_0),
+        .out_valid        (inv_quant_out_valid_1),
+        .out_ready        (1'b1),
+        .out_coeff        (inv_quant_out_coeff_1),
+        .out_scan_idx     (inv_quant_out_scan_idx_1),
+        .out_last         ()
+    );
+
+    //-------------------------------------------------------------------------
+    // Dual-Lane Serial-to-Parallel (S2P) Split Banked Buffer (LUT-Optimized)
+    //-------------------------------------------------------------------------
+    reg signed [15:0] s2p_buf_8x8 [0:7][0:7];
+    reg signed [15:0] s2p_buf_e   [0:31][0:31];
+    reg signed [15:0] s2p_buf_o   [0:31][0:31];
     reg               idct_start_pending;
-    
-    wire [4:0] s2p_x, s2p_y;
-    address_generator u_s2p_addr_gen (
+    reg               idct_zero_bypass;
+
+    wire [4:0] s2p_x0, s2p_y0;
+    wire [4:0] s2p_x1, s2p_y1;
+    address_generator u_s2p_addr_gen_0 (
         .tu_size_log2 (dct_out_tu_size_log2),
-        .scan_mode    (scan_mode), // Synchronized with forward P2S
-        .scan_idx     (inv_quant_out_scan_idx),
-        .addr_x       (s2p_x),
-        .addr_y       (s2p_y)
+        .scan_mode    (scan_mode),
+        .scan_idx     (inv_quant_out_scan_idx_0),
+        .addr_x       (s2p_x0),
+        .addr_y       (s2p_y0)
+    );
+    address_generator u_s2p_addr_gen_1 (
+        .tu_size_log2 (dct_out_tu_size_log2),
+        .scan_mode    (scan_mode),
+        .scan_idx     (inv_quant_out_scan_idx_1),
+        .addr_x       (s2p_x1),
+        .addr_y       (s2p_y1)
     );
 
     //-------------------------------------------------------------------------
@@ -2854,6 +3004,8 @@ module hevc_encoder_top #(
         end
     endfunction
 
+    wire luma_zero_cbf_bypass = inv_quant_out_valid_0 && inv_quant_out_last_0 && (tq_tu_comp == 2'd0) && !tu_has_nonzero;
+
 `ifndef SYNTHESIS
     integer s_i, s_j;
 `endif
@@ -2863,28 +3015,43 @@ module hevc_encoder_top #(
             idct_start <= 1'b0;
             idct_start_pending <= 1'b0;
 `ifndef SYNTHESIS
+            for (s_i = 0; s_i < 8; s_i = s_i + 1) begin
+                for (s_j = 0; s_j < 8; s_j = s_j + 1) begin
+                    s2p_buf_8x8[s_i][s_j] <= 16'sd0;
+                end
+            end
             for (s_i = 0; s_i < 32; s_i = s_i + 1) begin
                 for (s_j = 0; s_j < 32; s_j = s_j + 1) begin
-                    s2p_buffer[s_i][s_j] <= 16'd0;
+                    s2p_buf_e[s_i][s_j] <= 16'sd0;
+                    s2p_buf_o[s_i][s_j] <= 16'sd0;
                 end
             end
 `endif
         end else begin
-            if (inv_quant_out_valid) begin
-                s2p_buffer[s2p_y][s2p_x] <= inv_quant_out_coeff;
+            if (inv_quant_out_valid_0) begin
+                s2p_buf_e[s2p_y0][s2p_x0] <= $signed(inv_quant_out_coeff_0);
+                if (s2p_y0 < 5'd8 && s2p_x0 < 5'd8) begin
+                    s2p_buf_8x8[s2p_y0[2:0]][s2p_x0[2:0]] <= $signed(inv_quant_out_coeff_0);
+                end
             end
-            if (inv_quant_out_valid && inv_quant_out_last && (reg_tu_comp != 2'd0) && !tu_has_nonzero) begin
-                s2p_buffer[0][0] <= calc_chroma_level1_dequant(ctu_qp, dct_out_tu_size_log2);
+            if (inv_quant_out_valid_1) begin
+                s2p_buf_o[s2p_y1][s2p_x1] <= $signed(inv_quant_out_coeff_1);
+                if (s2p_y1 < 5'd8 && s2p_x1 < 5'd8) begin
+                    s2p_buf_8x8[s2p_y1[2:0]][s2p_x1[2:0]] <= $signed(inv_quant_out_coeff_1);
+                end
+            end
+            if (inv_quant_out_valid_0 && inv_quant_out_last_0 && (tq_tu_comp != 2'd0) && !tu_has_nonzero) begin
+                s2p_buf_8x8[0][0] <= calc_chroma_level1_dequant(ctu_qp, dct_out_tu_size_log2);
                 // synthesis translate_off
                 $display("Time=%0t: [HEVC_TOP] Injecting chroma phantom DC coeff %0d into s2p_buffer for comp=%0d size=%0d (qp=%0d)",
-                         $time, calc_chroma_level1_dequant(ctu_qp, dct_out_tu_size_log2), reg_tu_comp, dct_out_tu_size_log2, ctu_qp);
+                         $time, calc_chroma_level1_dequant(ctu_qp, dct_out_tu_size_log2), tq_tu_comp, dct_out_tu_size_log2, ctu_qp);
                 // synthesis translate_on
             end
-            
-            // Trigger IDCT pipeline when the last coefficient is placed (delayed 1 cycle for SRAM write)
+
+            // Trigger IDCT pipeline when the last coefficient is placed (bypass IDCT on zero-CBF Luma only)
             idct_start <= idct_start_pre;
-            
-            if (inv_quant_out_valid && inv_quant_out_last) begin
+
+            if (inv_quant_out_valid_0 && inv_quant_out_last_0 && !luma_zero_cbf_bypass) begin
                 if (!idct_p2s_active) begin
                     idct_start_pre <= 1'b1;
                 end else begin
@@ -2903,7 +3070,16 @@ module hevc_encoder_top #(
     generate
         for (gi = 0; gi < 32; gi = gi + 1) begin : gen_idct_in_row
             for (gj = 0; gj < 32; gj = gj + 1) begin : gen_idct_in_col
-                assign idct_in_data[gi][gj] = s2p_buffer[gi][gj];
+                if (gi < 8 && gj < 8) begin : g_s2p_8x8
+                    assign idct_in_data[gi][gj] = s2p_buf_8x8[gi][gj];
+                end else if (((gi % 4 == 0) && (gj % 4 <= 1)) ||
+                             ((gi % 4 == 1) && (gj % 4 >= 1)) ||
+                             ((gi % 4 == 2) && (gj % 4 == 3)) ||
+                             ((gi % 4 == 3) && (gj % 4 <= 1))) begin : g_s2p_even
+                    assign idct_in_data[gi][gj] = s2p_buf_e[gi][gj];
+                end else begin : g_s2p_odd
+                    assign idct_in_data[gi][gj] = s2p_buf_o[gi][gj];
+                end
                 assign idct_in_data_flat[(gi*32+gj)*16 +: 16] = idct_in_data[gi][gj];
             end
         end
@@ -2943,24 +3119,34 @@ module hevc_encoder_top #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            idct_p2s_active <= 0;
-            idct_p2s_idx <= 0;
-            idct_p2s_max <= 0;
-            idct_p2s_log2 <= 0;
-            idct_p2s_coeff <= 0;
+            idct_p2s_active  <= 1'b0;
+            idct_zero_bypass <= 1'b0;
+            idct_p2s_idx     <= 10'd0;
+            idct_p2s_max     <= 10'd0;
+            idct_p2s_log2    <= 3'd0;
+            idct_p2s_coeff   <= 16'sd0;
         end else begin
             if (idct_out_valid) begin // Triggered when IDCT finishes
-                idct_p2s_active <= 1'b1;
-                idct_p2s_idx <= 10'd0;
-                idct_p2s_max <= (10'd1 << (idct_out_tu_size_log2 * 2)) - 10'd1;
-                idct_p2s_log2 <= idct_out_tu_size_log2;
-                idct_p2s_coeff <= dct_out_data[0][0];
+                idct_p2s_active  <= 1'b1;
+                idct_zero_bypass <= 1'b0;
+                idct_p2s_idx     <= 10'd0;
+                idct_p2s_max     <= (10'd1 << (idct_out_tu_size_log2 * 2)) - 10'd1;
+                idct_p2s_log2    <= idct_out_tu_size_log2;
+                idct_p2s_coeff   <= dct_out_data[0][0];
+            end else if (luma_zero_cbf_bypass) begin // Zero-CBF Luma bypass: skip IDCT pass
+                idct_p2s_active  <= 1'b1;
+                idct_zero_bypass <= 1'b1;
+                idct_p2s_idx     <= 10'd0;
+                idct_p2s_max     <= (10'd1 << (dct_out_tu_size_log2 * 2)) - 10'd1;
+                idct_p2s_log2    <= dct_out_tu_size_log2;
+                idct_p2s_coeff   <= 16'sd0;
             end else if (idct_p2s_active && idct_p2s_ready) begin
                 if (idct_p2s_idx == idct_p2s_max) begin
-                    idct_p2s_active <= 1'b0;
+                    idct_p2s_active  <= 1'b0;
+                    idct_zero_bypass <= 1'b0;
                 end else begin
-                    idct_p2s_idx <= idct_p2s_idx + 10'd1;
-                    idct_p2s_coeff <= shared_xform_rd_sample;
+                    idct_p2s_idx   <= idct_p2s_idx + 10'd1;
+                    idct_p2s_coeff <= idct_zero_bypass ? 16'sd0 : shared_xform_rd_sample;
                 end
             end
         end
@@ -2969,21 +3155,21 @@ module hevc_encoder_top #(
     recon_unit u_recon_unit (
         .clk              (clk),
         .rst_n            (rst_n),
-        .comp             (reg_tu_comp), // Fixed: Automatically routes reconstruction to active color plane
+        .comp             (tq_tu_comp), // Fixed: Automatically routes reconstruction to active Stage-2 color plane
         .pred_valid       (pred_valid),
         .pred_ready       (intra_out_ready),
         .pred_pixel       (pred_pixel),
-        .pred_x           (active_pred_x[5:0]), // Use active multiplexed coordinates (Inter & Intra safe)
-        .pred_y           (active_pred_y[5:0]),
+        .pred_x           ({1'b0, active_pred_x[4:0]}),
+        .pred_y           ({pred_wr_bank, active_pred_y[4:0]}), // Banked 2x32x32 pred_sram
         .pred_last        (active_pred_last),
-        
+
         .res_valid        (idct_p2s_active),
         .res_ready        (idct_p2s_ready),
         .res_coeff        (idct_p2s_coeff),
-        .res_x_pu         ({1'b0, idct_p2s_x}),  // TU-relative: matches how pred_sram was written by intra_pred
-        .res_y_pu         ({1'b0, idct_p2s_y}),
-        .res_x_ctu        (reg_tu_x + {1'b0, idct_p2s_x}),  // CTU-relative for output positioning
-        .res_y_ctu        (reg_tu_y + {1'b0, idct_p2s_y}),
+        .res_x_pu         ({1'b0, idct_p2s_x}),
+        .res_y_pu         ({tq_pred_bank, idct_p2s_y}),
+        .res_x_ctu        (tq_tu_x + {1'b0, idct_p2s_x}),  // CTU-relative for output positioning
+        .res_y_ctu        (tq_tu_y + {1'b0, idct_p2s_y}),
         .res_last         (idct_p2s_idx == idct_p2s_max),
         
         .out_valid        (recon_out_valid),
@@ -3320,13 +3506,16 @@ module hevc_encoder_top #(
         .DEPTH  (4096),
         .ADDR_W (12)
     ) u_coeff_buffer (
-        .clk   (clk),
-        .we    (quant_out_valid),
-        .waddr ({tu_fifo_wr_ptr, quant_out_scan_idx}),
-        .wdata (quant_out_level),
-        .re    (coeff_buf_re),
-        .raddr ({tu_fifo_rd_ptr, coeff_buf_raddr[9:0]}),
-        .rdata (coeff_buf_rdata)
+        .clk    (clk),
+        .we0    (quant_out_valid_0),
+        .waddr0 ({tu_fifo_wr_ptr, quant_out_scan_idx_0[9:1]}),
+        .wdata0 (quant_out_level_0),
+        .we1    (quant_out_valid_1),
+        .waddr1 ({tu_fifo_wr_ptr, quant_out_scan_idx_1[9:1]}),
+        .wdata1 (quant_out_level_1),
+        .re     (coeff_buf_re),
+        .raddr  ({tu_fifo_rd_ptr, coeff_buf_raddr[9:0]}),
+        .rdata  (coeff_buf_rdata)
     );
 
     reg         cu_cbf_latched;
@@ -3342,13 +3531,16 @@ module hevc_encoder_top #(
     reg [63:0]  tu_fifo_cg_mask   [0:3];
     reg         tu_fifo_is_intra  [0:3];
 
-    wire [5:0]  quant_cg_bit      = (reg_tu_comp == 2'd0) ? quant_out_scan_idx[9:4] : {2'b00, quant_out_scan_idx[7:4]};
-    wire        quant_cur_nz      = (quant_out_level != 16'd0);
-    wire        final_tu_nz       = tu_has_nonzero | quant_cur_nz;
-    wire [9:0]  final_tu_last_idx = quant_cur_nz ? quant_out_scan_idx : tu_last_sig_idx;
+    wire [5:0]  quant_cg_bit      = (tq_tu_comp == 2'd0) ? quant_out_scan_idx_0[9:4] : {2'b00, quant_out_scan_idx_0[7:4]};
+    wire        quant_cur_nz_0    = (quant_out_level_0 != 16'd0);
+    wire        quant_cur_nz_1    = (quant_out_level_1 != 16'd0);
+    assign      quant_cur_nz      = quant_cur_nz_0 | quant_cur_nz_1;
+    assign      final_tu_nz       = tu_has_nonzero | quant_cur_nz;
+    wire [9:0]  final_tu_last_idx = quant_cur_nz_1 ? quant_out_scan_idx_1 :
+                                    quant_cur_nz_0 ? quant_out_scan_idx_0 : tu_last_sig_idx;
     wire [63:0] final_tu_cg_mask  = tq_cg_nonzero_mask | (quant_cur_nz ? (64'd1 << quant_cg_bit) : 64'd0);
 
-    wire        tu_fifo_push      = quant_out_valid && quant_out_last;
+    wire        tu_fifo_push      = quant_out_valid_0 && quant_out_last_0;
     wire        tu_fifo_pop       = (cabac_state == CABAC_WAIT_COEFF_DONE) && cabac_coeff_done;
     wire        tu_fifo_empty     = (tu_fifo_count == 3'd0);
 
@@ -3381,33 +3573,34 @@ module hevc_encoder_top #(
             tu_fifo_rd_ptr     <= 2'd0;
             tu_fifo_count      <= 3'd0;
         end else begin
-            if (trigger_leaf_cu || (tu_valid && tu_ready_signal)) begin
+            if (trigger_leaf_cu) begin
+                cu_cbf_latched <= 1'b0;
+            end
+            if (dct_start) begin
                 tu_last_sig_idx    <= 10'd0;
                 tu_has_nonzero     <= 1'b0;
                 tq_cg_nonzero_mask <= 64'd0;
-                if (trigger_leaf_cu)
-                    cu_cbf_latched <= 1'b0;
-            end else if (quant_out_valid) begin
+            end else if (quant_out_valid_0) begin
                 if (quant_cur_nz) begin
-                    tu_last_sig_idx <= quant_out_scan_idx;
+                    tu_last_sig_idx <= final_tu_last_idx;
                     tu_has_nonzero  <= 1'b1;
                     tq_cg_nonzero_mask[quant_cg_bit] <= 1'b1;
                 end
-                cu_cbf_latched <= cu_cbf_latched | quant_out_cbf;
+                cu_cbf_latched <= cu_cbf_latched | quant_cur_nz;
             end
 
             if (tu_fifo_push) begin
-                tu_fifo_comp[tu_fifo_wr_ptr]      <= reg_tu_comp;
-                tu_fifo_size_log2[tu_fifo_wr_ptr] <= reg_tu_size_log2;
+                tu_fifo_comp[tu_fifo_wr_ptr]      <= tq_tu_comp;
+                tu_fifo_size_log2[tu_fifo_wr_ptr] <= tq_tu_size_log2;
                 tu_fifo_cbf[tu_fifo_wr_ptr]       <= final_tu_nz;
                 tu_fifo_last_pos[tu_fifo_wr_ptr]  <= final_tu_last_idx;
                 tu_fifo_scan_mode[tu_fifo_wr_ptr] <= scan_mode;
                 tu_fifo_cg_mask[tu_fifo_wr_ptr]   <= final_tu_cg_mask;
                 tu_fifo_is_intra[tu_fifo_wr_ptr]  <= latched_cu_is_intra;
-                tu_fifo_is_last[tu_fifo_wr_ptr]   <= reg_tu_is_last_in_cu;
+                tu_fifo_is_last[tu_fifo_wr_ptr]   <= tq_tu_is_last_in_cu;
                 tu_fifo_wr_ptr                    <= tu_fifo_wr_ptr + 2'd1;
                 // synthesis translate_off
-                $display("Time=%0t: [HEVC_TOP] TU quant done! comp=%0d, has_nonzero=%0d, last_idx=%0d", $time, reg_tu_comp, final_tu_nz, final_tu_last_idx);
+                $display("Time=%0t: [HEVC_TOP] TU quant done! comp=%0d, has_nonzero=%0d, last_idx=%0d", $time, tq_tu_comp, final_tu_nz, final_tu_last_idx);
                 // synthesis translate_on
             end
 
@@ -3835,21 +4028,20 @@ module hevc_encoder_top #(
                 slice_trm_done <= 1'b1;
             end
 
-            if (cabac_be_state == CABAC_BE_IDLE && cabac_be_pending_cnt == 2'd0 && slice_trm_done) begin
+            if (cabac_be_state == CABAC_BE_IDLE && cabac_be_pending_cnt == 2'd0 && slice_trm_done && !cabac_enc_busy) begin
                 if (cabac_flush_state == 2'd0)
                     cabac_flush_state <= 2'd1;
             end
 
-            if (cabac_flush_state != 2'd0) begin
-                if (cabac_idle_timer < 8'd100) begin
-                    cabac_idle_timer <= cabac_idle_timer + 8'd1;
-                end
-
-                if (cabac_flush_state == 2'd1 && cabac_idle_timer == 8'd99) begin
-                    cabac_flush_state <= 2'd2;
-                    cabac_idle_timer <= 8'd0;
-                end else if (cabac_flush_state == 2'd2 && cabac_idle_timer == 8'd99) begin
-                    cabac_flush_state <= 2'd3;
+            if (cabac_flush_state == 2'd1) begin
+                if (!cabac_enc_busy) begin
+                    if (cabac_idle_timer == 8'd3) begin
+                        cabac_flush_state <= 2'd2;
+                        cabac_idle_timer  <= 8'd0;
+                    end else begin
+                        cabac_idle_timer  <= cabac_idle_timer + 8'd1;
+                    end
+                end else begin
                     cabac_idle_timer <= 8'd0;
                 end
             end
@@ -3858,7 +4050,7 @@ module hevc_encoder_top #(
 
     wire top_trm_req       = ctu_trm_pulse_w;
     wire top_trm_bin_val   = is_last_slice_ctu; // 1 for the last CTU in slice, 0 for others
-    wire cabac_flush_pulse = (cabac_flush_state == 2'd2 && cabac_idle_timer == 8'd99);
+    wire cabac_flush_pulse = (cabac_flush_state == 2'd1 && !cabac_enc_busy && cabac_idle_timer == 8'd3);
 
     // =========================================================================
     // HEVC Clause 9.3.3.1 CU Depth Map & Split Flag Context Derivation
@@ -4088,7 +4280,7 @@ module hevc_encoder_top #(
         if (!rst_n) begin
             idct_active <= 1'b0;
         end else begin
-            if (inv_quant_out_valid && inv_quant_out_last) begin
+            if (inv_quant_out_valid_0 && inv_quant_out_last_0) begin
                 idct_active <= 1'b1;
             end else if (idct_p2s_active && idct_p2s_ready && idct_p2s_idx == idct_p2s_max) begin
                 idct_active <= 1'b0;
