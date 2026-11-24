@@ -171,19 +171,21 @@ module cabac_enc_top #(
     wire        rc_muxed_bin_value;
 
     wire [CTX_ID_W-1:0] rc_ctx_id;
+    wire        eff_trm_valid;
+    wire        eff_trm_val;
 
     range_coder u_rc (
         .clk        (clk),
         .rst_n      (rst_n),
         .coder_init (slice_init),
         .bin_valid  (rc_bin_valid),
-        .bin_value  (trm_req ? trm_bin_val : rc_bin_value),
+        .bin_value  (rc_muxed_bin_value),
         .bin_pstate (rc_pstate),
         .bin_valmps (rc_valmps),
         .bin_ctx_id (rc_ctx_id),
         .bin_ready  (rc_bin_ready),
         .ep_valid   (rc_ep_valid),
-        .trm_valid  (trm_req),
+        .trm_valid  (eff_trm_valid),
         .flush_valid(flush_req),
         .flush_done (flush_done),
         .byte_valid (byte_valid),
@@ -193,12 +195,13 @@ module cabac_enc_top #(
     );
 
     // =========================================================================
-    // bin_encoder — arbitrated bin mux feeds into this
+    // bin_encoder — arbitrated bin mux feeds into this via 2-entry skid buffer
     // =========================================================================
     wire                 be_bin_valid, be_bin_value;
     wire [CTX_ID_W-1:0] be_ctx_id;
     wire                 be_is_ep;
     wire                 be_bin_rdy;
+    wire                 be_skid_in_ready;
     wire                 cu_bin_rdy;
 
     bin_encoder #(.CTX_ID_W(CTX_ID_W)) u_be (
@@ -401,7 +404,7 @@ module cabac_enc_top #(
         .bin_value  (ss_bin_value),
         .bin_ctx_id (ss_ctx_id),
         .bin_is_ep  (ss_is_ep),
-        .bin_rdy    (be_bin_rdy)
+        .bin_rdy    (be_skid_in_ready)
     );
 
     // =========================================================================
@@ -435,7 +438,7 @@ module cabac_enc_top #(
                                sp_bin_valid ? sp_is_ep : sf_is_ep;
 
     assign      ctu_bin_wr_ready = !bin_bank_full[bin_wr_bank];
-    assign      cu_bin_rdy   = eff_ctu_sao_delay_en ? (!bin_bank_full[bin_wr_bank] && (bin_wr_ptr < 13'd8191)) : be_bin_rdy;
+    assign      cu_bin_rdy   = eff_ctu_sao_delay_en ? (!bin_bank_full[bin_wr_bank] && (bin_wr_ptr < 13'd8191)) : be_skid_in_ready;
 
     wire        bin_ram_we   = eff_ctu_sao_delay_en && cu_bin_valid && cu_bin_rdy;
     wire [9:0]  bin_ram_wdata = {cu_bin_is_ep, cu_bin_value, cu_bin_ctx_id};
@@ -444,7 +447,7 @@ module cabac_enc_top #(
     wire        drain_has_data  = bin_bank_full[bin_rd_bank] && (bin_rd_ptr < rd_bank_len);
     wire        drain_bin_valid = eff_ctu_sao_delay_en && eff_ctu_bin_drain_en && !ss_bin_valid
                                 && drain_has_data && drain_prefetched_valid;
-    wire        drain_bin_fire  = drain_bin_valid && be_bin_rdy;
+    wire        drain_bin_fire  = drain_bin_valid && be_skid_in_ready;
     assign      ctu_bin_drain_done = eff_ctu_sao_delay_en
                                    ? (eff_ctu_bin_drain_en && bin_bank_full[bin_rd_bank] && !drain_has_data)
                                    : 1'b1;
@@ -513,29 +516,85 @@ module cabac_enc_top #(
     wire        drain_is_ep     = bin_ram_rdata_q[9];
 
     // =========================================================================
-    // Bin arbitration mux — feeds into bin_encoder (u_be)
-    // When ctu_sao_delay_en == 1:
-    //   1. SAO element bins (ss_bin_valid) emitted first directly to u_be
-    //   2. Drained CU syntax bins (drain_bin_valid) emitted after SAO completes
-    // When ctu_sao_delay_en == 0:
-    //   Direct arbitration: syntax_cu > syntax_pred > syntax_coeff > syntax_sao
+    // Bin arbitration mux + 2-entry registered skid buffer -> bin_encoder (u_be)
+    // Cuts syntax_* / ctu_bin_ram -> u_ctx -> u_rc combinational path for 180 MHz.
     // =========================================================================
-    assign be_bin_valid = eff_ctu_sao_delay_en ? (ss_bin_valid | drain_bin_valid)
-                                               : (cu_bin_valid | ss_bin_valid);
-    assign be_bin_value = eff_ctu_sao_delay_en ? (ss_bin_valid ? ss_bin_value : drain_bin_value)
-                                               : (cu_bin_valid ? cu_bin_value : ss_bin_value);
-    assign be_ctx_id    = eff_ctu_sao_delay_en ? (ss_bin_valid ? ss_ctx_id : drain_ctx_id)
-                                               : (cu_bin_valid ? cu_bin_ctx_id : ss_ctx_id);
-    assign be_is_ep     = eff_ctu_sao_delay_en ? (ss_bin_valid ? ss_is_ep : drain_is_ep)
-                                               : (cu_bin_valid ? cu_bin_is_ep : ss_is_ep);
+    wire                raw_be_bin_valid = eff_ctu_sao_delay_en ? (ss_bin_valid | drain_bin_valid)
+                                                                  : (cu_bin_valid | ss_bin_valid);
+    wire                raw_be_bin_value = eff_ctu_sao_delay_en ? (ss_bin_valid ? ss_bin_value : drain_bin_value)
+                                                                  : (cu_bin_valid ? cu_bin_value : ss_bin_value);
+    wire [CTX_ID_W-1:0] raw_be_ctx_id    = eff_ctu_sao_delay_en ? (ss_bin_valid ? ss_ctx_id : drain_ctx_id)
+                                                                  : (cu_bin_valid ? cu_bin_ctx_id : ss_ctx_id);
+    wire                raw_be_is_ep     = eff_ctu_sao_delay_en ? (ss_bin_valid ? ss_is_ep : drain_is_ep)
+                                                                  : (cu_bin_valid ? cu_bin_is_ep : ss_is_ep);
+
+    reg [9:0] be_skid_mem [0:1];
+    reg       be_skid_wr_ptr;
+    reg       be_skid_rd_ptr;
+    reg [1:0] be_skid_count;
+    reg       trm_pending;
+    reg       trm_pending_val;
+
+    assign be_skid_in_ready = (be_skid_count < 2'd2);
+    wire   be_skid_push     = raw_be_bin_valid && be_skid_in_ready;
+    wire   be_skid_pop      = (be_skid_count != 2'd0) && be_bin_rdy;
+
+    assign be_bin_valid = (be_skid_count != 2'd0);
+    assign be_is_ep     = be_skid_mem[be_skid_rd_ptr][9];
+    assign be_bin_value = be_skid_mem[be_skid_rd_ptr][8];
+    assign be_ctx_id    = be_skid_mem[be_skid_rd_ptr][7:0];
+
+    wire trm_can_fire_now = (be_skid_count == 2'd0) && rc_bin_ready;
+    assign eff_trm_valid  = (trm_pending && trm_can_fire_now) || (trm_req && !trm_pending && trm_can_fire_now);
+    assign eff_trm_val    = trm_pending ? trm_pending_val : trm_bin_val;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            be_skid_mem[0]  <= 10'd0;
+            be_skid_mem[1]  <= 10'd0;
+            be_skid_wr_ptr  <= 1'b0;
+            be_skid_rd_ptr  <= 1'b0;
+            be_skid_count   <= 2'd0;
+            trm_pending     <= 1'b0;
+            trm_pending_val <= 1'b0;
+        end else if (slice_init) begin
+            be_skid_wr_ptr  <= 1'b0;
+            be_skid_rd_ptr  <= 1'b0;
+            be_skid_count   <= 2'd0;
+            trm_pending     <= 1'b0;
+            trm_pending_val <= 1'b0;
+        end else begin
+            if (be_skid_push) begin
+                be_skid_mem[be_skid_wr_ptr] <= {raw_be_is_ep, raw_be_bin_value, raw_be_ctx_id};
+                be_skid_wr_ptr <= ~be_skid_wr_ptr;
+            end
+            if (be_skid_pop) begin
+                be_skid_rd_ptr <= ~be_skid_rd_ptr;
+            end
+            case ({be_skid_push, be_skid_pop})
+                2'b10:   be_skid_count <= be_skid_count + 2'd1;
+                2'b01:   be_skid_count <= be_skid_count - 2'd1;
+                default: be_skid_count <= be_skid_count;
+            endcase
+
+            if (trm_pending && trm_can_fire_now) begin
+                trm_pending <= 1'b0;
+            end else if (trm_req && !trm_pending && !trm_can_fire_now) begin
+                trm_pending     <= 1'b1;
+                trm_pending_val <= trm_bin_val;
+            end
+        end
+    end
 
     // Mux bin value and context into range_coder
-    assign rc_muxed_bin_value = trm_req ? trm_bin_val : rc_bin_value;
+    assign rc_muxed_bin_value = eff_trm_valid ? eff_trm_val : rc_bin_value;
 
     // =========================================================================
-    // Busy signal
+    // Busy signal (includes be_skid_count & trm_pending so trm_req waits cleanly)
     // =========================================================================
     assign enc_busy = (eff_ctu_sao_delay_en ? (drain_bin_valid | ss_bin_valid) : (cu_bin_valid | ss_bin_valid))
+                    | (be_skid_count != 2'd0)
+                    | trm_pending
                     | ctx_init_busy | rc_coder_busy;
 
     // =========================================================================

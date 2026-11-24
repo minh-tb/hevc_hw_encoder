@@ -1339,6 +1339,8 @@ module hevc_encoder_top #(
     // TU Sequencer Registers
     reg         inter_p2s_active;
     reg         intra_ref_active;
+    reg         intra_ref_s1_active;
+    reg         intra_ref_active_q;
     reg [7:0]   intra_ref_idx; // 0 to 4N (max 128)
     reg         mc_data_ready;
     reg [2:0]   reg_tu_size_log2;
@@ -1717,13 +1719,14 @@ module hevc_encoder_top #(
         end
     end
 
-    wire tu_stage1_free = !res_buf_busy && !res_buf_ready && !inter_p2s_active && !intra_ref_active &&
+    wire tu_stage1_free = !res_buf_busy && !res_buf_ready && !inter_p2s_active &&
+                          !intra_ref_active && !intra_ref_s1_active && !intra_ref_active_q &&
                           !dct_start_pre && !dct_start;
     wire tu_stage2_ok   = !tq_stage_busy || (!latched_cu_is_intra && (tu_comp != tq_tu_comp));
     wire tu_fifo_ok     = tq_stage_busy ? (tu_fifo_count < 3'd3) : (tu_fifo_count < 3'd4);
 
     assign tq_cu_idle      = !res_buf_busy && !res_buf_ready && !tq_stage_busy &&
-                             !inter_p2s_active && !intra_ref_active && !p2s_active &&
+                             !inter_p2s_active && !intra_ref_active && !intra_ref_s1_active && !intra_ref_active_q && !p2s_active &&
                              !idct_p2s_active && !idct_active && !idct_start && !idct_start_pre &&
                              !dct_start && !dct_start_pre;
     assign tu_ready_signal = tu_stage1_free && tu_stage2_ok && tu_fifo_ok &&
@@ -1878,109 +1881,195 @@ module hevc_encoder_top #(
     wire corner_available = top_available && left_available;
     wire any_neighbor_available = top_available || left_available;
 
-    wire recon_rd_valid = any_neighbor_available;
+    //-------------------------------------------------------------------------
+    // Unified 2-Stage Intra Reference Sample Fetch Pipeline
+    //   Stage S0: Address, clamp, and 3-bit source decode (NO RAM reads)
+    //   Stage S1: Register decoded source & addresses (breaks intra_ref_idx -> LUTRAM)
+    //   Stage S2: Single selected memory read + 5:1 mux -> recon_ram_q
+    //-------------------------------------------------------------------------
+    localparam [2:0]
+        INTRA_SRC_CONST  = 3'd0,
+        INTRA_SRC_RECON  = 3'd1,
+        INTRA_SRC_LINE   = 3'd2,
+        INTRA_SRC_COL    = 3'd3,
+        INTRA_SRC_CORNER = 3'd4;
 
-    // First available top sample for sample substitution when left is unavailable
-    wire [9:0] first_top_sample = 
-        (reg_tu_y > 0) ? (is_luma_comp ? recon_y_ram[{reg_tu_y - 6'd1, reg_tu_x}] :
-                          (reg_tu_comp == 2'd1) ? recon_u_ram[{reg_tu_y[4:0] - 5'd1, reg_tu_x[4:0]}] :
-                                                  recon_v_ram[{reg_tu_y[4:0] - 5'd1, reg_tu_x[4:0]}]) :
-        (latched_cu_ctu_y > 0) ? (is_luma_comp ? line_buf_y[{6'd0, latched_cu_ctu_x, 6'd0} + {6'd0, reg_tu_x}] :
-                                  (reg_tu_comp == 2'd1) ? line_buf_u[{7'd0, latched_cu_ctu_x, 5'd0} + {7'd0, reg_tu_x[4:0]}] :
-                                                          line_buf_v[{7'd0, latched_cu_ctu_x, 5'd0} + {7'd0, reg_tu_x[4:0]}]) :
-        10'd512;
+    wire [2:0]  first_top_src = (reg_tu_y > 0) ? INTRA_SRC_RECON :
+                                (latched_cu_ctu_y > 0) ? INTRA_SRC_LINE : INTRA_SRC_CONST;
+    wire [11:0] first_top_recon_addr = is_luma_comp ? {reg_tu_y - 6'd1, reg_tu_x}
+                                                    : {2'b0, reg_tu_y[4:0] - 5'd1, reg_tu_x[4:0]};
+    wire [11:0] first_top_line_x = is_luma_comp
+        ? ({6'd0, latched_cu_ctu_x, 6'd0} + {6'd0, reg_tu_x})
+        : ({7'd0, latched_cu_ctu_x, 5'd0} + {7'd0, reg_tu_x[4:0]});
 
-    // First available left sample for sample substitution when top is unavailable
-    wire [9:0] first_left_sample = 
-        (reg_tu_x > 0) ? (is_luma_comp ? recon_y_ram[{reg_tu_y, reg_tu_x - 6'd1}] :
-                          (reg_tu_comp == 2'd1) ? recon_u_ram[{reg_tu_y[4:0], reg_tu_x[4:0] - 5'd1}] :
-                                                  recon_v_ram[{reg_tu_y[4:0], reg_tu_x[4:0] - 5'd1}]) :
-        (latched_cu_ctu_x > 0) ? (is_luma_comp ? col_buf_y[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y] :
-                                  (reg_tu_comp == 2'd1) ? col_buf_u[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y[4:0]] :
-                                                          col_buf_v[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y[4:0]]) :
-        10'd512;
+    wire [2:0]  first_left_src = (reg_tu_x > 0) ? INTRA_SRC_RECON :
+                                 (latched_cu_ctu_x > 0) ? INTRA_SRC_COL : INTRA_SRC_CONST;
+    wire [11:0] first_left_recon_addr = is_luma_comp ? {reg_tu_y, reg_tu_x - 6'd1}
+                                                     : {2'b0, reg_tu_y[4:0], reg_tu_x[4:0] - 5'd1};
+    wire [5:0]  first_left_col_row = is_luma_comp ? reg_tu_y : {1'b0, reg_tu_y[4:0]};
 
-    reg [9:0] recon_val_wire;
+    reg [2:0]  s0_src_sel;
+    reg [11:0] s0_recon_addr;
+    reg [11:0] s0_line_x;
+    reg [5:0]  s0_col_row;
+
     always @(*) begin
+        s0_src_sel    = INTRA_SRC_CONST;
+        s0_recon_addr = 12'd0;
+        s0_line_x     = 12'd0;
+        s0_col_row    = 6'd0;
+
         if (intra_ref_idx == 0) begin
             if (corner_available) begin
-                if (reg_tu_x > 0 && reg_tu_y > 0)
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? recon_y_ram[recon_rd_addr] :
-                                     (reg_tu_comp == 2'd1) ? recon_u_ram[recon_rd_addr[9:0]] :
-                                                             recon_v_ram[recon_rd_addr[9:0]];
-                else if (reg_tu_y > 0 && latched_cu_ctu_x > 0)
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? col_buf_y[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y - 6'd1] :
-                                     (reg_tu_comp == 2'd1) ? col_buf_u[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y[4:0] - 5'd1] :
-                                                             col_buf_v[latched_cu_ctu_x[1:0] - 2'd1][reg_tu_y[4:0] - 5'd1];
-                else if (reg_tu_x > 0 && latched_cu_ctu_y > 0)
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? line_buf_y[abs_ref_corner_x] :
-                                     (reg_tu_comp == 2'd1) ? line_buf_u[abs_ref_corner_x] :
-                                                             line_buf_v[abs_ref_corner_x];
-                else if (latched_cu_ctu_x > 0 && latched_cu_ctu_y > 0)
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? ctu_corner_y[latched_cu_ctu_x[1:0] - 2'd1][latched_cu_ctu_y[1:0] - 2'd1] :
-                                     (reg_tu_comp == 2'd1) ? ctu_corner_u[latched_cu_ctu_x[1:0] - 2'd1][latched_cu_ctu_y[1:0] - 2'd1] :
-                                                             ctu_corner_v[latched_cu_ctu_x[1:0] - 2'd1][latched_cu_ctu_y[1:0] - 2'd1];
-                else
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? line_buf_y[abs_ctu_corner_x] :
-                                     (reg_tu_comp == 2'd1) ? line_buf_u[abs_ctu_corner_x] :
-                                                             line_buf_v[abs_ctu_corner_x];
+                if (reg_tu_x > 0 && reg_tu_y > 0) begin
+                    s0_src_sel    = INTRA_SRC_RECON;
+                    s0_recon_addr = recon_rd_addr;
+                end else if (reg_tu_y > 0 && latched_cu_ctu_x > 0) begin
+                    s0_src_sel = INTRA_SRC_COL;
+                    s0_col_row = is_luma_comp ? (reg_tu_y - 6'd1) : {1'b0, reg_tu_y[4:0] - 5'd1};
+                end else if (reg_tu_x > 0 && latched_cu_ctu_y > 0) begin
+                    s0_src_sel = INTRA_SRC_LINE;
+                    s0_line_x  = abs_ref_corner_x;
+                end else if (latched_cu_ctu_x > 0 && latched_cu_ctu_y > 0) begin
+                    s0_src_sel = INTRA_SRC_CORNER;
+                end else begin
+                    s0_src_sel = INTRA_SRC_LINE;
+                    s0_line_x  = abs_ctu_corner_x;
+                end
             end else if (top_available) begin
-                recon_val_wire = first_top_sample; // HEVC sample substitution
+                s0_src_sel    = first_top_src;
+                s0_recon_addr = first_top_recon_addr;
+                s0_line_x     = first_top_line_x;
             end else if (left_available) begin
-                recon_val_wire = first_left_sample; // HEVC sample substitution
-            end else begin
-                recon_val_wire = 10'd512;
+                s0_src_sel    = first_left_src;
+                s0_recon_addr = first_left_recon_addr;
+                s0_col_row    = first_left_col_row;
             end
         end else if (intra_ref_idx <= intra_ref_half) begin
             // Top references
             if (top_available) begin
-                if (reg_tu_y > 0)
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? recon_y_ram[recon_rd_addr] :
-                                     (reg_tu_comp == 2'd1) ? recon_u_ram[recon_rd_addr[9:0]] :
-                                                             recon_v_ram[recon_rd_addr[9:0]];
-                else
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? line_buf_y[abs_ref_top_x] :
-                                     (reg_tu_comp == 2'd1) ? line_buf_u[abs_ref_top_x] :
-                                                             line_buf_v[abs_ref_top_x];
+                if (reg_tu_y > 0) begin
+                    s0_src_sel    = INTRA_SRC_RECON;
+                    s0_recon_addr = recon_rd_addr;
+                end else begin
+                    s0_src_sel = INTRA_SRC_LINE;
+                    s0_line_x  = abs_ref_top_x;
+                end
             end else if (left_available) begin
-                recon_val_wire = first_left_sample; // HEVC sample substitution
-            end else begin
-                recon_val_wire = 10'd512;
+                s0_src_sel    = first_left_src;
+                s0_recon_addr = first_left_recon_addr;
+                s0_col_row    = first_left_col_row;
             end
         end else begin
             // Left references
             if (left_available) begin
-                if (reg_tu_x > 0)
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? recon_y_ram[recon_rd_addr] :
-                                     (reg_tu_comp == 2'd1) ? recon_u_ram[recon_rd_addr[9:0]] :
-                                                             recon_v_ram[recon_rd_addr[9:0]];
-                else
-                    recon_val_wire = (reg_tu_comp == 2'd0) ? col_buf_y[latched_cu_ctu_x[1:0] - 2'd1][left_row_clamped] :
-                                     (reg_tu_comp == 2'd1) ? col_buf_u[latched_cu_ctu_x[1:0] - 2'd1][left_row_clamped[4:0]] :
-                                                             col_buf_v[latched_cu_ctu_x[1:0] - 2'd1][left_row_clamped[4:0]];
+                if (reg_tu_x > 0) begin
+                    s0_src_sel    = INTRA_SRC_RECON;
+                    s0_recon_addr = recon_rd_addr;
+                end else begin
+                    s0_src_sel = INTRA_SRC_COL;
+                    s0_col_row = is_luma_comp ? left_row_clamped : {1'b0, left_row_clamped[4:0]};
+                end
             end else if (top_available) begin
-                recon_val_wire = first_top_sample; // HEVC sample substitution
-            end else begin
-                recon_val_wire = 10'd512;
+                s0_src_sel    = first_top_src;
+                s0_recon_addr = first_top_recon_addr;
+                s0_line_x     = first_top_line_x;
             end
         end
     end
 
-    reg recon_rd_valid_q;
-    reg [9:0] recon_ram_q;
-    reg        intra_ref_active_q;
-    reg [7:0]  intra_ref_idx_q;
-    reg        intra_ref_last_q;
+    reg [7:0]  intra_ref_s1_idx;
+    reg        intra_ref_s1_last;
+    reg [2:0]  intra_ref_s1_src_sel;
+    reg [11:0] intra_ref_s1_recon_addr;
+    reg [11:0] intra_ref_s1_line_x;
+    reg [5:0]  intra_ref_s1_col_row;
+    reg [1:0]  intra_ref_s1_comp;
+    reg [1:0]  intra_ref_s1_col_ctu_x;
+    reg [1:0]  intra_ref_s1_corner_ctu_y;
 
-    always @(posedge clk) begin
-        recon_ram_q        <= recon_val_wire;
-        recon_rd_valid_q   <= recon_rd_valid;
-        intra_ref_active_q <= intra_ref_active;
-        intra_ref_idx_q    <= intra_ref_idx;
-        intra_ref_last_q   <= (intra_ref_idx == intra_ref_max);
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            intra_ref_s1_active      <= 1'b0;
+            intra_ref_s1_idx         <= 8'd0;
+            intra_ref_s1_last        <= 1'b0;
+            intra_ref_s1_src_sel     <= INTRA_SRC_CONST;
+            intra_ref_s1_recon_addr  <= 12'd0;
+            intra_ref_s1_line_x      <= 12'd0;
+            intra_ref_s1_col_row     <= 6'd0;
+            intra_ref_s1_comp        <= 2'd0;
+            intra_ref_s1_col_ctu_x   <= 2'd0;
+            intra_ref_s1_corner_ctu_y<= 2'd0;
+        end else if (ctu_frame_start) begin
+            intra_ref_s1_active      <= 1'b0;
+            intra_ref_s1_idx         <= 8'd0;
+            intra_ref_s1_last        <= 1'b0;
+            intra_ref_s1_src_sel     <= INTRA_SRC_CONST;
+        end else begin
+            intra_ref_s1_active      <= intra_ref_active;
+            intra_ref_s1_idx         <= intra_ref_idx;
+            intra_ref_s1_last        <= (intra_ref_idx == intra_ref_max);
+            intra_ref_s1_src_sel     <= s0_src_sel;
+            intra_ref_s1_recon_addr  <= s0_recon_addr;
+            intra_ref_s1_line_x      <= s0_line_x;
+            intra_ref_s1_col_row     <= s0_col_row;
+            intra_ref_s1_comp        <= reg_tu_comp;
+            intra_ref_s1_col_ctu_x   <= latched_cu_ctu_x[1:0] - 2'd1;
+            intra_ref_s1_corner_ctu_y<= latched_cu_ctu_y[1:0] - 2'd1;
+        end
     end
 
-    wire [9:0] intra_ref_sample = recon_rd_valid_q ? recon_ram_q : 10'd512;
+    reg [9:0] recon_val_s2;
+    always @(*) begin
+        case (intra_ref_s1_src_sel)
+            INTRA_SRC_RECON: begin
+                recon_val_s2 = (intra_ref_s1_comp == 2'd0) ? recon_y_ram[intra_ref_s1_recon_addr] :
+                               (intra_ref_s1_comp == 2'd1) ? recon_u_ram[intra_ref_s1_recon_addr[9:0]] :
+                                                             recon_v_ram[intra_ref_s1_recon_addr[9:0]];
+            end
+            INTRA_SRC_LINE: begin
+                recon_val_s2 = (intra_ref_s1_comp == 2'd0) ? line_buf_y[intra_ref_s1_line_x] :
+                               (intra_ref_s1_comp == 2'd1) ? line_buf_u[intra_ref_s1_line_x] :
+                                                             line_buf_v[intra_ref_s1_line_x];
+            end
+            INTRA_SRC_COL: begin
+                recon_val_s2 = (intra_ref_s1_comp == 2'd0) ? col_buf_y[intra_ref_s1_col_ctu_x][intra_ref_s1_col_row] :
+                               (intra_ref_s1_comp == 2'd1) ? col_buf_u[intra_ref_s1_col_ctu_x][intra_ref_s1_col_row[4:0]] :
+                                                             col_buf_v[intra_ref_s1_col_ctu_x][intra_ref_s1_col_row[4:0]];
+            end
+            INTRA_SRC_CORNER: begin
+                recon_val_s2 = (intra_ref_s1_comp == 2'd0) ? ctu_corner_y[intra_ref_s1_col_ctu_x][intra_ref_s1_corner_ctu_y] :
+                               (intra_ref_s1_comp == 2'd1) ? ctu_corner_u[intra_ref_s1_col_ctu_x][intra_ref_s1_corner_ctu_y] :
+                                                             ctu_corner_v[intra_ref_s1_col_ctu_x][intra_ref_s1_corner_ctu_y];
+            end
+            default: recon_val_s2 = 10'd512;
+        endcase
+    end
+
+    reg [9:0] recon_ram_q;
+    reg [7:0] intra_ref_idx_q;
+    reg       intra_ref_last_q;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            recon_ram_q        <= 10'd512;
+            intra_ref_active_q <= 1'b0;
+            intra_ref_idx_q    <= 8'd0;
+            intra_ref_last_q   <= 1'b0;
+        end else if (ctu_frame_start) begin
+            recon_ram_q        <= 10'd512;
+            intra_ref_active_q <= 1'b0;
+            intra_ref_idx_q    <= 8'd0;
+            intra_ref_last_q   <= 1'b0;
+        end else begin
+            recon_ram_q        <= recon_val_s2;
+            intra_ref_active_q <= intra_ref_s1_active;
+            intra_ref_idx_q    <= intra_ref_s1_idx;
+            intra_ref_last_q   <= intra_ref_s1_last;
+        end
+    end
+
+    wire [9:0] intra_ref_sample = recon_ram_q;
 
     //-------------------------------------------------------------------------
     // RMD Reference Sample Feeder

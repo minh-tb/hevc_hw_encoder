@@ -311,25 +311,13 @@ module intra_angular (
     end
 
     //-------------------------------------------------------------------------
-    // Output FSM — compute and stream N×N pixels
-    //
-    // For each pixel position (px, py):
-    //   Vertical mode:
-    //     deltaPos = (py+1) * angle                 [signed multiply]
-    //     iIdx     = px + (deltaPos >> 5)           [integer part of projection]
-    //     frac     = deltaPos & 31                  [fractional part, 0..31]
-    //     refAccess= refExt[32 + 1 + iIdx]          [apply 32 offset + 1 for pSrc[1]]
-    //
-    //   pred = frac==0 ? ref[refAccess]
-    //              : ((32-frac)*ref[refAccess] + frac*ref[refAccess+1] + 16) >> 5
-    //
-    // For horizontal mode: swap px↔py in deltaPos calculation,
-    //   and swap out_x/out_y at output register
-    //
-    // Pure horizontal/vertical modes (angle=0): pred = refMain[px+1 or py+1]
+    // Output FSM — 2-Stage Lockstep Pipeline (180 MHz Timing Closure)
+    //   Stage 1: Coordinate/deltaPos/refExt lookup -> s1_* registers
+    //   Stage 2: Interpolation DSP/MAC from s1_* -> out_pixel register
     //-------------------------------------------------------------------------
     reg [5:0] px;
     reg [5:0] py;
+    reg       gen_done;
 
     wire signed [6:0]  angle     = angle_r;
     wire               pure_mode = pure_mode_r;
@@ -339,9 +327,6 @@ module intra_angular (
     wire [5:0]  ref_selector  = px;
 
     // deltaPos = (delta_driver+1) * angle  — signed multiply, 14-bit result
-    // angle range: -32..32 (7-bit signed)
-    // delta_driver+1 range: 1..32 (7-bit signed)
-    // product range: -1024..1024 → 14-bit signed
     wire signed [13:0] deltaPos = $signed({1'b0, delta_driver + 6'd1}) * angle;
 
     // Integer part of displacement (arithmetic right shift by 5)
@@ -351,19 +336,13 @@ module intra_angular (
     wire [4:0]  frac     = deltaPos[4:0];             // low 5 bits
     wire        is_int   = (frac == 5'd0);            // no interpolation needed
 
-    // Reference index into refExt
-    // refExt is centered at 32 (refMain[0] = refExt[32])
-    // pSrc[0] = refMain[0] = refExt[32] = corner
-    // pSrc[1] = refMain[1] = refExt[33] = first active sample
-    // For vertical mode: access pSrc[x + iDeltaInt + 1]
-    //   = refExt[32 + 1 + x + iDeltaInt]
     wire signed [9:0] base_idx  = 10'sd33 +
                                    $signed({4'b0, ref_selector}) +
                                    $signed({{1{iDeltaInt[8]}}, iDeltaInt});
     wire [7:0]  ref_idx0 = base_idx[7:0];
     wire [7:0]  ref_idx1 = base_idx[7:0] + 8'd1;
 
-    // Reference sample read
+    // Reference sample read (Stage 1)
     wire [`PIXEL_WIDTH-1:0] s0 = refExt[ref_idx0];
     wire [`PIXEL_WIDTH-1:0] s1 = refExt[ref_idx1];
 
@@ -377,60 +356,105 @@ module intra_angular (
 
     wire [`PIXEL_WIDTH-1:0] pure_pred = apply_edge_filter ? edge_pred : refMain[{2'b0, ref_selector} + 8'd1];
 
-    // Fractional interpolation: ((32-frac)*s0 + frac*s1 + 16) >> 5
-    wire [14:0] interp_sum = {5'b0, (6'd32 - {1'b0, frac})} * {5'b0, s0} +
-                              {5'b0, {1'b0, frac}}           * {5'b0, s1} +
-                              15'd16;
-    wire [`PIXEL_WIDTH-1:0] interp_pred = interp_sum[14:5];  // >> 5
+    // Stage 1 -> Stage 2 Pipeline Registers
+    reg                     s1_valid;
+    reg [`PIXEL_WIDTH-1:0]  s1_s0;
+    reg [`PIXEL_WIDTH-1:0]  s1_s1;
+    reg [4:0]               s1_frac;
+    reg                     s1_is_int;
+    reg [`PIXEL_WIDTH-1:0]  s1_pure_pred;
+    reg [5:0]               s1_out_x;
+    reg [5:0]               s1_out_y;
+    reg                     s1_last;
 
-    wire [`PIXEL_WIDTH-1:0] ang_pred = pure_mode ? pure_pred :
-                                        is_int    ? s0        :
-                                        interp_pred;
+    // Stage 2: Fractional interpolation from registered s1_*
+    wire [14:0] interp_sum_s2 = {5'b0, (6'd32 - {1'b0, s1_frac})} * {5'b0, s1_s0} +
+                                 {5'b0, {1'b0, s1_frac}}           * {5'b0, s1_s1} +
+                                 15'd16;
+    wire [`PIXEL_WIDTH-1:0] interp_pred_s2 = interp_sum_s2[14:5];  // >> 5
+
+    wire [`PIXEL_WIDTH-1:0] ang_pred_s2 = pure_mode_r ? s1_pure_pred :
+                                          s1_is_int   ? s1_s0        :
+                                          interp_pred_s2;
+
+    wire pipe_en = out_ready || !out_valid;
 
     //-------------------------------------------------------------------------
-    // Output register
+    // Lockstep 2-stage output register
     //-------------------------------------------------------------------------
     always @(posedge clk) begin
         if (!rst_n) begin
-            out_valid <= 1'b0;
-            out_pixel <= {`PIXEL_WIDTH{1'b0}};
-            out_x     <= 6'd0;
-            out_y     <= 6'd0;
-            out_last  <= 1'b0;
-            px        <= 6'd0;
-            py        <= 6'd0;
+            out_valid    <= 1'b0;
+            out_pixel    <= {`PIXEL_WIDTH{1'b0}};
+            out_x        <= 6'd0;
+            out_y        <= 6'd0;
+            out_last     <= 1'b0;
+            px           <= 6'd0;
+            py           <= 6'd0;
+            gen_done     <= 1'b0;
+            s1_valid     <= 1'b0;
+            s1_s0        <= {`PIXEL_WIDTH{1'b0}};
+            s1_s1        <= {`PIXEL_WIDTH{1'b0}};
+            s1_frac      <= 5'd0;
+            s1_is_int    <= 1'b0;
+            s1_pure_pred <= {`PIXEL_WIDTH{1'b0}};
+            s1_out_x     <= 6'd0;
+            s1_out_y     <= 6'd0;
+            s1_last      <= 1'b0;
         end else if (state == S_OUTPUT) begin
-            if (out_ready || !out_valid) begin
+            if (pipe_en) begin
                 if (out_last && out_valid) begin
                     out_valid <= 1'b0;
                     out_last  <= 1'b0;
+                    s1_valid  <= 1'b0;
+                    s1_last   <= 1'b0;
+                    gen_done  <= 1'b0;
+                    px        <= 6'd0;
+                    py        <= 6'd0;
                 end else begin
-                    out_valid <= 1'b1;
-                    out_pixel <= ang_pred;
+                    // Stage 1: Coordinate advance & refExt fetch
+                    if (!gen_done) begin
+                        s1_valid     <= 1'b1;
+                        s1_s0        <= s0;
+                        s1_s1        <= s1;
+                        s1_frac      <= frac;
+                        s1_is_int    <= is_int;
+                        s1_pure_pred <= pure_pred;
+                        s1_out_x     <= is_vertical_r ? px : py;
+                        s1_out_y     <= is_vertical_r ? py : px;
+                        s1_last      <= (px == N_r - 6'd1) && (py == N_r - 6'd1);
 
-                    // Horizontal modes: transpose output coordinates
-                    out_x     <= is_vertical_r ? px : py;
-                    out_y     <= is_vertical_r ? py : px;
-                    out_last  <= (px == N_r - 6'd1) && (py == N_r - 6'd1);
-
-                    // Raster scan advance
-                    if (px == N_r - 6'd1) begin
-                        px <= 6'd0;
-                        py <= py + 6'd1;
+                        if ((px == N_r - 6'd1) && (py == N_r - 6'd1)) begin
+                            gen_done <= 1'b1;
+                            px       <= 6'd0;
+                            py       <= 6'd0;
+                        end else if (px == N_r - 6'd1) begin
+                            px <= 6'd0;
+                            py <= py + 6'd1;
+                        end else begin
+                            px <= px + 6'd1;
+                        end
                     end else begin
-                        px <= px + 6'd1;
+                        s1_valid <= 1'b0;
+                        s1_last  <= 1'b0;
                     end
 
-                    if ((px == N_r - 6'd1) && (py == N_r - 6'd1)) begin
-                        px <= 6'd0;
-                        py <= 6'd0;
-                    end
+                    // Stage 2: Interpolation -> output
+                    out_valid <= s1_valid;
+                    out_pixel <= ang_pred_s2;
+                    out_x     <= s1_out_x;
+                    out_y     <= s1_out_y;
+                    out_last  <= s1_valid && s1_last;
                 end
             end
         end else begin
             out_valid <= 1'b0;
-            px <= 6'd0;
-            py <= 6'd0;
+            out_last  <= 1'b0;
+            s1_valid  <= 1'b0;
+            s1_last   <= 1'b0;
+            gen_done  <= 1'b0;
+            px        <= 6'd0;
+            py        <= 6'd0;
         end
     end
 

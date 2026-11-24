@@ -362,8 +362,9 @@ module syntax_coeff #(
     wire        cur_cg_skip       = eff_tu_cg_mask_en && (cur_cg != last_cg_idx) && (eff_tu_cg_mask[cur_cg] === 1'b0);
 `endif
 
-    // 16-word buffer for the currently active 4x4 CG
-    reg signed [COEFF_W-1:0] cg_coeffs [0:15];
+    // Streaming CG compaction signals (reverse scan order: pos 15 -> 0)
+    wire [3:0] cg_req_pos = 4'd15 - load_cnt;
+    wire [3:0] cg_rx_pos  = 4'd15 - (load_cnt - 4'd1);
     reg [15:0] cg_sig_map;
     reg [4:0]  cg_num_sig;
 
@@ -600,7 +601,7 @@ module syntax_coeff #(
 
             S_LOAD_CG_REQ: begin
                 coeff_rd_en   = (load_cnt == 4'd0 && cur_cg_skip) ? 1'b0 : 1'b1;
-                coeff_rd_addr = {6'd0, cur_cg, 4'd0} + {8'd0, load_cnt};
+                coeff_rd_addr = {6'd0, cur_cg, cg_req_pos};
             end
             S_LOAD_CG_WAIT: begin
                 coeff_rd_en   = 1'b0;
@@ -735,11 +736,6 @@ module syntax_coeff #(
     reg [COEFF_W-1:0] cur_abs_val;
     reg [COEFF_W-1:0] base_level_val;
     reg [37:0] eg_result;
-    reg [15:0] v_sig_map;
-    reg [4:0]  v_num_sig;
-    reg [3:0]  v_pos_list [0:15];
-    reg signed [COEFF_W-1:0] v_val_list [0:15];
-    reg signed [COEFF_W-1:0] c_val;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -789,7 +785,6 @@ module syntax_coeff #(
             sig_cg_not_first_r  <= 1'b0;
             sig_cg_is_zero_r    <= 1'b0;
             for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
-                cg_coeffs[c_i]    <= {COEFF_W{1'b0}};
                 sig_pos_list[c_i] <= 4'd0;
                 sig_val_list[c_i] <= {COEFF_W{1'b0}};
             end
@@ -948,7 +943,6 @@ module syntax_coeff #(
                     if ((load_cnt == 4'd0) && cur_cg_skip) begin
                         // Pillar 3: Zero-subblock (CG) 1-cycle fast-skip (with all 4 safeguards)
                         for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
-                            cg_coeffs[c_i]    <= {COEFF_W{1'b0}};
                             sig_pos_list[c_i] <= 4'd0;
                             sig_val_list[c_i] <= {COEFF_W{1'b0}};
                         end
@@ -972,8 +966,18 @@ module syntax_coeff #(
                             state <= S_CG_FLAG;
                         end
                     end else begin
-                        if (load_cnt != 4'd0) begin
-                            cg_coeffs[load_cnt - 4'd1] <= coeff_rd_data;
+                        if (load_cnt == 4'd0) begin
+                            cg_sig_map <= 16'd0;
+                            cg_num_sig <= 5'd0;
+                        end else begin
+                            // Streaming reverse-order compaction for cg_rx_pos (15..1)
+                            if ((coeff_rd_data != {COEFF_W{1'b0}}) &&
+                                ((cur_cg != last_cg_idx) || (cg_rx_pos <= last_sig_pos_r[3:0]))) begin
+                                cg_sig_map[cg_rx_pos]         <= 1'b1;
+                                sig_pos_list[cg_num_sig[3:0]] <= cg_rx_pos;
+                                sig_val_list[cg_num_sig[3:0]] <= coeff_rd_data;
+                                cg_num_sig                    <= cg_num_sig + 5'd1;
+                            end
                         end
                         if (load_cnt == 4'd15) begin
                             state <= S_LOAD_CG_WAIT;
@@ -984,7 +988,6 @@ module syntax_coeff #(
                 end
 
                 S_LOAD_CG_WAIT: begin
-                    cg_coeffs[4'd15] <= coeff_rd_data;
                     sig_cg_pattern_r   <= pre_cg_pattern;
                     sig_cg_not_first_r <= pre_cg_not_first;
                     sig_cg_is_zero_r   <= pre_cg_is_zero;
@@ -993,38 +996,21 @@ module syntax_coeff #(
                         get_cg_col(tu_size_log2_r, cur_cg, scan_mode_r),
                         get_cg_row(tu_size_log2_r, cur_cg, scan_mode_r))] <= 1'b1;
                     scan_ptr <= (cur_cg == last_cg_idx) ? {1'b0, last_sig_pos_r[3:0]} : 5'd15;
-
-                    // Procedural accumulation with blocking assignments
-                    v_sig_map = 16'd0;
-                    v_num_sig = 5'd0;
-                    for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
-                        v_pos_list[c_i] = 4'd0;
-                        v_val_list[c_i] = {COEFF_W{1'b0}};
-                    end
-                    for (c_i = 15; c_i >= 0; c_i = c_i - 1) begin
-                        c_val = (c_i == 15) ? coeff_rd_data : cg_coeffs[c_i];
-                        if (c_val != 16'd0) begin
-                            if (cur_cg != last_cg_idx || c_i <= last_sig_pos_r[3:0]) begin
-                                v_sig_map[c_i] = 1'b1;
-                                v_pos_list[v_num_sig[3:0]] = c_i[3:0];
-                                v_val_list[v_num_sig[3:0]] = c_val;
-                                v_num_sig = v_num_sig + 5'd1;
-                            end
-                        end
-                    end
-                    if (v_num_sig == 5'd0 && cur_cg == last_cg_idx) begin
-                        v_sig_map[0] = 1'b1;
-                        v_pos_list[0] = 4'd0;
-                        v_val_list[0] = 16'd1;
-                        v_num_sig = 5'd1;
-                    end
-                    cg_sig_map <= v_sig_map;
-                    cg_num_sig <= v_num_sig;
-                    ctx_set    <= (comp_r == 2'd0) ? ((cur_cg > 6'd0 ? 2'd2 : 2'd0) + {1'b0, prev_cg_had_gt1}) :
+                    ctx_set  <= (comp_r == 2'd0) ? ((cur_cg > 6'd0 ? 2'd2 : 2'd0) + {1'b0, prev_cg_had_gt1}) :
                                                      {1'b0, prev_cg_had_gt1};
-                    for (c_i = 0; c_i < 16; c_i = c_i + 1) begin
-                        sig_pos_list[c_i] <= v_pos_list[c_i];
-                        sig_val_list[c_i] <= v_val_list[c_i];
+
+                    // Final arriving coefficient at scan pos 0
+                    if ((coeff_rd_data != {COEFF_W{1'b0}}) &&
+                        ((cur_cg != last_cg_idx) || (4'd0 <= last_sig_pos_r[3:0]))) begin
+                        cg_sig_map[4'd0]              <= 1'b1;
+                        sig_pos_list[cg_num_sig[3:0]] <= 4'd0;
+                        sig_val_list[cg_num_sig[3:0]] <= coeff_rd_data;
+                        cg_num_sig                    <= cg_num_sig + 5'd1;
+                    end else if (cg_num_sig == 5'd0 && cur_cg == last_cg_idx) begin
+                        cg_sig_map[4'd0] <= 1'b1;
+                        sig_pos_list[0]  <= 4'd0;
+                        sig_val_list[0]  <= 16'd1;
+                        cg_num_sig       <= 5'd1;
                     end
                 end
 

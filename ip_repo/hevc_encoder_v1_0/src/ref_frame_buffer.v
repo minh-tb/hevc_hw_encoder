@@ -189,69 +189,53 @@ module ref_frame_buffer #(
         end
     endfunction
 
-    // Compute DDR byte address for pixel (x, y, comp, slot)
-    // Matches frame_store.v address formula
-    function automatic [AXI_AW-1:0] pixel_byte_addr;
-        input [11:0]  px, py;
-        input [11:0]  pstride;
-        input [32:0]  pcomp_base;
-        input [32:0]  pslot_base;
-        reg   [32:0]  row_word_offset;
-        begin
-            row_word_offset = {1'b0, py} * {1'b0, pstride} + {1'b0, px};
-            pixel_byte_addr = pslot_base + pcomp_base + row_word_offset * 33'd2;
-        end
-    endfunction
-
-    // Extract pixel from 256-bit beat at byte-address px_addr within beat
-    function automatic [PIXEL_WIDTH-1:0] extract_pixel;
+    // Extract pixel from 256-bit beat using 4-bit sample offset within 16-pixel beat
+    function automatic [PIXEL_WIDTH-1:0] extract_pixel_off;
         input [AXI_DW-1:0] beat;
-        input [AXI_AW-1:0] px_addr;   // full pixel byte address
-        reg   [2:0]  word_idx;
+        input [3:0]        px_off;    // px_addr[4:1]: {word_idx[2:0], odd_px}
         reg   [31:0] word32;
         begin
-            word_idx        = px_addr[4:2];                      // which 32-bit word in beat
-            word32          = beat >> ({word_idx, 5'd0});         // right-justify word
-            extract_pixel   = px_addr[1] ? word32[25:16] : word32[9:0]; // even/odd pixel
+            word32            = beat >> ({px_off[3:1], 5'd0});
+            extract_pixel_off = px_off[0] ? word32[25:16] : word32[9:0];
         end
     endfunction
 
     // =========================================================================
     // Clamped pixel coordinates for current row / current column
+    // Single shared row-base multiply replaces 13 independent multipliers.
     // =========================================================================
     wire signed [12:0] cur_y_raw  = req_y_r + $signed({9'b0, row_idx});
-    wire [11:0]         cur_y_cl   = clamp_coord(cur_y_raw, frame_h);
+    wire [11:0]        cur_y_cl   = clamp_coord(cur_y_raw, frame_h);
+    wire [AXI_AW-1:0]  cur_row_base = slot_base + comp_base +
+                                      (({21'd0, cur_y_cl} * {21'd0, stride}) << 1);
 
     // Pixel addresses for beat 1 and beat 2 of this row
-    // Beat 1: covers pixel at req_x (possibly clamped), aligned down to 32-byte boundary
-    // Beat 2: next 32-byte beat (for pixels that overflow beat 1)
-    wire [AXI_AW-1:0] px0_addr = pixel_byte_addr(
-                                    clamp_coord(req_x_r, frame_w),
-                                    cur_y_cl, stride, comp_base, slot_base);
+    wire [AXI_AW-1:0] px0_addr   = cur_row_base + {20'd0, clamp_coord(req_x_r, frame_w), 1'b0};
     wire [AXI_AW-1:0] beat1_addr = px0_addr & ~33'h1F;   // 32-byte aligned
     wire [AXI_AW-1:0] beat2_addr = beat1_addr + 33'd32;  // next beat
 
     // Check if last pixel of the row falls in a different beat
-    wire [AXI_AW-1:0] px_last_addr = pixel_byte_addr(
-                        clamp_coord(req_x_r + $signed({9'b0, blk_ext_cur - 4'd1}), frame_w),
-                        cur_y_cl, stride, comp_base, slot_base);
+    wire [AXI_AW-1:0] px_last_addr = cur_row_base +
+        {20'd0, clamp_coord(req_x_r + $signed({9'b0, blk_ext_cur - 4'd1}), frame_w), 1'b0};
     wire spans_two_beats = (px_last_addr[AXI_AW-1:5] != px0_addr[AXI_AW-1:5]);
 
-    // Continuous parallel extraction for all columns
+    // Per-column address calculation in S_ROW_AR1 -> latched into beat2/offset FFs
     wire signed [12:0]     row_x_raw   [0:BLK_EXT_Y-1];
     wire [11:0]            row_x_cl    [0:BLK_EXT_Y-1];
     wire [AXI_AW-1:0]      row_px_addr [0:BLK_EXT_Y-1];
-    wire [AXI_DW-1:0]      row_src_beat[0:BLK_EXT_Y-1];
-    wire [PIXEL_WIDTH-1:0] row_pixel   [0:BLK_EXT_Y-1];
+    reg  [BLK_EXT_Y-1:0]   row_use_beat2_r;
+    reg  [3:0]             row_px_off_r [0:BLK_EXT_Y-1];
+    wire [PIXEL_WIDTH-1:0] row_pixel_s [0:BLK_EXT_Y-1];
 
     genvar gci;
     generate
         for (gci = 0; gci < BLK_EXT_Y; gci = gci + 1) begin : gen_row_px
-            assign row_x_raw[gci]    = req_x_r + gci;
-            assign row_x_cl[gci]     = clamp_coord(row_x_raw[gci], frame_w);
-            assign row_px_addr[gci]  = pixel_byte_addr(row_x_cl[gci], cur_y_cl, stride, comp_base, slot_base);
-            assign row_src_beat[gci] = (row_px_addr[gci][AXI_AW-1:5] == beat1_addr[AXI_AW-1:5]) ? beat1_data : beat2_data;
-            assign row_pixel[gci]    = extract_pixel(row_src_beat[gci], row_px_addr[gci]);
+            assign row_x_raw[gci]   = req_x_r + gci;
+            assign row_x_cl[gci]    = clamp_coord(row_x_raw[gci], frame_w);
+            assign row_px_addr[gci] = cur_row_base + {20'd0, row_x_cl[gci], 1'b0};
+            assign row_pixel_s[gci] = extract_pixel_off(
+                row_use_beat2_r[gci] ? beat2_data : beat1_data,
+                row_px_off_r[gci]);
         end
     endgenerate
 
@@ -277,9 +261,13 @@ module ref_frame_buffer #(
             stride         <= FRAME_W_Y[11:0];
             comp_base      <= 33'd0;
             slot_base      <= 33'd0;
-            need_beat2     <= 1'b0;
-            beat1_data     <= {AXI_DW{1'b0}};
-            beat2_data     <= {AXI_DW{1'b0}};
+            need_beat2      <= 1'b0;
+            beat1_data      <= {AXI_DW{1'b0}};
+            beat2_data      <= {AXI_DW{1'b0}};
+            row_use_beat2_r <= {BLK_EXT_Y{1'b0}};
+            for (ci = 0; ci < BLK_EXT_Y; ci = ci + 1) begin
+                row_px_off_r[ci] <= 4'd0;
+            end
         end else begin
             axi_arvalid    <= 1'b0;
             ref_resp_valid <= 1'b0;
@@ -344,6 +332,10 @@ module ref_frame_buffer #(
                 axi_arsize  <= 3'b101;     // 32 bytes (256 bits)
                 axi_arburst <= 2'b01;      // INCR
                 need_beat2  <= spans_two_beats;
+                for (ci = 0; ci < BLK_EXT_Y; ci = ci + 1) begin
+                    row_use_beat2_r[ci] <= (row_px_addr[ci][AXI_AW-1:5] != beat1_addr[AXI_AW-1:5]);
+                    row_px_off_r[ci]    <= row_px_addr[ci][4:1];
+                end
                 if (axi_arvalid && axi_arready) begin
                     axi_arvalid <= 1'b0;
                     state       <= S_ROW_R1;
@@ -396,7 +388,7 @@ module ref_frame_buffer #(
             S_ROW_STORE: begin
                 for (ci = 0; ci < BLK_EXT_Y; ci = ci + 1) begin
                     if (ci < blk_ext_cur) begin
-                        ext_buf[row_idx][ci] <= row_pixel[ci];
+                        ext_buf[row_idx][ci] <= row_pixel_s[ci];
                     end
                 end
                 if (row_idx == blk_ext_cur - 4'd1) begin

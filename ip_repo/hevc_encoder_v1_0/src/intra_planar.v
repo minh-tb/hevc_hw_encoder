@@ -99,20 +99,13 @@ module intra_planar (
     localparam S_COMPUTE = 2'd1;
 
     reg [1:0] state;
+    reg [5:0] N_r;
+    reg [4:0] shift_r;
+    reg [`PIXEL_WIDTH-1:0] refT_N_r;
+    reg [`PIXEL_WIDTH-1:0] refL_N_r;
 
     //-------------------------------------------------------------------------
     // Input buffer FSM
-    // ref[1..N+1]   → refT[0..N]   (top row + top-right)
-    // ref[2N+1..3N+1] → refL[0..N]  (left col + bottom-left)
-    //
-    // HM pSrc pointer layout:
-    //   pSrc[0..nTbS]   = top row left-to-right (N+1 values including top-right)
-    //   pSrc[-1..-nTbS] = left col top-to-bottom (N values)
-    //   pSrc[-nTbS-1]   = bottom-left
-    //
-    // Mapped to ref_buf flat indexing:
-    //   refT[i] = ref_buf[i+1]         for i=0..N
-    //   refL[i] = ref_buf[2N+1+i]      for i=0..N
     //-------------------------------------------------------------------------
     assign in_ready = (state == S_REF_BUF);
 
@@ -130,25 +123,33 @@ module intra_planar (
 `endif
     always @(posedge clk) begin
         if (!rst_n) begin
-            state <= S_REF_BUF;
+            state    <= S_REF_BUF;
+            N_r      <= 6'd4;
+            shift_r  <= 5'd3;
+            refT_N_r <= {`PIXEL_WIDTH{1'b0}};
+            refL_N_r <= {`PIXEL_WIDTH{1'b0}};
         end else begin
             case (state)
                 S_REF_BUF: begin
                     if (fire_in) begin
-                        // Top row: ref[1..N+1] → refT[0..N]
-                        // in_idx 1 to N+1
+                        // Top row: ref[1..N+1] -> refT[0..N]
                         if (in_idx >= 8'd1 && in_idx <= N_wide + 8'd1) begin
                             refT[in_idx - 8'd1] <= in_sample;
                         end
 
-                        // Left col: ref[2N+1..3N+1] → refL[0..N]
-                        // in_idx 2N+1 to 3N+1
+                        // Left col: ref[2N+1..3N+1] -> refL[0..N]
                         if (in_idx >= N2_wide + 8'd1 &&
                             in_idx <= N2_wide + N_wide + 8'd1) begin
                             refL[in_idx - N2_wide - 8'd1] <= in_sample;
                         end
 
-                        if (in_last) state <= S_COMPUTE;
+                        if (in_last) begin
+                            N_r      <= N;
+                            shift_r  <= {2'b0, pu_size_log2} + 5'd1;
+                            refT_N_r <= refT[N];
+                            refL_N_r <= refL[N];
+                            state    <= S_COMPUTE;
+                        end
                     end
                 end
 
@@ -161,102 +162,122 @@ module intra_planar (
     end
 
     //-------------------------------------------------------------------------
-    // Pixel computation
-    //
-    // HM formula for pixel (x, y):
-    //   pred = ( (N-1-x)*refL[y] + (x+1)*refT[N]
-    //          + (N-1-y)*refT[x] + (y+1)*refL[N]
-    //          + N ) >> (log2N + 1)
-    //
-    // Decompose into two horizontal/vertical weighted averages:
-    //   hor_val = (N-1-x)*refL[y] + (x+1)*refT[N]
-    //   ver_val = (N-1-y)*refT[x] + (y+1)*refL[N]
-    //   pred    = (hor_val + ver_val + N) >> (log2N + 1)
-    //
-    // All multiplications use coefficients ≤ N (max 32, 6-bit)
-    // and reference samples ≤ 1023 (10-bit) → 16-bit product
-    // 4 products summed: max 4 * 32 * 1023 + 32 = 130976 → 17-bit
-    // After >> (log2N+1) max 6: result ≤ 1023 → 10-bit ✓
-    //
-    // Registered pipeline:
-    //   Cycle 0: latch (x,y), read refT[x], refL[y]
-    //   Cycle 1: compute 4 products
-    //   Cycle 2: sum + round + shift → output
-    //   But to keep 1-cycle throughput per pixel, fully unroll combinationally.
-    //   Synthesis maps to 4 DSP48 slices per planar unit.
+    // Pixel computation — 2-Stage Lockstep Pipeline (180 MHz Timing Closure)
+    //   Stage 1: Read refL[py]/refT[px] and compute 4 products -> s1_*
+    //   Stage 2: Sum + round + shift -> out_pixel register
     //-------------------------------------------------------------------------
     reg [5:0] px;
     reg [5:0] py;
+    reg       gen_done;
 
-    // Coefficient computation (combinational from px, py, N)
-    wire [5:0] coef_hor_l  = (N - 6'd1 - px);  // N-1-x
-    wire [5:0] coef_hor_r  = (px + 6'd1);       // x+1
-    wire [5:0] coef_ver_t  = (N - 6'd1 - py);  // N-1-y
-    wire [5:0] coef_ver_b  = (py + 6'd1);       // y+1
+    // Coefficient computation (combinational from px, py, N_r)
+    wire [5:0] coef_hor_l  = (N_r - 6'd1 - px);  // N-1-x
+    wire [5:0] coef_hor_r  = (px + 6'd1);         // x+1
+    wire [5:0] coef_ver_t  = (N_r - 6'd1 - py);  // N-1-y
+    wire [5:0] coef_ver_b  = (py + 6'd1);         // y+1
 
     // Reference samples for current (px, py)
     wire [`PIXEL_WIDTH-1:0] sL_y  = refL[py];       // refL[y]
-    wire [`PIXEL_WIDTH-1:0] sT_N  = refT[N];        // refT[N] = top-right
     wire [`PIXEL_WIDTH-1:0] sT_x  = refT[px];       // refT[x]
-    wire [`PIXEL_WIDTH-1:0] sL_N  = refL[N];        // refL[N] = bottom-left
 
     // Four products (16-bit each)
     wire [15:0] prod_hl  = coef_hor_l * sL_y;
-    wire [15:0] prod_hr  = coef_hor_r * sT_N;
+    wire [15:0] prod_hr  = coef_hor_r * refT_N_r;
     wire [15:0] prod_vt  = coef_ver_t * sT_x;
-    wire [15:0] prod_vb  = coef_ver_b * sL_N;
+    wire [15:0] prod_vb  = coef_ver_b * refL_N_r;
 
-    // Sum + rounding + shift
-    // {11'b0, N} forces Verilog to safely instantiate 17-bit adders to prevent overflow
-    wire [16:0] psum  = prod_hl + prod_hr
-                      + prod_vt + prod_vb
-                      + {11'b0, N};                  // +N for rounding
+    // Stage 1 -> Stage 2 Pipeline Registers
+    reg        s1_valid;
+    reg [15:0] s1_prod_hl;
+    reg [15:0] s1_prod_hr;
+    reg [15:0] s1_prod_vt;
+    reg [15:0] s1_prod_vb;
+    reg [5:0]  s1_x;
+    reg [5:0]  s1_y;
+    reg        s1_last;
 
-    wire [4:0]  shift = {2'b0, pu_size_log2} + 5'd1; // log2N + 1
+    // Stage 2: Sum + rounding + shift
+    wire [16:0] psum_s2  = s1_prod_hl + s1_prod_hr
+                         + s1_prod_vt + s1_prod_vb
+                         + {11'b0, N_r};
 
-    wire [`PIXEL_WIDTH-1:0] pred_pixel = psum >> shift; // max result = 1023 ✓
+    wire [`PIXEL_WIDTH-1:0] pred_pixel_s2 = psum_s2 >> shift_r;
+    wire pipe_en = out_ready || !out_valid;
 
     //-------------------------------------------------------------------------
-    // Output FSM — raster scan
+    // Lockstep 2-stage output FSM — raster scan
     //-------------------------------------------------------------------------
     always @(posedge clk) begin
         if (!rst_n) begin
-            out_valid <= 1'b0;
-            out_pixel <= {`PIXEL_WIDTH{1'b0}};
-            out_x     <= 6'd0;
-            out_y     <= 6'd0;
-            out_last  <= 1'b0;
-            px        <= 6'd0;
-            py        <= 6'd0;
+            out_valid  <= 1'b0;
+            out_pixel  <= {`PIXEL_WIDTH{1'b0}};
+            out_x      <= 6'd0;
+            out_y      <= 6'd0;
+            out_last   <= 1'b0;
+            px         <= 6'd0;
+            py         <= 6'd0;
+            gen_done   <= 1'b0;
+            s1_valid   <= 1'b0;
+            s1_prod_hl <= 16'd0;
+            s1_prod_hr <= 16'd0;
+            s1_prod_vt <= 16'd0;
+            s1_prod_vb <= 16'd0;
+            s1_x       <= 6'd0;
+            s1_y       <= 6'd0;
+            s1_last    <= 1'b0;
         end else if (state == S_COMPUTE) begin
-            if (out_ready || !out_valid) begin
+            if (pipe_en) begin
                 if (out_last && out_valid) begin
                     out_valid <= 1'b0;
                     out_last  <= 1'b0;
+                    s1_valid  <= 1'b0;
+                    s1_last   <= 1'b0;
+                    gen_done  <= 1'b0;
+                    px        <= 6'd0;
+                    py        <= 6'd0;
                 end else begin
-                    out_valid <= 1'b1;
-                    out_pixel <= pred_pixel;
-                    out_x     <= px;
-                    out_y     <= py;
-                    out_last  <= (px == N - 6'd1) && (py == N - 6'd1);
+                    // Stage 1: Coordinate advance & 4x multipliers
+                    if (!gen_done) begin
+                        s1_valid   <= 1'b1;
+                        s1_prod_hl <= prod_hl;
+                        s1_prod_hr <= prod_hr;
+                        s1_prod_vt <= prod_vt;
+                        s1_prod_vb <= prod_vb;
+                        s1_x       <= px;
+                        s1_y       <= py;
+                        s1_last    <= (px == N_r - 6'd1) && (py == N_r - 6'd1);
 
-                    if (px == N - 6'd1) begin
-                        px <= 6'd0;
-                        py <= py + 6'd1;
+                        if ((px == N_r - 6'd1) && (py == N_r - 6'd1)) begin
+                            gen_done <= 1'b1;
+                            px       <= 6'd0;
+                            py       <= 6'd0;
+                        end else if (px == N_r - 6'd1) begin
+                            px <= 6'd0;
+                            py <= py + 6'd1;
+                        end else begin
+                            px <= px + 6'd1;
+                        end
                     end else begin
-                        px <= px + 6'd1;
+                        s1_valid <= 1'b0;
+                        s1_last  <= 1'b0;
                     end
 
-                    if ((px == N - 6'd1) && (py == N - 6'd1)) begin
-                        px <= 6'd0;
-                        py <= 6'd0;
-                    end
+                    // Stage 2: Sum + shift -> output
+                    out_valid <= s1_valid;
+                    out_pixel <= pred_pixel_s2;
+                    out_x     <= s1_x;
+                    out_y     <= s1_y;
+                    out_last  <= s1_valid && s1_last;
                 end
             end
         end else begin
             out_valid <= 1'b0;
-            px <= 6'd0;
-            py <= 6'd0;
+            out_last  <= 1'b0;
+            s1_valid  <= 1'b0;
+            s1_last   <= 1'b0;
+            gen_done  <= 1'b0;
+            px        <= 6'd0;
+            py        <= 6'd0;
         end
     end
 
