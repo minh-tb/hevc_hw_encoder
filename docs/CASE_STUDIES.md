@@ -499,20 +499,41 @@ Following `v2.0` (`62,568 cycles/CTU`, `103.73 MHz` max clock under a `50 MHz` c
    - Pipelined [`intra_rmd.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_rmd.v), converted [`db_filter_luma.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/db_filter_luma.v) to a 2-stage pipeline + output skid buffer in [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), pipelined [`syntax_coeff.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v) `S_LOAD_CG` to 17 cycles, and split [`coeff_buffer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/coeff_buffer.v) into dual-bank ping-pong with `tu_meta_fifo`. Closed `6.667 ns` (`150 MHz`) Vivado OOC timing with `0` failing endpoints.
 3. **Phase B1 (`8cbb107`) — `128x128` On-Chip Luma Search Cache ([`ref_search_cache.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_search_cache.v)):**
    - Added a `128x128` Luma search-window cache (`4 RAMB36 + 1 RAMB18`) inside `inter_pred_top.v` / `tz_search.v`, slashing Frame 2 CTU 1 `T_MD` from `30,830` to `8,442` cycles (`T_MD` 3-frame avg `9,888 -> 6,403` cycles/CTU).
-4. **Phase B2 (`bbc3086`, Final RTL Freeze) — 2-Bank CTU Ping-Pong & Split CABAC FE/BE:**
+4. **Phase B2 (`bbc3086`, `v3.0` Sign-Off) — 2-Bank CTU Ping-Pong & Split CABAC FE/BE:**
    - Upgraded CTU pixel storage, [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), and [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v) (`ctu_bin_ram_0/1`) to **2-bank CTU Ping-Pong**, scaled [`coeff_buffer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/coeff_buffer.v) to **4 banks (`DEPTH=4096`)** with **4-entry `cu_fifo` & `tu_meta_fifo`**, and decoupled front-end `cabac_state` from back-end `cabac_be_state` (`CABAC_BE_*`) in [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v).
 
-### Progression Scorecard (`Baseline -> v2.0 -> v3.0-final-signoff`)
+---
 
-| Metric | Initial Baseline | `v2.0` Sign-Off (`50 MHz`) | **`v3.0` Final (`150 MHz`)** | Net Gain (`v3.0` vs `v2.0` / Baseline) |
-|---|---:|---:|---:|---|
-| **Avg CTU Period (cyc/CTU)** | 127,647 | 62,568 | **39,970** | **-36.1% vs `v2.0` / -68.7% vs Baseline** |
-| **3-Frame Total Sim Time** | — | 8,001,545 ns | **4,920,865 ns** | **-38.5% total simulation cycles** |
-| **`Stall_CABAC` (cyc/CTU)** | — | 6,763–12,119 | **0 (all 12 CTUs)** | **100% FE/BE stall elimination** |
-| **Avg `T_MD` / `T_DB`** | `— / 15,936` | `9,888 / 7,230` | **`6,403 / 7,096`** | `-35.2%` `T_MD` (`ref_search_cache`) |
-| **Vivado $F_{\max}$ / WNS** | 96.36 MHz (`@50M`) | 103.73 MHz (`@50M`) | **157.51 MHz (`+0.318 ns @150M`)** | **`+51.8%` Fmax, 0 / 451,909 failing** |
-| **LUTs / FFs / BRAM / DSP** | `448,916 / 344,030 / 12.5 / 920` | `226,544 / 140,046 / 41.5 / 63` | **`237,476 / 163,801 / 60.0 / 63`** | Within `45.43%` LUT, `6.10%` BRAM, `0` latches |
-| **3-Frame Bitstream / Bins / PSNR-YUV** | — | `3,175 B / 28,962 / 39.900 dB` | **`3,134 B / 28,581 / 39.981 dB`** | **`73,728/73,728 max_diff=0`**, `+0.081 dB` |
-| **4-QP BD-Rate / BD-PSNR (HM 18.0)** | — | `+148.58% / -5.11 dB` | **`+145.52% / -5.02 dB`** | **Improved BD-Rate (`-3.06%`)**, `0 Max Diff` all QPs |
-| **Projected Steady-State 720p / 1080p** | — | `10.9 / 4.7 fps @ 150M` | **`17.9 / 7.7 fps @ 157.51M`** | `985.2` (128x128) / `164.2` (CIF) fps @ Fmax |
+## 14. Case Study 13: `v4.0` Phase C Throughput Optimization & `180 MHz` Timing Closure
+
+### Problem Statement Following `v3.0-final-signoff`
+Although `v3.0` (`3595c7b`) eliminated CABAC stalls (`Stall_CABAC = 0`) and closed `150 MHz` (`157.51 MHz` Fmax), three bottlenecks capped steady-state throughput at `39,970 cycles/CTU` (`17.9 fps @ 720p`):
+1. **In-Loop & `frame_store` Serialization (`Stall_Inloop = 3,799` avg cyc/CTU):** `decoder_inloop_filters.v` serialized `S_STATS` sequentially (`Y -> Cb -> Cr`) and executed a separate post-SAO `S_DUMP` pass waiting on blocking AXI4 [`frame_store.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/recon/frame_store.v) writes.
+2. **Single-Lane Transform/Quantization (`T_TQ = 14,301` cyc/CTU):** `fwd_quant`, `inv_quant`, and P2S/S2P scanning processed 1 sample/cycle, and Inter TUs serialized `mc_window_fetch` reconstruction behind IDCT completion.
+3. **`180 MHz` (`5.555 ns`) Combinational Margins:** Reaching `>= 180 MHz` required breaking long paths in [`syntax_coeff.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v), [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v), [`intra_angular.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_angular.v), [`intra_planar.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_planar.v), [`ref_sample_filter.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/ref_sample_filter.v), [`ref_frame_buffer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_frame_buffer.v), and `hevc_encoder_top.v` (`intra_ref_idx -> recon_ram_q`).
+
+### Multi-Phase Execution (`9c0c9ee -> ecac14c -> d15568b`, Bit-Exact Frozen)
+1. **Phase C1 (`9c0c9ee`) — Decoupled `frame_store`, Fused `S_SAO/S_DUMP` & 3-Plane `sao_stats`:**
+   - Decoupled AXI4 [`frame_store.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/recon/frame_store.v) writes, fused inline `S_SAO` and `S_DUMP` inside [`decoder_inloop_filters.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/decoder_inloop_filters.v), and parallelized `Y / Cb / Cr` accumulators inside [`sao_stats.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inloop_filters/sao_stats.v).
+   - Cut steady-state period by **22.6%** (`39,970 -> 30,937` cyc/CTU), reduced `Stall_Inloop` to **`0`**, and lifted Fmax to `165.59 MHz` (`+0.628 ns` WNS @ `150 MHz`).
+2. **Phase C2 (`ecac14c`) — Dual-Lane TQ/Quant & 2-Bank `pred_sram` Inter TU Overlap:**
+   - Instantiated dual-lane `u_fwd_quant_0/1` and `u_inv_quant_0/1` with even/odd banked [`coeff_buffer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/coeff_buffer.v), added zero-CBF Luma-only (`reg_tu_comp == 2'd0`) IDCT bypass with [`dct_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/transform/dct_top.v) handshake updates, and added 2-bank `pred_sram` Inter TU prefetch overlap + 4-cycle end-of-slice flush in [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v).
+   - Reduced steady-state period further to **`27,739` cyc/CTU** (`-30.6%` vs `v3.0`, `T_TQ = 11,220` cyc/CTU) while preserving `60.0` BRAMs and `100%` SHA-256 identity.
+3. **Phase C3 (`d15568b`, `v4.0-final-signoff` Freeze) — `180 MHz` Timing Closure & Backpressure Skid:**
+   - Tightened [`synth/hevc_encoder_top.xdc`](file:///d:/UIT_Doc/hevc_hw_encoder/synth/hevc_encoder_top.xdc) to `5.555 ns` (`180 MHz`), added a `2-entry be_skid_mem` backpressure buffer in [`cabac_enc_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/cabac_enc_top.v), converted [`syntax_coeff.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/syntax_coeff.v) `S_LOAD_CG` to streaming reverse-order compression (`T_CABAC: 44,805 -> 35,094`), and pipelined critical paths across [`intra_angular.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_angular.v), [`intra_planar.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/intra_planar.v), [`ref_sample_filter.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/intra/ref_sample_filter.v), [`ref_frame_buffer.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/inter/ref_frame_buffer.v), and [`hevc_encoder_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_top.v).
+   - Closed `5.555 ns` (`180 MHz`) Vivado OOC timing cleanly at **`WNS = +0.250 ns` (`Fmax = 188.50 MHz`, `0 / 452,482` failing)** with **`27,785` avg cyc/CTU**, **`Stall_CABAC = 0`**, and **`Stall_Inloop = 0`**.
+
+### Progression Scorecard (`Baseline -> v2.0 -> v3.0 -> v4.0-final-signoff`)
+
+| Metric | Initial Baseline | `v2.0` (`50 MHz`) | `v3.0` (`150 MHz`) | **`v4.0` Final (`180 MHz`)** | Net Gain (`v4.0` vs `v3.0` / Baseline) |
+|---|---:|---:|---:|---:|---|
+| **Avg CTU Period (cyc/CTU)** | 127,647 | 62,568 | 39,970 | **27,785** | **-30.5% vs `v3.0` / -78.2% vs Baseline** |
+| **3-Frame Total Sim Time** | — | 8,001,545 ns | 4,920,865 ns | **3,458,665 ns** | **-29.7% vs `v3.0` / -56.8% vs `v2.0`** |
+| **`Stall_CABAC` / `Stall_Inloop`** | — | `6,763–12,119 / —` | `0 / 3,799` | **`0 / 0` (all 12 CTUs)** | **100% FE/BE & In-Loop stall elimination** |
+| **Avg `T_MD` / `T_TQ` / `T_DB`** | `— / — / 15,936` | `9,888 / — / 7,230` | `6,403 / 14,301 / 7,096` | **`6,403 / 11,220 / 6,951`** | `-21.5%` `T_TQ` vs `v3.0`, `T_CABAC = 35,094` |
+| **Vivado $F_{\max}$ / WNS** | 96.36 MHz (`@50M`) | 103.73 MHz (`@50M`) | 157.51 MHz (`+0.318 ns @150M`) | **188.50 MHz (`+0.250 ns @180M`)** | **`+19.7%` Fmax vs `v3.0` (`+95.6%` vs Base)** |
+| **LUTs / FFs / BRAM / DSP** | `448,916 / 344,030 / 12.5 / 920` | `226,544 / 140,046 / 41.5 / 63` | `237,476 / 163,801 / 60.0 / 63` | **`243,266 / 169,846 / 60.0 / 54`** | Within `46.54%` LUT, `2.74%` DSP, `0` latches |
+| **3-Frame Bitstream / Bins / PSNR-YUV** | — | `3,175 B / 28,962 / 39.900 dB` | `3,134 B / 28,581 / 39.981 dB` | **`3,134 B / 28,581 / 39.981 dB`** | **`73,728/73,728 max_diff=0`**, SHA-256 identical |
+| **4-QP BD-Rate / BD-PSNR (HM 18.0)** | — | `+148.58% / -5.11 dB` | `+145.52% / -5.02 dB` | **`+145.52% / -5.02 dB`** | `0 Max Diff` all QPs `{22, 27, 32, 37}` |
+| **Projected Steady-State 720p / 1080p** | — | `10.9 / 4.7 fps @ 150M` | `17.9 / 7.7 fps @ 157.51M` | **`30.8 / 13.3 fps @ 188.50M`** | `1,696.1` (128x128) / `282.7` (CIF) fps @ Fmax |
 

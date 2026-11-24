@@ -6,13 +6,13 @@
 
 ## 1. Executive Summary & Dual-Tier Methodology
 
-To elevate verification of the synthesizable **HEVC / H.265 Main10 Hardware Video Encoder** beyond directed Verilog regression (Gates **G0–G7**), **Gate G8** implements a **Dual-Tier UVM Verification Environment** verified across **both Siemens QuestaSim 2021.2_1 (`asiclab` Linux server, UVM-1.1d, `make regression` in `31 s` with merged UCDB coverage)** and **AMD Vivado 2026.1 Simulator (`xsim`, UVM 1.2, `v3.0` sign-off in `75.80 s`)**, plus **Cadence Xcelium (`tool=Cadence`)** support — with **zero RTL edits** (verified continuously via Gate G6 `64/64` SHA-256 parity between `rtl/` and `ip_repo/hevc_encoder_v1_0/src/`):
+To elevate verification of the synthesizable **HEVC / H.265 Main10 Hardware Video Encoder** beyond directed Verilog regression (Gates **G0–G7**), **Gate G8** implements a **Dual-Tier UVM Verification Environment** verified across **both Siemens QuestaSim 2021.2_1 (`asiclab` Linux server, UVM-1.1d, `make regression` in `31 s` with merged UCDB coverage)** and **AMD Vivado 2026.1 Simulator (`xsim`, UVM 1.2, `v4.0` sign-off in `78.23 s`)**, plus **Cadence Xcelium (`tool=Cadence`)** support — with **zero RTL edits** (verified continuously via Gate G6 `64/64` SHA-256 parity between `rtl/` and `ip_repo/hevc_encoder_v1_0/src/`):
 
-| Verification Tier | DUT Target | Key UVM Infrastructure | Golden Reference / Oracle | Verified Closure Metrics (`Vivado 2026.1 xsim v3.0` & `QuestaSim 2021.2_1`) |
+| Verification Tier | DUT Target | Key UVM Infrastructure | Golden Reference / Oracle | Verified Closure Metrics (`Vivado 2026.1 xsim v4.0` & `QuestaSim 2021.2_1`) |
 |---|---|---|---|---|
 | **Tier 1 (Block)** | [`range_coder.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/entropy/range_coder.v) | `cabac_if` (2 SVA), `cabac_agent` (active driver + randomized sink stall), `cabac_scoreboard`, `cabac_coverage` | Bit-exact SystemVerilog HM 18.0 `TEncBinCABAC` model | **5,940 bins** (`18` slices), **1,327/1,327 B** Questa / **1,266/1,266 B** `xsim` (`0` mismatches), **100.00% `cg_cabac`**, `91.95%` Stmt / `76.03%` Br, `0` errors |
 | **Tier 2A (SoC RAL)** | [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v) | `hevc_reg_block` (`0x00..0x24`), `reg2axi_lite_adapter`, explicit `uvm_reg_predictor`, `hevc_axi_scoreboard` | Built-in `uvm_reg_hw_reset_seq`, `uvm_reg_bit_bash_seq`, black-box CSR mirrors | **10/10** hw_reset, **10/10** bit_bash, **664R/653W** AXI4-Lite txns, `0` TB warnings, `0` errors |
-| **Tier 2B/C (SoC E2E)** | [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v) | 4 AMBA VIP agents, `hevc_virtual_sequencer`, 4 SVA assertions, `cg_soc_axi` | Annex B framing + **HM 18.0 `TAppDecoder.exe`** closed-loop PSNR | **`256 B`** (`v3.0` `xsim`, `4` NALs, HM `exit=0`, `12,288 B` YUV), **384/384** AXI4 DRAM beats, **100.00% `cg_soc_axi`** |
+| **Tier 2B/C (SoC E2E)** | [`hevc_encoder_axi_top.v`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl/top/hevc_encoder_axi_top.v) | 4 AMBA VIP agents, `hevc_virtual_sequencer`, 4 SVA assertions, `cg_soc_axi` | Annex B framing + **HM 18.0 `TAppDecoder.exe`** closed-loop PSNR | **`256 B`** (`v4.0` `xsim`, `4` NALs, HM `exit=0`, `12,288 B` YUV), **384/384** AXI4 DRAM beats, **100.00% `cg_soc_axi`**, plus `+BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25` (`72/256` stalls, `0` errors) |
 
 ---
 
@@ -227,7 +227,7 @@ sequenceDiagram
    `irq_status` is asserted on `core_frame_done`, roughly 4 cycles before `gop_controller` sets `core_encode_done` (`STATUS.DONE=1, BUSY=0`), which `hevc_full_uvm_test` handles cleanly via bounded `STATUS` polling.
 
 ### 5.3 Non-Invasive Verification Closure & Dual-Mode Plusargs
-Because Gate G8 enforces **Zero RTL Modifications** (preserving Gate G6 `63/63` SHA-256 IP parity), [hevc_axi_tests_pkg.sv](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/uvm_axi_top/tests/hevc_axi_tests_pkg.sv#L286-L366) resolves the finding cleanly while preserving bug observability:
+Because Gate G8 enforces **Zero RTL Modifications** (preserving Gate G6 `64/64` SHA-256 IP parity), [hevc_axi_tests_pkg.sv](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/uvm_axi_top/tests/hevc_axi_tests_pkg.sv#L286-L366) resolves the finding cleanly while preserving bug observability:
 
 - **Production Regression Mode (Default: `BS_FORCE_HDR_STALL=0`, `BS_STALL_PROB=25`):**  
   `stall_prob` stays `0` across the initial `80` header bytes (`VPS 28B + SPS 34B + PPS 11B + slice header`), then dynamically enables `env.axis_bs_agt.set_stall_prob(25)` across the slice RBSP payload (`68/273` stalled cycles on QuestaSim `regression.log` / `37/273` on `axi_full.log`, `170/626` on `xsim`), proving **100% slice-payload backpressure compliance** (`273 B` intact on QuestaSim -> `12,288 B` decoded YUV at **`47.79 dB` `PSNR_Y`**, `100.00% cg_soc_axi`).

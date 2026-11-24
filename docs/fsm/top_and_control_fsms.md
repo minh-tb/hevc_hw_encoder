@@ -674,7 +674,7 @@ flowchart TD
 
 #### (c) Corner-Case Behavior
 - **CTU-0 Deferred Frame Start**: `ctu_frame_start` fires as soon as `slice_controller` finishes transmitting the slice header, potentially before the external video source finishes streaming CTU 0's 4,096 pixels (`4096` beats). `frame_start_pending` holds off `deferred_frame_start` until `ctu_pixels_ready == 1`, preventing `ctu_raster_scan` from timing out or launching on uninitialized `orig_*_ram`.
-- **Out-of-Order & Overlapped 2-Bank CTU Ping-Pong (`v3.0`):** `hevc_encoder_top.v` pipelines two active CTUs across dual-bank CTU pixel storage, `decoder_inloop_filters`, `cabac_enc_top` (`ctu_bin_ram_0/1`), 4-bank `coeff_buffer.v` (`DEPTH=4096`), 4-entry `cu_fifo` & `tu_meta_fifo`, and decoupled `cabac_state` (FE) / `cabac_be_state` (BE) FSMs, achieving `Avg CTU Period = 39,970 cyc` and `Stall_CABAC = 0`. Both `inloop_done_pending` and `cabac_done_pending` remain guarded by `ctu_both_done`.
+- **Out-of-Order & Overlapped 2-Bank CTU Ping-Pong (`v4.0`):** `hevc_encoder_top.v` pipelines two active CTUs across dual-bank CTU pixel storage, `decoder_inloop_filters` (with inline fused `S_SAO`/`S_DUMP` and 3-plane `sao_stats`), `cabac_enc_top` (`ctu_bin_ram_0/1` + 2-entry `be_skid_mem`), dual-lane `fwd_quant_0/1` & `inv_quant_0/1`, 2-bank `pred_sram` Inter TU overlap, even/odd banked `coeff_buffer.v`, 4-entry `cu_fifo` & `tu_meta_fifo`, and decoupled `cabac_state` (FE) / `cabac_be_state` (BE) FSMs, achieving `Avg CTU Period = 27,785 cyc` with `Stall_CABAC = 0` and `Stall_Inloop = 0`. Both `inloop_done_pending` and `cabac_done_pending` remain guarded by `ctu_both_done`.
 
 ---
 

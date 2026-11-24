@@ -1,17 +1,17 @@
 # HEVC Main10 Hardware Video Encoder - Complete Regression Execution Results
 
-**Execution Release Tag:** `v3.0-final-signoff` (Vivado `150 MHz` Build: `2026-11-24 03:18:34`)  
+**Execution Release Tag:** `v4.0-final-signoff` (Vivado `180 MHz` Build: `2026-11-24 19:39:09`)  
 **Regression Runner:** [`scripts/run_all_flaw_tb.py`](file:///d:/UIT_Doc/hevc_hw_encoder/scripts/run_all_flaw_tb.py), [`tb/run_tb_axi.do`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/run_tb_axi.do), [`run_sim.do`](file:///d:/UIT_Doc/hevc_hw_encoder/run_sim.do), [`tb/run_sim_synthdef.do`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/run_sim_synthdef.do), [`uvm/run_uvm_suite.py`](file:///d:/UIT_Doc/hevc_hw_encoder/uvm/run_uvm_suite.py)  
 **Toolchain:** ModelSim Altera Starter Edition 10.1d (`vlog.exe`, `vsim.exe` headless batch) & AMD Vivado 2026.1 (64-bit, `xsim` UVM 1.2 + OOC Synth)  
 **Host Environment:** Windows PowerShell, Python 3.12.8  
 **Default RTL State:** Pure single-path production RTL across **64 files (`60` `.v` + `4` `.vh`)** with **0 `REMEDIATION` directives** in [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src); historical buggy baselines for the 14-flaw dual-state harness reside exclusively in [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) (`FAST_EARLY_CU_SPLIT = 0` default)  
-**Total Flaw Test Cases:** 14 (`28 / 28` dual-state runs completed in `19.9 seconds` wallclock runtime; `14/14` Buggy PROVEN FAIL + `14/14` Remediated PASS 100%)  
+**Total Flaw Test Cases:** 14 (`28 / 28` dual-state runs completed in `19.0 seconds` wallclock runtime; `14/14` Buggy PROVEN FAIL + `14/14` Remediated PASS 100%)  
 **Total AXI SoC Test Cases:** 9 (`9 / 9 PASS` — `113 B`, `TLAST=1`, `irq` aligned with `STATUS.DONE=1`)  
 **Re-Verified Self-Checking Unit & SoC Suites:** Active unit & SoC suites incl. `tb_hevc_encoder_axi_top` (`9/9`, `113 B`, `TLAST=1`), `tb_nal_writer`, `tb_slice_controller`, `tb_gop_controller`, `tb_intra_pred_top` (`616,224` samples), `tb_ref_frame_buffer`, `tb_boundary_strength` (`1,010` vectors), `tb_transform_rigorous` (`240/240`), `tb_b_prediction`, `tb_mc_window_fetch` (`6,272` samples incl. `rd_hold`), `tb_sao`, `tb_sao_stats`, `tb_inloop_filters`, `tb_deblock`, `tb_db_filter_luma`, `tb_interpolation_filter`, `tb_spatial_availability`, `tb_range_coder`, `tb_ctx_model_store`, `tb_syntax_pred`, `tb_rate_control_rdo`, `tb_intra_planar`, `tb_intra_dc`, `tb_ref_sample_filter`, `tb_mvp_predictor`, `tb_inv_quant`  
-**3-Frame Pipeline Throughput (`v3.0` Overlapped CTU Ping-Pong):** **Avg CTU Period = 39,970 cycles/CTU** (`-36.1%` vs `v2.0` `62,568`, `-68.7%` vs `127,647` baseline; **`T_MD = 6,403`**, **`T_TQ = 14,301`**, **`T_DB = 7,096`** `<= 12,500` target, **`T_CABAC = 44,805`** 2-stage overlapped FE->BE lifetime, **`Stall_CABAC = 0`** across all 12 CTUs, **`Stall = 9.50%`** avg `Stall_Inloop = 3,799`; total sim `4,920,865 ns` / `492,086.5` cycles)  
+**3-Frame Pipeline Throughput (`v4.0` Phase A–C3):** **Avg CTU Period = 27,785 cycles/CTU** (`-30.5%` vs `v3.0` `39,970`, `-55.6%` vs `v2.0` `62,568`, `-78.2%` vs `127,647` baseline; **`T_MD = 6,403`**, **`T_TQ = 11,220`**, **`T_DB = 6,951`** `<= 12,500` target, **`T_CABAC = 35,094`** 2-stage overlapped FE->BE lifetime, **`Stall_CABAC = 0`** and **`Stall_Inloop = 0` (`0.00%`)** across all 12 CTUs; total sim `3,458,665 ns` / `345,866.5` cycles)  
 **3-Frame CABAC Bin & Reconstruction Conformance:** **28,581 / 28,581 bins** (100.00% bit-exact 6-field match: `POC 0: 8,349`, `POC 1: 9,819`, `POC 2: 10,413`; `str_b_frame.bin` `3,134 B`), **73,728 / 73,728 samples (`max_diff = 0`)**, **`39.981 dB` PSNR-YUV** (`39.268 dB` Y, `41.866 dB` U, `42.373 dB` V)  
-**Gate G8 UVM (`Vivado 2026.1 xsim`):** `75.80 s`, **PASS (`ERR=0 FAT=0 SVA=0`)**: Tier 1 (`5,940` bins, `1,266/1,266 B`, `cg_cabac=100%`), Tier 2A (`10/10` RAL), Tier 2B+C (**`256 B`**, `384/384` DRAM writes, `cg_soc_axi=100%`, HM 18.0 `exit=0`, `12,288 B`), Gate G6 (`64/64` parity)  
-**Regression Status:** **100% CONVERGENCE (`14/14` PROVEN BUGGY, `14/14` PASS REMEDIATED, GATE G8 UVM PASS, `157.51 MHz` TIMING MET @ `150 MHz`, `64/64` IP FILES SYNCED)**
+**Gate G8 UVM (`Vivado 2026.1 xsim`):** `78.23 s`, **PASS (`ERR=0 FAT=0 SVA=0`)**: Tier 1 (`5,940` bins, `1,266/1,266 B`, `cg_cabac=100%`), Tier 2A (`10/10` RAL), Tier 2B+C (**`256 B`**, `384/384` DRAM writes, `cg_soc_axi=100%`, HM 18.0 `exit=0`, `12,288 B`, plus `+BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25` `72/256` stalls, `0` errors), Gate G6 (`64/64` parity)  
+**Regression Status:** **100% CONVERGENCE (`14/14` PROVEN BUGGY, `14/14` PASS REMEDIATED, GATE G8 UVM PASS, `188.50 MHz` TIMING MET @ `180 MHz`, `64/64` IP FILES SYNCED)**
 
 ---
 
@@ -124,102 +124,102 @@
 
 **Synthesis Toolchain:** AMD Vivado 2026.1 Enterprise (Build 6511674)  
 **Target Part:** `xczu19eg-ffvb1517-2-e` (AMD Zynq UltraScale+ MPSoC)  
-**Synthesis Mode:** Out-of-Context (`-mode out_of_context -verilog_define {SYNTHESIS=1}`, `6.667 ns` / `150 MHz` constraint)  
+**Synthesis Mode:** Out-of-Context (`-mode out_of_context -verilog_define {SYNTHESIS=1}`, `5.555 ns` / `180 MHz` constraint)  
 **Target Module:** `hevc_encoder_axi_top` (Includes core encoder, AXI4 memory controller, and register interfaces)  
-**Status:** **SYNTHESIS CONVERGENCE & 150 MHz TIMING CLOSURE ACHIEVED (0 Errors, 0 Critical Warnings, 0 Latches, 0 `Synth 8-614`, 0 `LUTAR-1` Warnings, WNS = +0.318 ns, $F_{\max}$ = 157.51 MHz)**
+**Status:** **SYNTHESIS CONVERGENCE & 180 MHz TIMING CLOSURE ACHIEVED (0 Errors, 0 Critical Warnings, 0 Latches, 0 `Synth 8-614`, 0 `LUTAR-1` Warnings, WNS = +0.250 ns, $F_{\max}$ = 188.50 MHz)**
 
-### 3.1 Device Utilization Summary (Baseline vs. `v2.0` 50 MHz vs. `v3.0` Final 150 MHz)
+### 3.1 Device Utilization Summary (Baseline vs. `v2.0` 50 MHz vs. `v3.0` 150 MHz vs. `v4.0` Final 180 MHz)
 
-| Cell / Logic Primitive | Baseline Used | v2.0 Used (`50 MHz`) | **v3.0 Final Used (`150 MHz`)** | Available | Utilization % | Total Delta vs Baseline |
-|---|---:|---:|---:|---:|---|---|
-| **CLB LUTs** | 448,916 | 226,544 | **237,476** | 522,720 | **45.43%** | **-211,440 LUTs (-47.10%)** |
-| *-- Logic LUTs* | 446,581 | 218,785 | **229,718** | 522,720 | **43.95%** | **-216,863 LUTs (-48.56%)** |
-| *-- LUT as Memory (LUTRAM + SRL)* | 6,991 | 7,759 | **7,758** | 161,280 | **4.81%** | 7,728 LUTRAM + 30 SRL |
-| **CLB Registers (Flip-Flops)** | 344,030 | 140,046 | **163,801** | 1,045,440 | **15.67%** | **-180,229 FFs (-52.39%)** |
-| **Register as Latch (`LDCE`)** | 0 | 0 | **0** | 1,045,440 | **0.00%** | 0 Unintended Latches |
-| **Unique Control Sets** | 14,641 | 7,679 | **9,158** | 130,680 | **7.01%** | **-5,483 sets (-37.45%)** |
-| **Block RAM Tile** | 12.5 | 41.5 | **60.0** | 984 | **6.10%** | **60.0 Tiles** (CTU ping-pong + `ref_search_cache` + `ctu_bin_ram_0/1`) |
-| *-- RAMB36/FIFO* | 11 | 33 | **49** | 984 | **4.98%** | +38 `RAMB36E2` |
-| *-- RAMB18* | 3 | 17 | **22** | 1,968 | **1.12%** | +19 `RAMB18E2` |
-| **DSP48E2 Slices** | 920 | 63 | **63** | 1,968 | **3.20%** | **-857 DSPs (-93.15%)** |
+| Cell / Logic Primitive | Baseline Used | v2.0 Used (`50 MHz`) | v3.0 Used (`150 MHz`) | **v4.0 Final Used (`180 MHz`)** | Available | Utilization % | Total Delta vs Baseline |
+|---|---:|---:|---:|---:|---:|---|---|
+| **CLB LUTs** | 448,916 | 226,544 | 237,476 | **243,266** | 522,720 | **46.54%** | **-205,650 LUTs (-45.81%)** |
+| *-- Logic LUTs* | 446,581 | 218,785 | 229,718 | **237,812** | 522,720 | **45.50%** | **-208,769 LUTs (-46.75%)** |
+| *-- LUT as Memory (LUTRAM + SRL)* | 6,991 | 7,759 | 7,758 | **5,454** | 161,280 | **3.38%** | 5,424 LUTRAM + 30 SRL |
+| **CLB Registers (Flip-Flops)** | 344,030 | 140,046 | 163,801 | **169,846** | 1,045,440 | **16.25%** | **-174,184 FFs (-50.63%)** |
+| **Register as Latch (`LDCE`)** | 0 | 0 | 0 | **0** | 1,045,440 | **0.00%** | 0 Unintended Latches |
+| **Unique Control Sets** | 14,641 | 7,679 | 9,158 | **8,840** | 130,680 | **6.76%** | **-5,801 sets (-39.62%)** |
+| **Block RAM Tile** | 12.5 | 41.5 | 60.0 | **60.0** | 984 | **6.10%** | **60.0 Tiles** (CTU ping-pong + `ref_search_cache` + `ctu_bin_ram_0/1`) |
+| *-- RAMB36/FIFO* | 11 | 33 | 49 | **49** | 984 | **4.98%** | +38 `RAMB36E2` |
+| *-- RAMB18* | 3 | 17 | 22 | **22** | 1,968 | **1.12%** | +19 `RAMB18E2` |
+| **DSP48E2 Slices** | 920 | 63 | 63 | **54** | 1,968 | **2.74%** | **-866 DSPs (-94.13%)** |
 
 ### 3.2 Hierarchical Subsystem Utilization Breakdown (`synth/vivado_output/utilization_hierarchical.rpt`)
 
 | Hierarchical Instance | Module | Total LUTs | Logic LUTs | LUTRAMs | SRLs | FFs | RAMB36 | RAMB18 | DSP48E2 | Architectural Note |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| **`hevc_encoder_axi_top`** | `(top)` | **237,476** | **229,718** | **7,728** | **30** | **163,801** | **49** | **22** | **63** | Full AXI4-Lite/AXI4 SoC wrapper (`51 LUTs, 177 FFs` self; edge-detected IRQ + `core_rst_n_reg`) |
-| `  u_hevc_encoder_top` | `hevc_encoder_top` | **237,425** | **229,667** | **7,728** | **30** | **163,624** | **49** | **22** | **63** | Top-level datapath, 2-bank CTU Ping-Pong, 4-entry `cu_fifo`/`tu_meta_fifo`, 4-bank `coeff_buffer`, TDP DPB (`23,098 LUTs` self, `7,680 LUTRAM`, `40,629 FFs`, `34 RAMB36, 6 RAMB18`) |
-| `    u_dct_top` | `dct_top` | **84,904** | **84,904** | 0 | 0 | **37,172** | 0 | 0 | **1** | Row-serial 2D DCT-II / DST-VII (`u_1d_core`: `48,541 LUTs, 2,619 FFs, 1 DSP`; `u_transpose_ram`: `5,048 LUTs, 16,896 FFs`) |
-| `    u_inloop_filters` | `decoder_inloop_filters` | **47,570** | **47,570** | 0 | 0 | **55,699** | **4** | **12** | **2** | 2-bank CTU Ping-Pong BRAMs + output skid buffer + 2-stage `u_deblock` (`19,483 LUTs, 1,192 FFs`), `u_sao` (`13,704 LUTs, 1,008 FFs`), `u_sao_stats` (`7,072 LUTs, 6,376 FFs, 2 DSPs`) |
-| `    u_inter_pred` | `inter_pred_top` | **31,739** | **31,709** | 0 | 30 | **9,803** | **4** | **1** | **13** | TZ search (`636 LUTs`), FME (`26,801 LUTs, 27 SRLs`), `mc_unit` (`110 LUTs`), `ref_frame_buffer` (`1,585 LUTs, 13 DSPs`), Phase B1 **`u_ref_search_cache`** (`2,606 LUTs, 1,692 FFs, 4 RAMB36, 1 RAMB18`) |
-| `    u_mc_window_fetch` | `mc_window_fetch` | **13,823** | **13,823** | 0 | 0 | **3,891** | 0 | 0 | **0** | Pillar 1 TDP 2-sample/cyc sliding-column DPB fetcher + `0D/1D` fast fetch + `row0_win` reuse + `rd_hold` stall |
-| `    u_intra_pred` | `intra_pred_top` | **10,399** | **10,351** | **48** | 0 | **4,482** | 0 | 0 | **23** | 35-mode reconstruction: Angular (`7,392 LUTs, 17 DSPs`), Ref filter (`2,497 LUTs, 2 DSPs`), DC (`357 LUTs`), Planar (`153 LUTs, 4 DSPs`) |
-| `    u_intra_rmd` | `intra_rmd` | **8,916** | **8,916** | 0 | 0 | **5,625** | 0 | 0 | **12** | Pipelined `150 MHz` 4-mode Luma SATD (`4x4..32x32`, 4x `hadamard_satd_4x4`) + 5-cand Chroma Table 8-2 RDO (`T3-14`) |
-| `    u_cabac_enc_top` | `cabac_enc_top` | **5,532** | **5,532** | 0 | 0 | **2,423** | **4** | **2** | **0** | Dual-bank `ctu_bin_ram_0/1` (`4 RAMB36, 2 RAMB18`), pipelined `syntax_coeff` (`2,623 LUTs, 758 FFs`), `ctx_model_store` (`1,200 LUTs, 1,335 FFs`), `range_coder` (`837 LUTs`), `syntax_pred` (`407 LUTs`), `bin_encoder` (`236 LUTs`), `syntax_sao` (`180 LUTs`) |
-| `    u_ctu_partitioner` | `ctu_partitioner` | **2,961** | **2,961** | 0 | 0 | **376** | 0 | 0 | **0** | Recursive Morton Z-scan quadtree controller ($64\times64 \to 8\times8$) |
-| `    u_recon_unit` | `recon_unit` | **1,869** | **1,869** | 0 | 0 | **362** | **1** | **1** | **0** | Pixel clipping & BRAM reconstruction buffer (`1 RAMB36E2, 1 RAMB18E2`) |
-| `    u_subpel_core_l0` | `subpel_interpolation_core` | **1,168** | **1,168** | 0 | 0 | **315** | 0 | 0 | **0** | Unified 2-stage pipelined 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 0, `(* use_dsp="no" *)`) |
+| **`hevc_encoder_axi_top`** | `(top)` | **243,266** | **237,812** | **5,424** | **30** | **169,846** | **49** | **22** | **54** | Full AXI4-Lite/AXI4 SoC wrapper (`52 LUTs, 178 FFs` self; edge-detected IRQ + `core_rst_n_reg`) |
+| `  u_hevc_encoder_top` | `hevc_encoder_top` | **243,214** | **237,760** | **5,424** | **30** | **169,668** | **49** | **22** | **54** | Top-level datapath, 2-bank CTU Ping-Pong, `2-bank pred_sram`, 4-entry `cu_fifo`/`tu_meta_fifo`, even/odd `coeff_buffer`, TDP DPB (`20,220 LUTs` self, `5,376 LUTRAM`, `40,621 FFs`, `34 RAMB36, 6 RAMB18`) |
+| `    u_dct_top` | `dct_top` | **91,840** | **91,840** | 0 | 0 | **37,189** | 0 | 0 | **1** | Row-serial 2D DCT-II / DST-VII + zero-CBF Luma IDCT bypass (`u_1d_core`: `49,556 LUTs, 2,618 FFs, 1 DSP`; `u_transpose_ram`: `5,048 LUTs, 16,896 FFs`) |
+| `    u_inloop_filters` | `decoder_inloop_filters` | **49,123** | **49,123** | 0 | 0 | **61,807** | **4** | **12** | **2** | 2-bank CTU Ping-Pong BRAMs + output skid buffer + inline fused `S_SAO`/`S_DUMP` + 2-stage `u_deblock` (`21,861 LUTs, 1,185 FFs`) + 3-plane `u_sao_stats` (`20,505 LUTs, 12,134 FFs, 2 DSPs`) |
+| `    u_inter_pred` | `inter_pred_top` | **32,609** | **32,579** | 0 | 30 | **9,893** | **4** | **1** | **1** | TZ search (`636 LUTs`), FME (`26,953 LUTs, 27 SRLs`), `mc_unit` (`110 LUTs`), `ref_frame_buffer` (`2,304 LUTs, 1 DSP`), **`u_ref_search_cache`** (`2,605 LUTs, 1,692 FFs, 4 RAMB36, 1 RAMB18`) |
+| `    u_mc_window_fetch` | `mc_window_fetch` | **13,529** | **13,529** | 0 | 0 | **3,884** | 0 | 0 | **0** | Pillar 1 TDP 2-sample/cyc sliding-column DPB fetcher + `0D/1D` fast fetch + `row0_win` reuse + `rd_hold` stall |
+| `    u_intra_pred` | `intra_pred_top` | **10,936** | **10,888** | **48** | 0 | **4,569** | 0 | 0 | **23** | `180 MHz` pipelined 35-mode reconstruction: Angular (`7,531 LUTs, 17 DSPs`), Ref filter (`2,890 LUTs, 2 DSPs`), DC (`345 LUTs`), Planar (`159 LUTs, 4 DSPs`) |
+| `    u_intra_rmd` | `intra_rmd` | **8,981** | **8,981** | 0 | 0 | **5,625** | 0 | 0 | **12** | Pipelined `180 MHz` 4-mode Luma SATD (`4x4..32x32`, 4x `hadamard_satd_4x4`) + 5-cand Chroma Table 8-2 RDO (`T3-14`) |
+| `    u_cabac_enc_top` | `cabac_enc_top` | **4,278** | **4,278** | 0 | 0 | **2,217** | **4** | **2** | **0** | Dual-bank `ctu_bin_ram_0/1` (`4 RAMB36, 2 RAMB18`) + 2-entry `be_skid_mem`, streaming `syntax_coeff` (`1,324 LUTs, 518 FFs`), `ctx_model_store` (`1,204 LUTs, 1,335 FFs`), `range_coder` (`859 LUTs`), `syntax_pred` (`428 LUTs`), `bin_encoder` (`238 LUTs`), `syntax_sao` (`169 LUTs`) |
+| `    u_ctu_partitioner` | `ctu_partitioner` | **2,914** | **2,914** | 0 | 0 | **375** | 0 | 0 | **0** | Recursive Morton Z-scan quadtree controller ($64\times64 \to 8\times8$) |
+| `    u_recon_unit` | `recon_unit` | **2,271** | **2,271** | 0 | 0 | **313** | **1** | **1** | **0** | Pixel clipping & BRAM reconstruction buffer (`1 RAMB36E2, 1 RAMB18E2`) |
+| `    u_subpel_core_l0` | `subpel_interpolation_core` | **1,175** | **1,175** | 0 | 0 | **315** | 0 | 0 | **0** | Unified 2-stage pipelined 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 0, `(* use_dsp="no" *)`) |
 | `    u_rate_controller` | `rate_controller` | **1,175** | **1,175** | 0 | 0 | **216** | 0 | 0 | **3** | Closed-loop VBV fullness shift-tree & reciprocal-multiply budget allocator (`0 LDCE`) |
-| `    u_residual_sub` | `residual_sub` | **1,002** | **1,002** | 0 | 0 | **116** | 0 | 0 | **0** | 11-bit signed residual subtraction |
-| `    u_pu_cu_splitter` | `pu_cu_splitter` | **958** | **958** | 0 | 0 | **709** | 0 | 0 | **0** | PU/CU partition sequencer |
-| `    u_mode_decision` | `mode_decision` | **634** | **634** | 0 | 0 | **221** | 0 | 0 | **3** | Lagrangian RDO cost comparator, depth-0 bypass & `FAST_EARLY_CU_SPLIT` (`0` default) |
-| `    u_ctu_raster_scan` | `ctu_raster_scan` | **548** | **548** | 0 | 0 | **38** | 0 | 0 | **0** | Frame-level CTU raster coordinate generator |
-| `    u_inv_quant` | `inv_quant` | **371** | **371** | 0 | 0 | **163** | 0 | 0 | **2** | Main10 inverse dequantizer with Table 8-10 Chroma QP mapping |
-| `    u_slice_controller` | `slice_controller` | **352** | **352** | 0 | 0 | **80** | 0 | 0 | **0** | Slice header & VPS/SPS/PPS `u_param_set_writer` (`59 LUTs, 13 FFs`), `nal_ready`-gated waits |
-| `    u_fwd_quant` | `fwd_quant` | **341** | **341** | 0 | 0 | **48** | 0 | 0 | **1** | Scalar deadzone forward quantizer |
-| `    u_subpel_core_l1` | `subpel_interpolation_core_0` | **324** | **324** | 0 | 0 | **284** | 0 | 0 | **0** | Unified 2-stage pipelined 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 1, `(* use_dsp="no" *)`) |
-| `    u_gop_controller` | `gop_controller` | **264** | **264** | 0 | 0 | **134** | 0 | 0 | **0** | Dynamic runtime AI/LDP GOP scheduler |
-| `    u_frame_store` | `frame_store` | **109** | **109** | 0 | 0 | **695** | 0 | 0 | **3** | AXI4 burst write/read frame buffer controller |
+| `    u_pu_cu_splitter` | `pu_cu_splitter` | **963** | **963** | 0 | 0 | **710** | 0 | 0 | **0** | PU/CU partition sequencer |
+| `    u_residual_sub` | `residual_sub` | **676** | **676** | 0 | 0 | **109** | 0 | 0 | **0** | 11-bit signed residual subtraction |
+| `    u_mode_decision` | `mode_decision` | **534** | **534** | 0 | 0 | **221** | 0 | 0 | **3** | Lagrangian RDO cost comparator, depth-0 bypass & `FAST_EARLY_CU_SPLIT` (`0` default) |
+| `    u_inv_quant_1` / `_0` | `inv_quant` | **469 / 126** | **469 / 126** | 0 | 0 | **85 / 78** | 0 | 0 | **2 / 2** | Dual-lane Main10 inverse dequantizers (Odd / Even) with Table 8-10 Chroma QP mapping |
+| `    u_fwd_quant_0` / `_1` | `fwd_quant` | **247 / 243** | **247 / 243** | 0 | 0 | **31 / 32** | 0 | 0 | **1 / 1** | Dual-lane scalar deadzone forward quantizers (Even / Odd) |
+| `    u_slice_controller` | `slice_controller` | **361** | **361** | 0 | 0 | **77** | 0 | 0 | **0** | Slice header & VPS/SPS/PPS `u_param_set_writer` (`74 LUTs, 13 FFs`), `nal_ready`-gated waits |
+| `    u_subpel_core_l1` | `subpel_interpolation_core_0` | **325** | **325** | 0 | 0 | **284** | 0 | 0 | **0** | Unified 2-stage pipelined 8-tap Luma / 4-tap Chroma sub-pel FIR core (List 1, `(* use_dsp="no" *)`) |
+| `    u_frame_store` | `frame_store` | **321** | **321** | 0 | 0 | **700** | 0 | 0 | **3** | Decoupled-flush AXI4 burst write/read frame buffer controller |
+| `    u_ctu_raster_scan` | `ctu_raster_scan` | **281** | **281** | 0 | 0 | **38** | 0 | 0 | **0** | Frame-level CTU raster coordinate generator |
+| `    u_gop_controller` | `gop_controller` | **250** | **250** | 0 | 0 | **135** | 0 | 0 | **0** | Dynamic runtime AI/LDP GOP scheduler |
 | `    u_nal_writer` | `nal_writer` | **55** | **55** | 0 | 0 | **37** | 0 | 0 | **0** | Annex B framing, inline `0x03` EPB, `nal_ready`, and `nal_end_pending` |
 | `    u_mvp_predictor` | `mvp_predictor` | **34** | **34** | 0 | 0 | **104** | 0 | 0 | **0** | Spatial/Temporal AMVP & 5-candidate Merge derivation |
 
 ### 3.3 Timing Performance & Closure (`synth/vivado_output/timing_summary_synth.rpt`)
 - **Clock Domain:** `clk`
-- **Target Period:** **6.667 ns (150.00 MHz)**
-- **Worst Negative Slack (WNS):** **+0.318 ns (MET)** (Worst Path: `u_cabac_enc_top/u_sc/cur_cg_reg[0]/C -> u_rc/low_r_reg[31]/D`, Data Path Delay: `6.131 ns` across `27` logic levels)
-- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of **451,909** total / **391,411** intra-clock endpoints)
-- **Worst Pulse Width Slack (WPWS):** **+2.791 ns** (`TPWS = 0.000 ns`, 0 / 171,712 endpoints)
-- **Estimated Maximum Frequency ($F_{\max}$):** **157.51 MHz** (Meets 150 MHz constraint cleanly)
+- **Target Period:** **5.555 ns (180.00 MHz)**
+- **Worst Negative Slack (WNS):** **+0.250 ns (MET)** (Worst Path: `u_hevc_encoder_top/u_inter_pred/u_ref_frame_buffer/row_idx_reg[0]/C -> u_hevc_encoder_top/u_inter_pred/u_ref_frame_buffer/need_beat2_reg/D`, Data Path Delay: `5.087 ns` across `18` logic levels)
+- **Total Negative Slack (TNS):** **0.000 ns** (0 failing endpoints out of **452,482** total / **384,993** intra-clock endpoints)
+- **Worst Pulse Width Slack (WPWS):** **+2.235 ns** (`TPWS = 0.000 ns`, 0 / 175,456 endpoints)
+- **Estimated Maximum Frequency ($F_{\max}$):** **188.50 MHz** (Meets 180 MHz constraint cleanly)
 
 ### 3.4 Vector-less Power Estimation (`synth/vivado_output/power_synth.rpt`)
-- **Dynamic On-Chip Power:** **3.026 W**
-- **Device Static Power:** **1.132 W**
-- **Total On-Chip Power:** **4.158 W** (Junction Temp: `28.4 °C`)
+- **Dynamic On-Chip Power:** **3.892 W**
+- **Device Static Power:** **1.139 W**
+- **Total On-Chip Power:** **5.031 W** (Junction Temp: `29.1 °C`)
 
 ### 3.5 Sign-Off Verification, Overlapped Throughput Profile & IP Packaging Parity
-- **Gate 1 (`run_sim.do`) == Gate 2 (`tb/run_sim_synthdef.do`, `+define+SYNTHESIS`) Simulation-vs-Synthesis Parity:** Both full-encoder simulations on [`tb/tb_full_encoder/tb_b_frame_encoder.v`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_full_encoder/tb_b_frame_encoder.v) finish at `4,920,865 ns` (`492,086.5` cycles total; `[FRAME_WALLCLOCK]` F0 `161,390`, F1 `160,280`, F2 `157,969` cycles) and emit bit-identical `str_b_frame.bin` (**3,134 B**, SHA-256 `FF2D0A83990DC94160627A8E061C8EC54F9EB07BECA3AC93F5C036ADD3DF820B`) and `hw_recon.yuv` (**147,456 B**, SHA-256 `AE739FE1EDA914849D180F309A0B55B00AEC85B04619B49270DFBFAC0ADB049E`), with **`0` `REMEDIATION` directives** in `rtl/` and `ip_repo/hevc_encoder_v1_0/src/`, **`0` behavioral `` `ifdef SYNTHESIS `` blocks** (`3` 4-state `===` X-safety guards).
-- **Pipeline Throughput Profile (`scripts/profile_pipeline_throughput.py`, Overlapped 2-Bank CTU Ping-Pong):**
+- **Gate 1 (`run_sim.do`) == Gate 2 (`tb/run_sim_synthdef.do`, `+define+SYNTHESIS`) Simulation-vs-Synthesis Parity:** Both full-encoder simulations on [`tb/tb_full_encoder/tb_b_frame_encoder.v`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_full_encoder/tb_b_frame_encoder.v) finish at `3,458,665 ns` (`345,866.5` cycles total; `[FRAME_WALLCLOCK]` F0 `135,266`, F1 `97,531`, F2 `100,622` cycles) and emit bit-identical `str_b_frame.bin` (**3,134 B**, SHA-256 `FF2D0A83990DC94160627A8E061C8EC54F9EB07BECA3AC93F5C036ADD3DF820B`) and `hw_recon.yuv` (**147,456 B**, SHA-256 `AE739FE1EDA914849D180F309A0B55B00AEC85B04619B49270DFBFAC0ADB049E`), with **`0` `REMEDIATION` directives** in `rtl/` and `ip_repo/hevc_encoder_v1_0/src/`, **`0` behavioral `` `ifdef SYNTHESIS `` blocks** (`3` 4-state `===` X-safety guards).
+- **Pipeline Throughput Profile (`scripts/profile_pipeline_throughput.py`, `v4.0` Phase C1–C3 Overlapped Ping-Pong):**
 
 | Frame | CTU | Total Cyc (Period) | `T_MD` | `T_TQ` | `T_DB` | `T_CABAC` (FE->BE) | `Stall_CABAC` | `Stall_Inloop` | Stall % |
 |:---:|:---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 0 (I) | 0 | 64,148 | 10,580 | 17,424 | 10,304 | 49,101 | 0 | 3,558 | 5.5% |
-| 0 (I) | 1 | 24,059 | 6,948 | 15,216 | 9,452 | 46,330 | 0 | 0 | 0.0% |
-| 0 (I) | 2 | 34,944 | 7,860 | 15,888 | 9,642 | 44,066 | 0 | 0 | 0.0% |
-| 0 (I) | 3 | 38,238 | 9,668 | 16,752 | 15,323 | 53,405 | 0 | 0 | 0.0% |
-| 1 (P) | 0 | 51,315 | 4,947 | 13,239 | 2,920 | 33,276 | 0 | 7,756 | 15.1% |
-| 1 (P) | 1 | 32,026 | 4,696 | 13,239 | 5,124 | 42,806 | 0 | 10,842 | 33.9% |
-| 1 (P) | 2 | 30,715 | 4,696 | 12,980 | 4,053 | 44,018 | 0 | 0 | 0.0% |
-| 1 (P) | 3 | 46,223 | 4,697 | 12,980 | 6,165 | 45,954 | 0 | 0 | 0.0% |
-| 2 (B) | 0 | 51,307 | 4,912 | 13,239 | 2,940 | 33,642 | 0 | 4,165 | 8.1% |
-| 2 (B) | 1 | 40,450 | 8,442 | 14,439 | 7,417 | 44,803 | 0 | 19,266 | 47.6% |
-| 2 (B) | 2 | 31,159 | 4,696 | 12,980 | 4,542 | 52,685 | 0 | 0 | 0.0% |
-| 2 (B) | 3 | 35,052 | 4,697 | 13,239 | 7,273 | 47,574 | 0 | 0 | 0.0% |
-| **AVG** | **--** | **39,970** | **6,403** | **14,301** | **7,096** | **44,805** | **0** | **3,799** | **9.5%** |
+| 0 (I) | 0 | 51,306 | 10,580 | 14,265 | 10,304 | 44,235 | 0 | 0 | 0.0% |
+| 0 (I) | 1 | 23,308 | 6,948 | 12,144 | 9,289 | 37,508 | 0 | 0 | 0.0% |
+| 0 (I) | 2 | 25,969 | 7,860 | 12,787 | 9,473 | 38,934 | 0 | 0 | 0.0% |
+| 0 (I) | 3 | 34,682 | 9,668 | 13,680 | 14,960 | 47,659 | 0 | 0 | 0.0% |
+| 1 (P) | 0 | 32,144 | 4,947 | 10,167 | 2,920 | 28,311 | 0 | 0 | 0.0% |
+| 1 (P) | 1 | 20,901 | 4,696 | 10,167 | 5,028 | 29,782 | 0 | 0 | 0.0% |
+| 1 (P) | 2 | 20,805 | 4,696 | 9,908 | 3,926 | 31,907 | 0 | 0 | 0.0% |
+| 1 (P) | 3 | 23,680 | 4,697 | 9,908 | 5,902 | 33,473 | 0 | 0 | 0.0% |
+| 2 (B) | 0 | 32,134 | 4,912 | 10,167 | 2,940 | 28,675 | 0 | 0 | 0.0% |
+| 2 (B) | 1 | 26,818 | 8,442 | 11,367 | 7,303 | 35,412 | 0 | 0 | 0.0% |
+| 2 (B) | 2 | 16,991 | 4,696 | 9,908 | 4,351 | 30,162 | 0 | 0 | 0.0% |
+| 2 (B) | 3 | 24,678 | 4,697 | 10,167 | 7,014 | 35,070 | 0 | 0 | 0.0% |
+| **AVG** | **--** | **27,785** | **6,403** | **11,220** | **6,951** | **35,094** | **0** | **0** | **0.0%** |
 
-  - **Steady-State Throughput (`Avg CTU Period = 39,970 cyc`):** **`150 MHz`: `938.2` (128x128) / `156.4` (CIF) / `17.1` (720p) / `7.4` (1080p) fps** | **`157.51 MHz` (Achieved Fmax): `985.2 / 164.2 / 17.9 / 7.7 fps`** | **`200 MHz`: `1,250.9 / 208.5 / 22.7 / 9.8 fps`**. (`T_CABAC = 44,805 cyc` spans the 2-stage overlapped FE->BE lifetime across consecutive CTUs rather than gating the initiation interval.)
+  - **Steady-State Throughput (`Avg CTU Period = 27,785 cyc`):** **`180 MHz`: `1,619.6` (128x128) / `269.9` (CIF) / `29.4` (720p) / `12.7` (1080p) fps** | **`188.50 MHz` (Achieved Fmax): `1,696.1 / 282.7 / 30.8 / 13.3 fps`** | **`200 MHz`: `1,799.6 / 299.9 / 32.7 / 14.1 fps`**. (`T_CABAC = 35,094 cyc` spans the 2-stage overlapped FE->BE lifetime across consecutive CTUs rather than gating the initiation interval.)
 - **Full 3-Frame Post-Filter & Pre-Filter Reconstruction (`scripts/regression_gate.py --enable-loop-filters --num-frames 3`):** **100.00% bit-exact across all `73,728 / 73,728` samples in Frames 0, 1, and 2 (Y, Cb, Cr)** (`Global Max Diff = 0`, `Avg Diff = 0.0000`) for both post-filter (`hw_recon.yuv` vs `dec_gate.yuv`) and pre-filter (`hw_recon_pre.yuv` SHA-256 `24F92B0B464255389E3D23DD6E87508798A4CCE8F3074E9088D482936192BA78` vs HM `rec_before_filter.yuv`).
 - **3-Frame Foreman Objective Quality (`scripts/calc_psnr_ssim.py`):** Frame 0 (I, QP 29) **`39.024 dB` Y / `39.549 dB` YUV**; Frame 1 (P, QP 26) **`39.343 dB` Y / `40.168 dB` YUV**; Frame 2 (B, QP 26) **`39.438 dB` Y / `40.227 dB` YUV**; 3-frame average **`PSNR-Y = 39.268 dB`, `U = 41.866 dB`, `V = 42.373 dB`, `YUV = 39.981 dB`**.
 - **3-Frame Top-Level CABAC (`scripts/verify_3frames_bins.py`):** **28,581 / 28,581 (100.00%)** 6-field exact (`bin`, `type`, `range`, `pstate`, `valmps`, `ctx`) across POC 0 (`8,349`), POC 1 (`9,819`), and POC 2 (`10,413`).
 - **AXI4-Lite / AXI4 SoC Testbench ([`tb/tb_axi_top/tb_hevc_encoder_axi_top.sv`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/tb_axi_top/tb_hevc_encoder_axi_top.sv) via [`tb/run_tb_axi.do`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/run_tb_axi.do)):** **9 / 9 test suites PASS** (`113 B` bitstream, `TLAST=1`, `irq` aligned with `STATUS.DONE=1`, CSR read/write, soft reset, frame encode, W1C interrupt clear, and VBV fullness telemetry).
-- **Gate G8 Dual-Tier UVM (`Vivado 2026.1 xsim` via `uvm/run_uvm_suite.py`):** `75.80 s`, **ALL GATES CONVERGED (`ERR=0 FAT=0 SVA=0`)**: Tier 1 (`5,940` bins, `1,266/1,266 B`, `cg_cabac=100%`), Tier 2A (`10/10` RAL), Tier 2B+C (**`256 B`**, `384/384` DRAM writes, `cg_soc_axi=100%`, HM 18.0 `exit=0`, `12,288 B`), Gate G6 (`64/64` parity).
-- **Dual-State Algorithmic Flaw Testbenches (`scripts/run_all_flaw_tb.py`):** **14 / 14 PASS (100%)** against `rtl/` and **14 / 14 PROVEN (FAIL)** against locked [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) baselines (`28 / 28` runs in `19.9s`).
+- **Gate G8 Dual-Tier UVM (`Vivado 2026.1 xsim` via `uvm/run_uvm_suite.py`):** `78.23 s`, **ALL GATES CONVERGED (`ERR=0 FAT=0 SVA=0`)**: Tier 1 (`5,940` bins, `1,266/1,266 B`, `cg_cabac=100%`), Tier 2A (`10/10` RAL), Tier 2B+C (**`256 B`**, `384/384` DRAM writes, `cg_soc_axi=100%`, HM 18.0 `exit=0`, `12,288 B`; plus `hevc_full_uvm_test +BS_FORCE_HDR_STALL=1 +BS_STALL_PROB=25` with `72/256` stalls, `0` errors), Gate G6 (`64/64` parity).
+- **Dual-State Algorithmic Flaw Testbenches (`scripts/run_all_flaw_tb.py`):** **14 / 14 PASS (100%)** against `rtl/` and **14 / 14 PROVEN (FAIL)** against locked [`tb/flaw_baseline_rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/tb/flaw_baseline_rtl) baselines (`28 / 28` runs in `19.0s`).
 - **IP-XACT Packaging Synchronization & Catalog Verification:** **64 / 64 `.v`/`.vh` RTL files** verified 100% SHA-256 identical (`0` mismatches) between [`rtl/`](file:///d:/UIT_Doc/hevc_hw_encoder/rtl) and [`ip_repo/hevc_encoder_v1_0/src/`](file:///d:/UIT_Doc/hevc_hw_encoder/ip_repo/hevc_encoder_v1_0/src) (`65` total files incl. `hevc_encoder_top.xdc`), and `ipx::check_integrity status: 1` / Vivado IP Integrator verification passed (`synth/vivado_verify.log`).
 
 ---
 
-## 4. Multi-QP Rate-Distortion & Bit-Exact Verification (`v3.0` Finalized RTL)
+## 4. Multi-QP Rate-Distortion & Bit-Exact Verification (`v4.0` Finalized RTL)
 
-Refreshed multi-QP evaluation (`scripts/run_qp_sweep_and_bd_rate.py --force` on finalized `v3.0` RTL `bbc3086`) was conducted across four operating points (`QP in {22, 27, 32, 37}`) on standard sequence **Foreman 128x128 10-bit** across 3 frames (POC 0: I-Slice, POC 1: P-Slice, POC 2: B-Slice). Each hardware encoded bitstream is decoded with the Fraunhofer HM 18.0 reference decoder (`TAppDecoder.exe`), and every reconstructed sample ($Y, Cb, Cr$) is compared sample-by-sample against the decoded output.
+Refreshed multi-QP evaluation (`scripts/run_qp_sweep_and_bd_rate.py --force` on finalized `v4.0` RTL `d15568b`) was conducted across four operating points (`QP in {22, 27, 32, 37}`) on standard sequence **Foreman 128x128 10-bit** across 3 frames (POC 0: I-Slice, POC 1: P-Slice, POC 2: B-Slice). Each hardware encoded bitstream is decoded with the Fraunhofer HM 18.0 reference decoder (`TAppDecoder.exe`), and every reconstructed sample ($Y, Cb, Cr$) is compared sample-by-sample against the decoded output.
 
 ### 4.1 Multi-QP Conformance Scorecard Table
 

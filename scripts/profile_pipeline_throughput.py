@@ -4,7 +4,7 @@ Parses ModelSim simulation log (sim_profile.log) to extract:
 - Cycle counts for each CTU pipeline stage: T_MD, T_TQ, T_DB, T_CABAC, Total
 - Verification of Deblock filter cycle gating (~5,511 cycles)
 - Pipeline bubble stall percentages
-- Maximum real-time throughput (fps) across standard resolutions at 150MHz & 200MHz
+- Maximum real-time throughput (fps) across standard resolutions at 180MHz & 200MHz
 """
 
 import os
@@ -143,7 +143,7 @@ def parse_profiler_log(log_path="sim_profile.log"):
     if is_overlapped:
         print("  Formula: Max FPS = F_target / (N_CTU_per_frame * Avg_CTU_Period)")
         print(f"  Using steady-state CTU initiation interval Avg CTU Period = {avg_total:.0f} cycles (T_CABAC = {avg_cabac:.0f} cycles is 2-stage FE->BE lifetime).\n")
-        for f_mhz, f_label in [(150.0, "150 MHz Constraint"), (157.51, "157.51 MHz Achieved Fmax"), (200.0, "200 MHz Reference")]:
+        for f_mhz, f_label in [(180.0, "180 MHz Constraint"), (188.50, "188.50 MHz Achieved Fmax"), (200.0, "200 MHz Reference")]:
             f_hz = f_mhz * 1e6
             print(f"  [Clock Frequency: {f_label}]")
             print("  -----------------------------------------------------------------------------------------------")
