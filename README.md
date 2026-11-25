@@ -52,7 +52,7 @@ Evaluated on **Foreman 128x128 10-bit** (`v4.0` default 3-frame sign-off run: PO
 | **QP = 32** | 64.00 | 36.58 | **165.68** | **37.41** | +0.83 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
 | **QP = 37** | 38.40 | 33.62 | **115.20** | **34.77** | +1.15 dB | **73,728 / 73,728** | **0** | **100.00% PASS** |
 
-- **Bjøntegaard Delta Rate (BD-Rate):** **+145.52%** (`+145.519%`, refreshed `v4.0` sweep in `qp_sweep_results.json`; reflects single-pass fixed-hardware RDO trade-off against floating-point multi-pass software search).
+- **Bjøntegaard Delta Rate (BD-Rate):** **+145.52%** (`+145.519%`, refreshed `v4.0` sweep in `qp_sweep_results.json`; reflects single-pass fixed-hardware RDO trade-off against floating-point multi-pass software search — see the **26-item ITU-T H.265 & HM 18.0 subset/gap breakdown** in [`docs/H265_CONFORMANCE_MATRIX.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/H265_CONFORMANCE_MATRIX.md)).
 - **Bjøntegaard Delta PSNR (BD-PSNR):** **-5.02 dB** (`-5.0248 dB`; average quality delta across equivalent bitrates against reference software anchor).
 - **Bit-Exact Conformance:** **100.00% across all 4 QPs** (`max_diff == 0` on all 73,728 samples per QP; `5,249 B / 3,118 B / 2,071 B / 1,440 B`).
 - Rate-distortion curves are visualized in [rd_curve.svg](file:///d:/UIT_Doc/hevc_hw_encoder/rd_curve.svg) (source metrics in [qp_sweep_results.json](file:///d:/UIT_Doc/hevc_hw_encoder/qp_sweep_results.json)).
@@ -137,5 +137,6 @@ Evaluated on **Foreman 128x128 10-bit** (`v4.0` default 3-frame sign-off run: PO
    - **CABAC Entropy Coding Subsystem:** [`docs/CABAC.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/CABAC.md)
    - **TU Quadtree, Transform & Quantization:** [`docs/TUQuadtree,Transform&Quantization_flowchart.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/TUQuadtree,Transform&Quantization_flowchart.md)
    - **RTL Finite State Machine (FSM) Reference Suite:** [`docs/fsm_reference.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm_reference.md) — master index & inter-FSM flowchart covering [Top & Control](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/top_and_control_fsms.md), [Partition & Mode Decision](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/partition_and_mode_decision_fsms.md), [Intra Prediction](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/intra_prediction_fsms.md), [Inter Prediction](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/inter_prediction_fsms.md), [Transform/Quant/Recon/DPB/RC](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/transform_quant_recon_fsms.md), [In-Loop Filters](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/inloop_filters_fsms.md), and [Entropy & NAL](file:///d:/UIT_Doc/hevc_hw_encoder/docs/fsm/entropy_and_nal_fsms.md)
+   - **ITU-T H.265 Conformance Matrix & HM 18.0 Feature Gap Inventory:** [`docs/H265_CONFORMANCE_MATRIX.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/H265_CONFORMANCE_MATRIX.md)
    - **IC Design & Remediation Case Studies:** [`docs/CASE_STUDIES.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/CASE_STUDIES.md) and [`docs/WALKTHROUGH.md`](file:///d:/UIT_Doc/hevc_hw_encoder/docs/WALKTHROUGH.md)
 
